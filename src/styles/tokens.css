@@ -1,0 +1,265 @@
+/* ============================================================
+   Muse by Mina — design tokens
+   Ported from the design system (MuseByMina2/src/styles.css §1–2).
+   See MuseByMina2/docs/design-system/muse-design-system.md for the
+   verified WCAG contrast tables behind these values.
+
+   THE RULE: components reference a ROLE token, never a brand colour.
+   Writing `color: var(--gold)` in a component is the bug — gold on
+   cream is 2.02:1 and fails every threshold.
+
+   The [data-theme] blocks are attribute-only (not :root-scoped) so a
+   theme can be stamped on ANY element — that is what lets a section
+   or panel carry its own theme. Custom properties inherit.
+   ============================================================ */
+
+/* ---------- 1 · brand palette — fixed in both themes ---------- */
+:root {
+  --plum-ink:     #1C0217;
+  --plum-canvas:  #2B0322;
+  --plum:         #420535;
+  --plum-raised:  #5A0A47;
+
+  --cream:        #F7F2EE;
+  --cream-sunken: #EFE4EB;
+  --cream-raised: #FFFFFF;
+
+  --gold:         #C8A96A;
+  --gold-deep:    #7C5E22;
+
+  --red:   #EA6B7C;  --red-deep:   #A1122F;
+  --green: #6FCF97;  --green-deep: #1E6B44;
+
+  --font-display: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+  --font-label:   'Jost', 'Segoe UI', sans-serif;
+  --font-body:    'Inter', -apple-system, 'Segoe UI', sans-serif;
+
+  --radius-none: 0;
+  --radius-sm:   6px;
+  --radius-lg:   16px;
+  --radius-full: 999px;
+
+  --ease:     cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 200ms;
+  --dur-base: 400ms;
+  --dur-slow: 700ms;
+
+  --space-1: 4px;   --space-2: 8px;   --space-3: 12px;  --space-4: 16px;
+  --space-5: 24px;  --space-6: 32px;  --space-7: 48px;  --space-8: 64px;
+  --space-9: 96px;  --space-10: 128px; --space-11: 160px;
+}
+
+/* ---------- 2 · role tokens ----------
+   Dark is the brand default, so it lives on bare :root.
+   The [data-theme] blocks are attribute-only (not :root-scoped) so a theme can
+   be stamped on ANY element — that is what lets a section, a panel or a preview
+   card carry its own theme. Custom properties inherit, so children follow.
+   ------------------------------------- */
+:root {
+  --surface:          var(--plum);
+  --surface-sunken:   var(--plum-canvas);
+  --surface-raised:   var(--plum-raised);
+  --surface-deep:     var(--plum-ink);
+  --surface-contrast: var(--cream);
+
+  --text:             var(--cream);
+  --text-muted:       rgba(247, 242, 238, .72);
+  --text-subtle:      rgba(247, 242, 238, .56);
+  --text-on-contrast: var(--plum);
+
+  --accent:           var(--gold);
+  --accent-fill:      var(--gold);
+  --accent-fill-text: var(--plum);
+
+  --btn-bg: var(--gold);
+  --btn-fg: var(--plum);
+
+  --line:        rgba(247, 242, 238, .14);
+  --line-accent: rgba(200, 169, 106, .32);
+
+  --error:   var(--red);
+  --success: var(--green);
+
+  --logo-white: block;
+  --logo-plum:  none;
+
+  /* the opposite theme, for .muse-invert */
+  --o-surface:          var(--cream);
+  --o-surface-raised:   var(--cream-raised);
+  --o-contrast:         var(--plum);
+  --o-text:             var(--cream);
+  --o-text-inv:         var(--plum);
+  --o-text-muted:       rgba(66, 5, 53, .78);
+  --o-text-subtle:      rgba(66, 5, 53, .66);
+  --o-accent:           var(--gold-deep);
+  --o-accent-fill:      var(--plum);
+  --o-accent-fill-text: var(--gold);
+  --o-btn-bg:           var(--plum);
+  --o-btn-fg:           var(--cream);
+  --o-line:             rgba(66, 5, 53, .14);
+  --o-line-accent:      rgba(124, 94, 34, .34);
+  --o-error:            var(--red-deep);
+  --o-success:          var(--green-deep);
+  --o-logo-white:       block;
+  --o-logo-plum:        none;
+
+  color-scheme: dark;
+}
+
+/* Light — system preference, unless an explicit dark choice is stamped */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+  --surface:          var(--cream);
+  --surface-sunken:   var(--cream-sunken);
+  --surface-raised:   var(--cream-raised);
+  --surface-deep:     var(--plum-ink);
+  --surface-contrast: var(--plum);
+
+  --text:             var(--plum);
+  --text-muted:       rgba(66, 5, 53, .78);
+  --text-subtle:      rgba(66, 5, 53, .66);
+  --text-on-contrast: var(--cream);
+
+  --accent:           var(--gold-deep);
+  --accent-fill:      var(--plum);
+  --accent-fill-text: var(--gold);
+
+  --btn-bg: var(--plum);
+  --btn-fg: var(--cream);
+
+  --line:        rgba(66, 5, 53, .14);
+  --line-accent: rgba(124, 94, 34, .34);
+
+  --error:   var(--red-deep);
+  --success: var(--green-deep);
+
+  --logo-white: none;
+  --logo-plum:  block;
+
+  /* the opposite theme, for .muse-invert */
+  --o-surface:          var(--plum);
+  --o-surface-raised:   var(--plum-raised);
+  --o-contrast:         var(--cream);
+  --o-text:             var(--plum);
+  --o-text-inv:         var(--cream);
+  --o-text-muted:       rgba(247, 242, 238, .72);
+  --o-text-subtle:      rgba(247, 242, 238, .56);
+  --o-accent:           var(--gold);
+  --o-accent-fill:      var(--gold);
+  --o-accent-fill-text: var(--plum);
+  --o-btn-bg:           var(--gold);
+  --o-btn-fg:           var(--plum);
+  --o-line:             rgba(247, 242, 238, .14);
+  --o-line-accent:      rgba(200, 169, 106, .32);
+  --o-error:            var(--red);
+  --o-success:          var(--green);
+  --o-logo-white:       none;
+  --o-logo-plum:        block;
+
+  color-scheme: light;
+  }
+}
+
+/* Light — explicit choice, beats a dark OS. Must follow the bare :root block. */
+[data-theme='light'] {
+  --surface:          var(--cream);
+  --surface-sunken:   var(--cream-sunken);
+  --surface-raised:   var(--cream-raised);
+  --surface-deep:     var(--plum-ink);
+  --surface-contrast: var(--plum);
+
+  --text:             var(--plum);
+  --text-muted:       rgba(66, 5, 53, .78);
+  --text-subtle:      rgba(66, 5, 53, .66);
+  --text-on-contrast: var(--cream);
+
+  --accent:           var(--gold-deep);
+  --accent-fill:      var(--plum);
+  --accent-fill-text: var(--gold);
+
+  --btn-bg: var(--plum);
+  --btn-fg: var(--cream);
+
+  --line:        rgba(66, 5, 53, .14);
+  --line-accent: rgba(124, 94, 34, .34);
+
+  --error:   var(--red-deep);
+  --success: var(--green-deep);
+
+  --logo-white: none;
+  --logo-plum:  block;
+
+  /* the opposite theme, for .muse-invert */
+  --o-surface:          var(--plum);
+  --o-surface-raised:   var(--plum-raised);
+  --o-contrast:         var(--cream);
+  --o-text:             var(--plum);
+  --o-text-inv:         var(--cream);
+  --o-text-muted:       rgba(247, 242, 238, .72);
+  --o-text-subtle:      rgba(247, 242, 238, .56);
+  --o-accent:           var(--gold);
+  --o-accent-fill:      var(--gold);
+  --o-accent-fill-text: var(--plum);
+  --o-btn-bg:           var(--gold);
+  --o-btn-fg:           var(--plum);
+  --o-line:             rgba(247, 242, 238, .14);
+  --o-line-accent:      rgba(200, 169, 106, .32);
+  --o-error:            var(--red);
+  --o-success:          var(--green);
+  --o-logo-white:       none;
+  --o-logo-plum:        block;
+
+  color-scheme: light;
+}
+
+/* Dark — explicit choice, beats a light OS */
+[data-theme='dark'] {
+  --surface:          var(--plum);
+  --surface-sunken:   var(--plum-canvas);
+  --surface-raised:   var(--plum-raised);
+  --surface-deep:     var(--plum-ink);
+  --surface-contrast: var(--cream);
+
+  --text:             var(--cream);
+  --text-muted:       rgba(247, 242, 238, .72);
+  --text-subtle:      rgba(247, 242, 238, .56);
+  --text-on-contrast: var(--plum);
+
+  --accent:           var(--gold);
+  --accent-fill:      var(--gold);
+  --accent-fill-text: var(--plum);
+
+  --btn-bg: var(--gold);
+  --btn-fg: var(--plum);
+
+  --line:        rgba(247, 242, 238, .14);
+  --line-accent: rgba(200, 169, 106, .32);
+
+  --error:   var(--red);
+  --success: var(--green);
+
+  --logo-white: block;
+  --logo-plum:  none;
+
+  /* the opposite theme, for .muse-invert */
+  --o-surface:          var(--cream);
+  --o-surface-raised:   var(--cream-raised);
+  --o-contrast:         var(--plum);
+  --o-text:             var(--cream);
+  --o-text-inv:         var(--plum);
+  --o-text-muted:       rgba(66, 5, 53, .78);
+  --o-text-subtle:      rgba(66, 5, 53, .66);
+  --o-accent:           var(--gold-deep);
+  --o-accent-fill:      var(--plum);
+  --o-accent-fill-text: var(--gold);
+  --o-btn-bg:           var(--plum);
+  --o-btn-fg:           var(--cream);
+  --o-line:             rgba(66, 5, 53, .14);
+  --o-line-accent:      rgba(124, 94, 34, .34);
+  --o-error:            var(--red-deep);
+  --o-success:          var(--green-deep);
+  --o-logo-white:       block;
+  --o-logo-plum:        none;
+
+  color-scheme: dark;
+}
