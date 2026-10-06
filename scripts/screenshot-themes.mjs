@@ -5,6 +5,10 @@ const ORIGIN = process.env.ORIGIN ?? 'http://localhost:4321';
 const BASE = process.env.BASE ?? '/MuseByMina';
 const OUT = process.env.OUT ?? '/tmp/muse-shots';
 
+/** Page URLs carry a trailing slash (`trailingSlash: 'always'`, MUSE-9). */
+const pageUrl = (route) =>
+  `${ORIGIN}${BASE.replace(/\/+$/, '')}${route === '/' ? '' : route}/`;
+
 mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch();
 
@@ -26,9 +30,7 @@ async function shot(name, { route = '/', colorScheme, stored, viewport, mobile }
   await ctx.addInitScript(() => localStorage.setItem('muse-lang', 'hr'));
 
   const page = await ctx.newPage();
-  await page.goto(`${ORIGIN}${BASE}${route === '/' ? '' : route}`, {
-    waitUntil: 'networkidle',
-  });
+  await page.goto(pageUrl(route), { waitUntil: 'networkidle' });
   await page.evaluate(() => document.fonts.ready);
 
   const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);

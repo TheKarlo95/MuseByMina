@@ -3,10 +3,13 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import { localeUrl } from '../lib/i18n';
 ---
 
+{/* Not indexable: the host serves this body for any unknown path, so it has no URL of
+    its own to declare a canonical for. See BaseLayout's `indexable` prop. */}
 <BaseLayout
   locale="hr"
   title="Stranica nije pronađena"
   description="Tražena stranica ne postoji."
+  indexable={false}
 >
   <section class="wrap">
     <p class="eyebrow">404</p>

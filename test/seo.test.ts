@@ -8,12 +8,12 @@ import {
   alternates,
   APEX_DEPLOY,
   buildSite,
+  declaredAlternates,
   groupFor,
   linkDescription,
   locs,
   markdownLinkTo,
   metaDescription,
-  normalise,
   PAGES_DEPLOY,
   robotsGroups,
   robotsPathMatches,
@@ -73,8 +73,17 @@ function routeIn(routeKeyValue: string, locale: 'hr' | 'en'): string {
   return `${prefix}${routeKeyValue === '/' ? '' : routeKeyValue}`;
 }
 
+/**
+ * The one URL a crawler should ever see for `route`.
+ *
+ * Directory shape, with the trailing slash — and *not* normalised, which is the point.
+ * The output is `<route>/index.html`, which a static host serves at the slashed URL and
+ * 301s to from the unslashed one, so the slash is the difference between a canonical and
+ * a redirect (MUSE-9). Spelled out here rather than imported from `src/lib/i18n.ts` so
+ * these assertions stay independent of the code they are checking.
+ */
 function absolute(build: Build, route: string): string {
-  return normalise(`${build.origin}${route === '/' ? '' : route}`);
+  return `${build.origin}${route === '/' ? '' : route}/`;
 }
 
 /** The HTML actually published for `route`. `build.format: 'directory'`, so `/x/index.html`. */
@@ -183,15 +192,9 @@ describe('AC1: /sitemap-index.xml', () => {
     const entries = allUrlEntries(pages);
 
     for (const route of ROUTES) {
-      const html = builtHtml(pages, route);
-      const declared = new Map<string, string>();
-      for (const m of html.matchAll(/<link\b[^>]*rel="alternate"[^>]*>/g)) {
-        const hreflang = /hreflang="([^"]+)"/.exec(m[0])?.[1];
-        const href = /href="([^"]+)"/.exec(m[0])?.[1];
-        if (hreflang && hreflang !== 'x-default' && href) {
-          declared.set(hreflang, normalise(href));
-        }
-      }
+      const declared = declaredAlternates(builtHtml(pages, route));
+      // x-default is in the page's cluster but has no sitemap counterpart to compare to.
+      declared.delete('x-default');
       expect(declared.size, `${route} declares no alternates`).toBeGreaterThan(0);
 
       const alts = alternates(entries.get(absolute(pages, route))!);
