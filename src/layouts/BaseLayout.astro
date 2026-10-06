@@ -20,9 +20,25 @@ interface Props {
   description: string;
   /** Redirect non-Croatian browsers to /en. Homepage only. */
   detectLanguage?: boolean;
+  /**
+   * Does this page have a URL of its own that a crawler should index?
+   *
+   * The 404 does not: the host serves it in place of whatever was asked for, so any
+   * canonical it declared would name a URL that is itself a 404 — and the hreflang
+   * alternate would promise an `/en/404/` that does not exist. `noindex` is the honest
+   * answer, and it keeps the MUSE-9 rule — every declared URL resolves 200 — exact
+   * rather than carved around.
+   */
+  indexable?: boolean;
 }
 
-const { locale, title, description, detectLanguage = false } = Astro.props;
+const {
+  locale,
+  title,
+  description,
+  detectLanguage = false,
+  indexable = true,
+} = Astro.props;
 
 const route = routeKey(Astro.url.pathname);
 const canonical = new URL(localeUrl(route, locale), Astro.site).href;
@@ -45,31 +61,39 @@ const skipLabel = locale === 'hr' ? 'Preskoči na sadržaj' : 'Skip to content';
 
     <title>{title}</title>
     <meta name="description" content={description} />
-    <link rel="canonical" href={canonical} />
 
+    {/* `localeUrl` emits the trailing slash the host serves these at, so a canonical and
+        its alternates all resolve 200 rather than 301ing (MUSE-9). */}
     {
-      LOCALES.map((l) => (
-        <link
-          rel="alternate"
-          hreflang={LOCALE_HTML_LANG[l]}
-          href={new URL(localeUrl(route, l), Astro.site).href}
-        />
-      ))
+      indexable ? (
+        <Fragment>
+          <link rel="canonical" href={canonical} />
+          {LOCALES.map((l) => (
+            <link
+              rel="alternate"
+              hreflang={LOCALE_HTML_LANG[l]}
+              href={new URL(localeUrl(route, l), Astro.site).href}
+            />
+          ))}
+          <link
+            rel="alternate"
+            hreflang="x-default"
+            href={new URL(localeUrl(route, DEFAULT_LOCALE), Astro.site).href}
+          />
+        </Fragment>
+      ) : (
+        <meta name="robots" content="noindex, follow" />
+      )
     }
-    <link
-      rel="alternate"
-      hreflang="x-default"
-      href={new URL(localeUrl(route, DEFAULT_LOCALE), Astro.site).href}
-    />
 
     {/* ds-allow: theme-color takes no CSS variable, so the two brand grounds are
         literal here. Keep in sync with --plum / --cream in tokens.css. */}
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#420535" />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F7F2EE" />
 
-    {/* `rootPath` joins the deploy base; `BASE_URL` has no trailing slash under
-        `trailingSlash: 'never'`, so interpolating it directly emits
-        `/MuseByMinafonts/…` and the preload 404s on the sub-path deploy (MUSE-8). */}
+    {/* `rootPath` joins the deploy base; interpolating `BASE_URL` directly depends on
+        whether it happens to carry a trailing slash, and emits `/MuseByMinafonts/…` when
+        it does not — a preload that 404s on the sub-path deploy (MUSE-8). */}
     <link
       rel="preload"
       href={rootPath('fonts/cormorant-garamond-latin.woff2')}
@@ -88,7 +112,7 @@ const skipLabel = locale === 'hr' ? 'Preskoči na sadržaj' : 'Skip to content';
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    <meta property="og:url" content={canonical} />
+    {indexable && <meta property="og:url" content={canonical} />}
   </head>
 
   <body>

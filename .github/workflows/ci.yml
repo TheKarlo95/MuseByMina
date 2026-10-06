@@ -54,7 +54,8 @@ jobs:
       - name: Serve and audit
         run: |
           npx astro preview --port 4321 &
-          npx wait-on http://localhost:4321/MuseByMina --timeout 60000
+          # The trailing slash is the served URL; the unslashed spelling redirects (MUSE-9).
+          npx wait-on http://localhost:4321/MuseByMina/ --timeout 60000
           npm run a11y
 
   designsystem:

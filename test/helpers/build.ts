@@ -131,6 +131,11 @@ function deployRoot(build: Build): URL {
   return new URL(`${build.origin}/`);
 }
 
+/** The path prefix the deploy is served from, with its slash: `/MuseByMina/`, or `/`. */
+export function basePath(build: Build): string {
+  return deployRoot(build).pathname;
+}
+
 /** A subresource a built page tells the browser to fetch. */
 export interface AssetRef {
   /** Where it came from, for failure messages — e.g. `<link rel="preload">`. */
@@ -143,7 +148,8 @@ export interface AssetRef {
  * `<link>` rel values that name a file the deploy has to serve.
  *
  * Deliberately not `canonical`, `alternate` or an `<a href>`: those are page URLs, which
- * are the trailing-slash question (MUSE-9) rather than the does-this-file-exist question.
+ * `pageRefs` collects and `test/urls.test.ts` resolves against a host that redirects —
+ * the trailing-slash question (MUSE-9), not the does-this-file-exist question.
  */
 const ASSET_RELS = new Set([
   'preload',
@@ -239,14 +245,85 @@ export function assetFile(build: Build, url: string): string | undefined {
   return path === '' ? 'index.html' : path;
 }
 
-/** Trailing slashes are not semantic here; the site sets `trailingSlash: 'never'`. */
-export function normalise(url: string): string {
-  return url.replace(/\/$/, '');
+/**
+ * A page URL a built page points at — a navigable address, not a subresource.
+ *
+ * Kept apart from `AssetRef` because the question is different: an asset either exists in
+ * `dist` or does not, whereas a page URL can exist and still be the wrong *spelling* of
+ * itself and 301. `test/urls.test.ts` (MUSE-9) is what resolves these.
+ */
+export interface PageRef {
+  /** Where it came from, for failure messages — e.g. `<link rel="canonical">`. */
+  source: string;
+  /** The attribute value as emitted. */
+  url: string;
 }
 
-/** Every `<loc>` in a sitemap document. */
+/** The `<link rel="canonical">` href a page declares, if any. */
+export function canonicalOf(html: string): string | undefined {
+  for (const m of html.matchAll(/<link\b[^>]*>/g)) {
+    if ((attr(m[0], 'rel') ?? '').toLowerCase() !== 'canonical') continue;
+    return attr(m[0], 'href');
+  }
+  return undefined;
+}
+
+/**
+ * `hreflang` → `href` for the `<link rel="alternate">` tags a page declares.
+ *
+ * `x-default` is included: Google treats it as one more alternate in the cluster, and it
+ * has to be a canonical, non-redirecting URL for exactly the same reason.
+ */
+export function declaredAlternates(html: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const m of html.matchAll(/<link\b[^>]*>/g)) {
+    if ((attr(m[0], 'rel') ?? '').toLowerCase() !== 'alternate') continue;
+    const hreflang = attr(m[0], 'hreflang');
+    const href = attr(m[0], 'href');
+    if (hreflang && href) out.set(hreflang, href);
+  }
+  return out;
+}
+
+/**
+ * Every navigable URL in a built page: links, canonical, hreflang alternates, `og:url`.
+ *
+ * Read off the markup rather than off a list of the tags the layout happens to emit
+ * today, so a URL added tomorrow is covered the day it lands — the same reasoning as
+ * `assetRefs` above.
+ */
+export function pageRefs(html: string): PageRef[] {
+  const refs: PageRef[] = [];
+
+  for (const m of html.matchAll(/<link\b[^>]*>/g)) {
+    const rel = (attr(m[0], 'rel') ?? '').toLowerCase();
+    const href = attr(m[0], 'href');
+    if (href === undefined) continue;
+    if (rel === 'canonical') refs.push({ source: '<link rel="canonical">', url: href });
+    if (rel === 'alternate') {
+      const hreflang = attr(m[0], 'hreflang');
+      refs.push({ source: `<link rel="alternate" hreflang="${hreflang}">`, url: href });
+    }
+  }
+
+  for (const m of html.matchAll(/<meta\b[^>]*>/g)) {
+    if (attr(m[0], 'property') !== 'og:url') continue;
+    const content = attr(m[0], 'content');
+    if (content === undefined) continue;
+    refs.push({ source: '<meta property="og:url">', url: content });
+  }
+
+  for (const m of html.matchAll(/<a\b[^>]*>/g)) {
+    const href = attr(m[0], 'href');
+    if (href !== undefined) refs.push({ source: '<a href>', url: href });
+  }
+
+  return refs;
+}
+
+/** Every `<loc>` in a sitemap document, exactly as written. */
 export function locs(xml: string): string[] {
-  return [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => normalise(m[1]!.trim()));
+  return [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]!.trim());
 }
 
 /** Each `<url>…</url>` block of a urlset, keyed by its own `<loc>`. */
@@ -255,7 +332,7 @@ export function urlEntries(xml: string): Map<string, string> {
   for (const m of xml.matchAll(/<url>([\s\S]*?)<\/url>/g)) {
     const block = m[1]!;
     const loc = /<loc>([^<]+)<\/loc>/.exec(block)?.[1];
-    if (loc) out.set(normalise(loc.trim()), block);
+    if (loc) out.set(loc.trim(), block);
   }
   return out;
 }
@@ -267,7 +344,7 @@ export function alternates(block: string): Map<string, string> {
     const attrs = m[1]!;
     const hreflang = /hreflang="([^"]+)"/.exec(attrs)?.[1];
     const href = /href="([^"]+)"/.exec(attrs)?.[1];
-    if (hreflang && href) out.set(hreflang, normalise(href));
+    if (hreflang && href) out.set(hreflang, href);
   }
   return out;
 }
@@ -307,14 +384,18 @@ function escapeRegExp(text: string): string {
 }
 
 /**
- * Matches a markdown link whose target is exactly `url`, trailing slash optional.
+ * Matches a markdown link whose target is exactly `url` — trailing slash included.
  *
  * Anchored on the closing paren on purpose. A substring test would let `/` match every
  * line in the file, and `/blog` match the `/blog/post` line — so a page could be missing
  * from `llms.txt` entirely and still look present.
+ *
+ * The slash is *not* optional (it was, until MUSE-9). `llms.txt` publishes URLs for
+ * crawlers to follow; a tolerant matcher here let the index advertise the redirecting
+ * spelling of every page while the suite stayed green.
  */
 export function markdownLinkTo(url: string): RegExp {
-  return new RegExp(`\\]\\(\\s*${escapeRegExp(url)}/?\\s*\\)`);
+  return new RegExp(`\\]\\(\\s*${escapeRegExp(url)}\\s*\\)`);
 }
 
 /** The description half of `- [Name](url): description`, or `undefined`. */

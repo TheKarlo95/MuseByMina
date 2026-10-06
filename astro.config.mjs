@@ -28,7 +28,26 @@ const HREFLANG = { hr: 'hr-HR', en: 'en' };
 export default defineConfig({
   site: SITE,
   base: BASE,
-  trailingSlash: 'never',
+
+  /**
+   * Directory-style output is served at the slashed URL, so the slashed URL is the only
+   * spelling that can be canonical (MUSE-9).
+   *
+   * `build.format` defaults to `'directory'` — Astro writes `dist/en/index.html` — and
+   * every static host, GitHub Pages included, answers `/en` with a 301 to `/en/`. Paired
+   * with the old `trailingSlash: 'never'` that meant every canonical, hreflang alternate
+   * and sitemap `<loc>` named a URL that redirected, so nothing on the site was
+   * self-referential and Google drops an hreflang cluster whose targets redirect.
+   *
+   * `build.format: 'file'` is the other way out, and does not work here: the deploy root
+   * is a directory whatever the format, so `/MuseByMina` would keep 301ing to
+   * `/MuseByMina/` and the homepage — the one URL that matters most — would still have a
+   * redirecting canonical. It also leans on the host resolving `/en` to `en.html`, which
+   * Pages happens to do and a bare `nginx` does not.
+   *
+   * `@astrojs/sitemap` reads this setting, so the sitemap follows with no code of ours.
+   */
+  trailingSlash: 'always',
 
   // Croatian is primary and sets the tone; English follows it (design system §10).
   // prefixDefaultLocale: false puts HR at / and EN at /en/.

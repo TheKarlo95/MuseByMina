@@ -39,7 +39,7 @@ export const GET: APIRoute = ({ site }) => {
     '',
     `> ${SITE_SUMMARY.hr} / ${SITE_SUMMARY.en}`,
     '',
-    `Croatian is the primary language and is served unprefixed; English mirrors it under \`/en\`.`,
+    `Croatian is the primary language and is served unprefixed; English mirrors it under \`/en/\`.`,
     `Every page exists in both locales with the same slug.`,
     '',
     ...LOCALES.flatMap((locale) => section(locale, site)),

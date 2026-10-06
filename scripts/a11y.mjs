@@ -9,11 +9,18 @@ const ORIGIN = process.env.ORIGIN ?? 'http://localhost:4321';
 const BASE = process.env.BASE ?? '/MuseByMina';
 const ROUTES = (process.env.ROUTES ?? '/,/en').split(',');
 
+/**
+ * Page URLs carry a trailing slash (`trailingSlash: 'always'`, MUSE-9). Auditing the
+ * unslashed spelling would audit a redirect, not the page.
+ */
+const pageUrl = (route) =>
+  `${ORIGIN}${BASE.replace(/\/+$/, '')}${route === '/' ? '' : route}/`;
+
 const browser = await chromium.launch();
 let failures = 0;
 
 for (const route of ROUTES) {
-  const url = `${ORIGIN}${BASE}${route === '/' ? '' : route}`;
+  const url = pageUrl(route);
 
   for (const scheme of ['dark', 'light']) {
     const ctx = await browser.newContext({

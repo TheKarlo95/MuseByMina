@@ -14,9 +14,9 @@ import {
 /**
  * MUSE-8 — a built page must not reference an asset the deploy does not serve.
  *
- * The specific bug was the two font `<link rel="preload">` hrefs: `BASE_URL` has no
- * trailing slash under `trailingSlash: 'never'`, so string concatenation emitted
- * `/MuseByMinafonts/…` — two 404s per page load and no preload.
+ * The specific bug was the two font `<link rel="preload">` hrefs: `BASE_URL` had no
+ * trailing slash, so string concatenation emitted `/MuseByMinafonts/…` — two 404s per
+ * page load and no preload.
  *
  * The class is wider than those two tags: anything that joins the deploy base to an
  * asset path by hand can get it wrong, and every such reference 404s only on the
@@ -24,8 +24,11 @@ import {
  * resolved to a file on disk the way the host resolves it — not matched against a
  * string pattern, which is what let the original bug ship.
  *
- * Page URLs (`<a href>`, `canonical`, `hreflang`) are deliberately not checked: those
- * are the trailing-slash/redirect question, tracked separately as MUSE-9.
+ * Page URLs (`<a href>`, `canonical`, `hreflang`) are still not checked here, now that
+ * MUSE-9 has landed. They are a different question and `assetFile` answers the wrong one:
+ * `/MuseByMina/en/` resolves to a directory, not a file, so a does-this-file-exist check
+ * either rejects every correct page URL or has to be taught the host's redirect rules.
+ * `test/urls.test.ts` teaches them to a real server and fetches each URL instead.
  */
 
 /**

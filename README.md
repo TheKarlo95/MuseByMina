@@ -12,7 +12,7 @@ Remaining pages, the CMS and the delivery pipeline are not yet wired up.
 |---|---|
 | Framework | Astro 7, static output, TypeScript strict |
 | Styling | Plain CSS — design tokens + scoped component styles. **No Tailwind.** |
-| i18n | Astro i18n; HR at `/`, EN at `/en` |
+| i18n | Astro i18n; HR at `/`, EN at `/en/` |
 | Hosting | GitHub Pages via Actions |
 | CMS | Sanity — *not yet wired* |
 | Video | Cloudflare R2 — *not yet wired* |
@@ -24,7 +24,7 @@ Astro inlines them.
 ## Commands
 
 ```bash
-npm run dev        # http://localhost:4321/MuseByMina
+npm run dev        # http://localhost:4321/MuseByMina/
 npm run build
 npm run typecheck  # astro check
 npm test           # vitest — asserts on real build output

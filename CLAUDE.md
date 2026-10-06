@@ -19,7 +19,7 @@ Header and footer sit on a band that is plum-ink in *both* themes, so they use t
 ## Commands
 
 ```bash
-npm run dev        # localhost:4321/MuseByMina
+npm run dev        # localhost:4321/MuseByMina/
 npm run build
 npm run typecheck  # astro check
 npm test           # vitest — builds the site and asserts on dist
@@ -47,10 +47,17 @@ npm run shots      # screenshots of all theme states to /tmp/muse-shots
   origin from it, and the suite rebuilds under a second target to prove a domain move is a
   config change.
 - Static assets are referenced through `rootPath()` in `src/lib/site.ts`, never by
-  interpolating `import.meta.env.BASE_URL` — `trailingSlash: 'never'` leaves it
-  *without* a trailing slash, so `${BASE_URL}fonts/x` silently yields
-  `/MuseByMinafonts/x`. An apex build hides this; only the Pages sub-path 404s.
-  `test/assets.test.ts` resolves every asset reference in the built HTML to a file in
-  `dist`, under both deploy targets.
+  interpolating `import.meta.env.BASE_URL` — whether that carries a trailing slash depends
+  on `trailingSlash`, so `${BASE_URL}fonts/x` can silently yield `/MuseByMinafonts/x`. An
+  apex build hides this; only the Pages sub-path 404s. `test/assets.test.ts` resolves every
+  asset reference in the built HTML to a file in `dist`, under both deploy targets.
+- **Page URLs end in a slash.** `trailingSlash: 'always'` + `build.format: 'directory'`,
+  so `dist/en/index.html` is served at `/en/` and `/en` 301s to it. Build hrefs with
+  `localeUrl()` (`src/lib/i18n.ts`) and nothing else — it is the single place the slash is
+  added, and canonical, hreflang, `llms.txt` and every nav link go through it. A URL
+  spelled without the slash is a redirect, which disqualifies it as a canonical and gets
+  the hreflang cluster dropped (MUSE-9). `test/urls.test.ts` serves `dist` from a model of
+  GitHub Pages and fetches every declared URL; `astro preview` answers both spellings with
+  200, so it cannot see this class of bug.
 - The theme is stamped pre-paint by an inline script (`src/lib/theme.ts`). Never move that
   into a component — it exists to prevent a flash.
