@@ -5,7 +5,6 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  rmSync,
   statSync,
 } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -17,11 +16,13 @@ const ROOT = fileURLToPath(new URL('../..', import.meta.url));
  * Build scratch space. Inside the repo rather than `os.tmpdir()` on purpose: Astro
  * moves assets out of `.astro/` with `fs.rename`, which fails with EXDEV when the
  * output directory is on another filesystem.
+ *
+ * `test/helpers/clean-scratch.ts` empties it once per run, as a `globalSetup`. It used to
+ * be emptied lazily by whichever test file built first, which was a race: vitest runs the
+ * files in parallel, so the second file's wipe deleted the first file's output from under
+ * a running `astro build`. Harmless with two suites, intermittent with three.
  */
-const SCRATCH = join(ROOT, 'node_modules/.muse-test-builds');
-
-/** Wiped once per run so stale output can never be mistaken for a fresh build. */
-let cleaned = false;
+export const SCRATCH = join(ROOT, 'node_modules/.muse-test-builds');
 
 /** A deploy target, exactly as CI passes it to `npm run build`. */
 export interface Deploy {
@@ -84,10 +85,6 @@ function walkOutput(dir: string): string[] {
  * acceptance criteria are all about what lands in the deployed output.
  */
 export function buildSite(deploy: Deploy): Build {
-  if (!cleaned) {
-    rmSync(SCRATCH, { recursive: true, force: true });
-    cleaned = true;
-  }
   mkdirSync(SCRATCH, { recursive: true });
   const outDir = mkdtempSync(join(SCRATCH, 'build-'));
 

@@ -39,11 +39,16 @@ export default defineConfig({
    * and sitemap `<loc>` named a URL that redirected, so nothing on the site was
    * self-referential and Google drops an hreflang cluster whose targets redirect.
    *
-   * `build.format: 'file'` is the other way out, and does not work here: the deploy root
-   * is a directory whatever the format, so `/MuseByMina` would keep 301ing to
-   * `/MuseByMina/` and the homepage — the one URL that matters most — would still have a
-   * redirecting canonical. It also leans on the host resolving `/en` to `en.html`, which
-   * Pages happens to do and a bare `nginx` does not.
+   * `build.format: 'file'` is the other way out, and does not work here. Tried and
+   * measured, not assumed:
+   *
+   *   - The deploy root is a directory whatever the format, so `/MuseByMina` keeps 301ing
+   *     to `/MuseByMina/`. The homepage — the one URL that matters most — would still
+   *     have a redirecting canonical.
+   *   - `Astro.url.pathname` then carries the `.html`, so `routeKey` reads `/index.html`
+   *     and the pages declare `…/MuseByMina/index.html` and `…/MuseByMina/en/en.html`.
+   *   - It leans on the host resolving `/en` to `en.html`, which Pages happens to do and
+   *     a bare `nginx` does not.
    *
    * `@astrojs/sitemap` reads this setting, so the sitemap follows with no code of ours.
    */
