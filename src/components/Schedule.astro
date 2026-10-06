@@ -1,0 +1,708 @@
+---
+import { localeUrl, type Locale } from '../lib/i18n';
+import { CTA } from '../lib/nav';
+import {
+  classCount,
+  daysWithClasses,
+  entriesAt,
+  formatTime,
+  groupByDay,
+  LEVELS,
+  LEVEL_NAME,
+  LEVEL_PREREQUISITE,
+  STYLES,
+  STYLE_NAME,
+  timeRows,
+  WEEKDAY_NAME,
+  type ClassEntry,
+} from '../lib/schedule';
+import { SCHEDULE } from '../data/schedule';
+
+/**
+ * The weekly schedule — design system §7.2, "the largest responsive shift in the
+ * system".
+ *
+ * Two layouts, one dataset, rendered from the same `entries` array at build time:
+ *
+ *   < 768px   an accordion by day. Collapsed row = day + session count + chevron;
+ *             expanded shows the class rows.
+ *   >= 768px  a day × time grid: days across, times down the left gutter, classes
+ *             as raised blocks with a 2px accent left border.
+ *
+ * Both are emitted and CSS picks one, rather than one DOM re-flowed by script.
+ * A media query cannot turn a list of days into a table of times, and the other
+ * way round — a `<details>` laid out with `display: contents` — loses the native
+ * disclosure behaviour that AC6 ("operable by keyboard alone") depends on. The
+ * cost is the markup appearing twice in the HTML; the hidden copy is
+ * `display: none`, so it is out of the accessibility tree and read once.
+ *
+ * **It is real HTML, never an image.** An image of a schedule is unreadable on a
+ * phone, invisible to search, and out of date the day it is exported.
+ *
+ * Data source: `entries` defaults to the placeholder rows in
+ * `src/data/schedule.ts`. Sanity becomes `entries={await getSchedule()}` — a prop
+ * change. Nothing in this file knows where the rows came from.
+ */
+interface Props {
+  locale: Locale;
+  /** Defaults to the hardcoded placeholder set. See `src/data/schedule.ts`. */
+  entries?: ClassEntry[];
+}
+
+const { locale, entries = SCHEDULE } = Astro.props;
+
+const t = {
+  hr: {
+    eyebrow: 'Raspored · Ilica 209',
+    h1: 'Tjedni raspored',
+    lede: 'Satovi traju 60 minuta. Dolaziš bez partnera i bez iskustva — razinu biraš po tome koliko dugo plešeš.',
+    filters: 'Filtriraj raspored',
+    levelFilter: 'Razina',
+    styleFilter: 'Stil',
+    allLevels: 'Sve razine',
+    allStyles: 'Svi stilovi',
+    time: 'Vrijeme',
+    gridCaption: 'Tjedni raspored — dani u stupcima, vrijeme u redovima.',
+    empty: 'Nema termina za odabrani filter.',
+    trialEyebrow: 'Prvi sat',
+    trialLede: 'Prvi sat je besplatan.',
+  },
+  en: {
+    eyebrow: 'Schedule · Ilica 209',
+    h1: 'Weekly schedule',
+    lede: 'Classes run 60 minutes. Come without a partner and without experience — pick your level by how long you have been dancing.',
+    filters: 'Filter the schedule',
+    levelFilter: 'Level',
+    styleFilter: 'Style',
+    allLevels: 'All levels',
+    allStyles: 'All styles',
+    time: 'Time',
+    gridCaption: 'Weekly schedule — days in columns, times in rows.',
+    empty: 'No classes match the selected filter.',
+    trialEyebrow: 'First class',
+    trialLede: 'Your first class is free.',
+  },
+}[locale];
+
+const days = groupByDay(entries);
+const columns = daysWithClasses(entries);
+const rows = timeRows(entries);
+
+/** Level and style, the two dimensions design system §7.5 names for the chips. */
+const filterGroups = [
+  {
+    kind: 'level' as const,
+    label: t.levelFilter,
+    all: t.allLevels,
+    values: LEVELS.map((value) => ({ value, label: LEVEL_NAME[locale][value] })),
+  },
+  {
+    kind: 'style' as const,
+    label: t.styleFilter,
+    all: t.allStyles,
+    values: STYLES.map((value) => ({ value, label: STYLE_NAME[locale][value] })),
+  },
+];
+---
+
+<section class="hero">
+  <p class="eyebrow">{t.eyebrow}</p>
+  <h1 class="display">{t.h1}</h1>
+  <p class="lede">{t.lede}</p>
+</section>
+
+<section class="band" data-schedule data-locale={locale}>
+  <div class="wrap">
+    {/*
+      Chips do nothing without scripting, so they are not in the document until
+      the component's script has proven it runs. With JavaScript off the full
+      schedule is still there — which is the state that matters.
+    */}
+    <div class="filters" data-filters hidden>
+      {
+        filterGroups.map((group) => (
+          <div class="filterGroup" role="group" aria-labelledby={`filter-${group.kind}`}>
+            <span class="filterLabel" id={`filter-${group.kind}`}>{group.label}</span>
+            <button
+              class="chip"
+              type="button"
+              aria-pressed="true"
+              data-filter={group.kind}
+              data-value="all"
+            >
+              {group.all}
+            </button>
+            {group.values.map((option) => (
+              <button
+                class="chip"
+                type="button"
+                aria-pressed="false"
+                data-filter={group.kind}
+                data-value={option.value}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        ))
+      }
+    </div>
+
+    <p class="empty" data-empty hidden>{t.empty}</p>
+
+    {/* --- under 768px: an accordion by day (design system §7.2) --- */}
+    <div class="accordion" data-view="accordion">
+      {
+        days.map((group, i) => (
+          <details class="day" data-day-group={group.day} open={i === 0}>
+            <summary>
+              <span class="dayName">{WEEKDAY_NAME[locale][group.day]}</span>
+              <span class="daySide">
+                <span class="dayCount" data-count>
+                  {classCount(group.entries.length, locale)}
+                </span>
+                <span class="chev" aria-hidden="true" />
+              </span>
+            </summary>
+            <ul class="slots">
+              {group.entries.map((entry) => (
+                <li class="slot" data-slot data-level={entry.level} data-style={entry.style}>
+                  <time class="slotTime" datetime={formatTime(entry.start)}>
+                    {formatTime(entry.start)}
+                  </time>
+                  <span class="slotBody">
+                    <span class="slotName">{STYLE_NAME[locale][entry.style]}</span>
+                    <span class="slotMeta">
+                      {LEVEL_NAME[locale][entry.level]} · {entry.instructor} ·{' '}
+                      {entry.durationMin} min
+                    </span>
+                    <span class="slotPrereq">{LEVEL_PREREQUISITE[locale][entry.level]}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ))
+      }
+    </div>
+
+    {/* --- 768px and up: the same data as a day × time grid --- */}
+    <div class="gridWrap" data-view="grid">
+      <table class="grid">
+        <caption class="srOnly">{t.gridCaption}</caption>
+        <thead>
+          <tr>
+            <th scope="col" class="gutterHead"><span class="srOnly">{t.time}</span></th>
+            {
+              columns.map((day) => (
+                <th scope="col" class="dayHead">
+                  {WEEKDAY_NAME[locale][day]}
+                </th>
+              ))
+            }
+          </tr>
+        </thead>
+        <tbody>
+          {
+            rows.map((start) => (
+              <tr data-time-row={start}>
+                <th scope="row" class="gutter">
+                  <time datetime={formatTime(start)}>{formatTime(start)}</time>
+                </th>
+                {columns.map((day) => (
+                  <td>
+                    {entriesAt(entries, day, start).map((entry) => (
+                      <div
+                        class="block"
+                        data-slot
+                        data-level={entry.level}
+                        data-style={entry.style}
+                      >
+                        <span class="blockName">{STYLE_NAME[locale][entry.style]}</span>
+                        <span class="blockMeta">
+                          {LEVEL_NAME[locale][entry.level]} · {entry.instructor}
+                        </span>
+                        <span class="blockPrereq">
+                          {LEVEL_PREREQUISITE[locale][entry.level]}
+                        </span>
+                      </div>
+                    ))}
+                  </td>
+                ))}
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <p class="eyebrow">{t.trialEyebrow}</p>
+    <h2 class="displayM">{t.trialLede}</h2>
+    <a class="btn btnPrimary" href={localeUrl(CTA.route, locale)}>{CTA.label[locale]}</a>
+  </div>
+</section>
+
+<script>
+  import { classCount } from '../lib/schedule';
+
+  /**
+   * Level and style filters. Filtering by instructor is out of scope (MUSE-6).
+   *
+   * Progressive enhancement, in this order:
+   *   1. the full schedule is server-rendered and needs no script at all;
+   *   2. the chips are revealed only once this runs;
+   *   3. filtering hides classes, recounts each day, drops days and time rows
+   *      that have emptied, and shows the empty state when nothing is left.
+   *
+   * The per-day count is recomputed with the same `classCount` the server used,
+   * imported rather than re-implemented — the Croatian rule (`1 termin`,
+   * `2 termina`, `21 termin`) lives in exactly one place.
+   */
+  const root = document.querySelector<HTMLElement>('[data-schedule]');
+
+  if (root) {
+    const locale = root.dataset.locale === 'en' ? 'en' : 'hr';
+    const filters = root.querySelector<HTMLElement>('[data-filters]');
+    const empty = root.querySelector<HTMLElement>('[data-empty]');
+    const views = [...root.querySelectorAll<HTMLElement>('[data-view]')];
+    const slots = [...root.querySelectorAll<HTMLElement>('[data-slot]')];
+    const groups = [...root.querySelectorAll<HTMLDetailsElement>('[data-day-group]')];
+    const timeRows = [...root.querySelectorAll<HTMLElement>('[data-time-row]')];
+    const chips = [...root.querySelectorAll<HTMLButtonElement>('[data-filter]')];
+
+    if (filters) filters.hidden = false;
+
+    const state: Record<string, string> = { level: 'all', style: 'all' };
+
+    const matches = (slot: HTMLElement) =>
+      (state.level === 'all' || slot.dataset.level === state.level) &&
+      (state.style === 'all' || slot.dataset.style === state.style);
+
+    const shown = (el: Element) =>
+      [...el.querySelectorAll<HTMLElement>('[data-slot]')].filter((s) => !s.hidden).length;
+
+    const apply = () => {
+      let visible = 0;
+      for (const slot of slots) {
+        slot.hidden = !matches(slot);
+        if (!slot.hidden) visible += 1;
+      }
+
+      for (const group of groups) {
+        const n = shown(group);
+        const count = group.querySelector('[data-count]');
+        if (count) count.textContent = classCount(n, locale);
+        group.hidden = n === 0;
+      }
+
+      // The day that was expanded may be one the filter just removed, which would
+      // leave a page of collapsed headers and no classes — the opposite of what
+      // clicking a filter asks for. Expand the first day that survived.
+      const remaining = groups.filter((group) => !group.hidden);
+      if (remaining.length > 0 && !remaining.some((group) => group.open)) {
+        remaining[0].open = true;
+      }
+
+      for (const row of timeRows) row.hidden = shown(row) === 0;
+
+      // Both layouts go, not just the one on screen: the viewport may change
+      // while a filter is applied.
+      for (const view of views) view.hidden = visible === 0;
+      if (empty) empty.hidden = visible > 0;
+    };
+
+    for (const chip of chips) {
+      chip.addEventListener('click', () => {
+        const kind = chip.dataset.filter;
+        if (!kind || !chip.dataset.value) return;
+        state[kind] = chip.dataset.value;
+        for (const other of chips) {
+          if (other.dataset.filter === kind) {
+            other.setAttribute('aria-pressed', String(other === chip));
+          }
+        }
+        apply();
+      });
+    }
+  }
+</script>
+
+<style>
+  /* An element hidden by the filter script must stay hidden: every layout rule
+     below would otherwise out-specify the UA's `[hidden] { display: none }`. */
+  [hidden] {
+    display: none !important;
+  }
+
+  .srOnly {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .hero {
+    max-width: 1280px;
+    margin-inline: auto;
+    padding: var(--space-8) var(--space-5) var(--space-7);
+  }
+  @media (min-width: 768px) {
+    .hero {
+      padding: var(--space-10) var(--space-7) var(--space-8);
+    }
+  }
+
+  /*
+    Design system §7.2 asks for an `.invert` band in the dark theme when the
+    schedule is the page's primary content, and explicitly *not* in light, where
+    the page is already cream. The repo's `.invert` is unconditional, so honouring
+    that literally would mean a component redeclaring role tokens per theme —
+    exactly what §2 centralises to prevent. `--surface-sunken` gives the long
+    table its relief in both themes with no new machinery. Noted as a deviation.
+  */
+  .band {
+    background: var(--surface-sunken);
+    padding: var(--space-7) var(--space-5) var(--space-8);
+  }
+  @media (min-width: 1024px) {
+    .band {
+      padding: var(--space-8) var(--space-7) var(--space-10);
+    }
+  }
+
+  .section {
+    padding: var(--space-8) var(--space-5);
+  }
+  @media (min-width: 768px) {
+    .section {
+      padding: var(--space-10) var(--space-7);
+    }
+  }
+
+  .wrap {
+    max-width: 1280px;
+    margin-inline: auto;
+  }
+
+  .eyebrow {
+    font-family: var(--font-label);
+    font-weight: 300;
+    font-size: 0.75rem;
+    letter-spacing: 0.32em;
+    /* Č Ć Ž Š carry marks above the cap line — 1.4 is the floor in Croatian (§4.6) */
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+    max-width: none;
+  }
+
+  /* Cormorant, so never below 26px — `clamp()`'s first value is the floor (§4). */
+  .display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.75rem, 8vw, 5.5rem);
+    line-height: 0.96;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: var(--space-4) 0 0;
+  }
+  .displayM {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.125rem, 5vw, 3.75rem);
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    margin: var(--space-4) 0 0;
+  }
+
+  .lede {
+    font-size: 1.125rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+    margin-top: var(--space-5);
+  }
+
+  /* --- filters (§7.5 chips) --- */
+  .filters {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
+  }
+  @media (min-width: 768px) {
+    .filters {
+      flex-direction: row;
+      gap: var(--space-7);
+    }
+  }
+
+  .filterGroup {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .filterLabel {
+    font-family: var(--font-label);
+    font-size: 0.6875rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--text-subtle);
+    margin-right: var(--space-2);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    /* 36px pill inside a 44px tap target — §11.3. */
+    min-height: 36px;
+    margin-block: 4px;
+    padding-inline: var(--space-3);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-full);
+    background: transparent;
+    color: var(--text-muted);
+    font-family: var(--font-label);
+    font-size: 0.6875rem;
+    letter-spacing: 0.2em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition:
+      border-color var(--dur-fast) var(--ease),
+      color var(--dur-fast) var(--ease);
+  }
+  .chip[aria-pressed='true'] {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .empty {
+    font-size: 1rem;
+    color: var(--text-muted);
+    padding: var(--space-6) 0;
+    margin: 0;
+  }
+
+  /* --- which layout is on screen --- */
+  .gridWrap {
+    display: none;
+  }
+  @media (min-width: 768px) {
+    .accordion {
+      display: none;
+    }
+    .gridWrap {
+      display: block;
+      /* Last resort between 768px and ~900px, where five day columns plus the
+         time gutter can out-measure the viewport. The page itself never scrolls
+         sideways; this box does. */
+      overflow-x: auto;
+    }
+  }
+
+  /* --- accordion (< 768px) --- */
+  .day {
+    border-top: 1px solid var(--line);
+  }
+  .day:last-of-type {
+    border-bottom: 1px solid var(--line);
+  }
+  .day summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    /* 44px minimum tap target, §11.3 */
+    min-height: 44px;
+    padding: var(--space-4) 0;
+    list-style: none;
+    cursor: pointer;
+  }
+  .day summary::-webkit-details-marker {
+    display: none;
+  }
+  .dayName {
+    font-family: var(--font-label);
+    font-size: 0.8125rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+  }
+  .daySide {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex: none;
+  }
+  .dayCount {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+  .chev {
+    width: 7px;
+    height: 7px;
+    border-right: 1px solid var(--accent);
+    border-bottom: 1px solid var(--accent);
+    transform: rotate(45deg) translate(-2px, -2px);
+    transition: transform var(--dur-base) var(--ease);
+  }
+  .day[open] .chev {
+    transform: rotate(-135deg) translate(-3px, -3px);
+  }
+
+  .slots {
+    list-style: none;
+    padding: 0 0 var(--space-5);
+  }
+  .slot {
+    display: flex;
+    gap: var(--space-4);
+    padding: var(--space-3) 0;
+    border-top: 1px solid var(--line);
+  }
+  .slot:first-child {
+    border-top: 0;
+  }
+  /* The reference bundle sets this at 1.25rem; Cormorant's floor is 26px, below
+     which the đ crossbar disappears — so 1.625rem, the display-s floor (§4). */
+  .slotTime {
+    flex: none;
+    width: 4.5rem;
+    font-family: var(--font-display);
+    font-size: 1.625rem;
+    line-height: 1.15;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  .slotBody {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .slotName {
+    font-size: 1rem;
+  }
+  .slotMeta {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+  }
+  /* Prerequisites are stated per class rather than once in a legend: the person
+     who needs to know "about a year of dancing" is reading one row, not the key. */
+  .slotPrereq {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    margin-top: var(--space-1);
+  }
+
+  /* --- day × time grid (>= 768px) --- */
+  .grid {
+    width: 100%;
+    border-collapse: collapse;
+    /* Columns size to the content, not to equal fractions, so Ponedjeljak and
+       Subota get the width each needs — §10 forbids fixed widths in Croatian. */
+    table-layout: auto;
+  }
+  .dayHead,
+  .gutterHead {
+    font-family: var(--font-label);
+    font-weight: 400;
+    font-size: 0.6875rem;
+    letter-spacing: 0.12em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+    text-align: left;
+    /* Left padding 0 so a day header sits flush with the blocks in its column. */
+    padding: 0 var(--space-3) var(--space-4) 0;
+    vertical-align: bottom;
+    white-space: nowrap;
+  }
+  .gutter {
+    font-weight: 400;
+    text-align: left;
+    vertical-align: top;
+    padding: var(--space-3) var(--space-4) var(--space-3) 0;
+    border-top: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  .gutter time {
+    font-family: var(--font-display);
+    font-size: 1.625rem;
+    line-height: 1.15;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  .grid td {
+    vertical-align: top;
+    padding: var(--space-2) var(--space-2) var(--space-4) 0;
+    border-top: 1px solid var(--line);
+  }
+
+  /* §7.2: classes as raised blocks with a 2px accent left border. No shadow —
+     depth in this system is surface value plus hairlines (§5). */
+  .block {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 7rem;
+    padding: var(--space-3);
+    background: var(--surface-raised);
+    border-left: 2px solid var(--accent);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  }
+  .blockName {
+    font-size: 0.9375rem;
+  }
+  .blockMeta {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+  }
+  .blockPrereq {
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+    margin-top: var(--space-6);
+    padding-inline: var(--space-6);
+    border-radius: var(--radius-full);
+    border: 1px solid transparent;
+    font-family: var(--font-label);
+    font-size: 0.8125rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    text-decoration: none;
+    transition:
+      transform var(--dur-fast) var(--ease),
+      filter var(--dur-fast) var(--ease);
+  }
+  @media (min-width: 768px) {
+    .btn {
+      min-height: 56px;
+    }
+  }
+  .btn:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+  }
+  .btnPrimary {
+    background: var(--btn-bg);
+    color: var(--btn-fg);
+  }
+</style>
