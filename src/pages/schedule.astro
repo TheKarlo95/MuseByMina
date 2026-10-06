@@ -1,0 +1,11 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Schedule from '../components/Schedule.astro';
+import { pageMeta } from '../lib/pages';
+
+const meta = pageMeta('/schedule');
+---
+
+<BaseLayout locale="hr" title={meta.title.hr} description={meta.description.hr}>
+  <Schedule locale="hr" />
+</BaseLayout>

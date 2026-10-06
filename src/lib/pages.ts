@@ -33,6 +33,18 @@ export const PAGES: PageMeta[] = [
       en: 'A dance studio in Zagreb. Bachata for adults — no partner, no experience needed. Come to a free trial class.',
     },
   },
+  {
+    route: '/schedule',
+    name: { hr: 'Raspored', en: 'Schedule' },
+    title: {
+      hr: 'Raspored — Muse by Mina',
+      en: 'Schedule — Muse by Mina',
+    },
+    description: {
+      hr: 'Tjedni raspored bachata satova u Zagrebu — dan, vrijeme, razina i instruktor za tradicionalnu, modernu i sensual bachatu.',
+      en: 'The weekly bachata class schedule in Zagreb — day, time, level and instructor for traditional, moderna and sensual bachata.',
+    },
+  },
 ];
 
 export function pageMeta(route: string): PageMeta {

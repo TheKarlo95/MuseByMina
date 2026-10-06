@@ -31,6 +31,15 @@ npm test           # vitest — asserts on real build output
 npm run ds         # design-system compliance
 npm run a11y       # axe on every page, both themes (needs a server running)
 npm run shots      # screenshots of all theme states → /tmp/muse-shots
+npm run ux:schedule  # /schedule: responsive shift, keyboard, filters (needs a server)
+```
+
+All three browser gates take `ORIGIN`/`BASE` from the environment. `a11y` also takes
+`ROUTES` and `shots` takes `ROUTE`/`OUT`, so either can be pointed at one page:
+
+```bash
+ROUTES=/,/en,/schedule,/en/schedule npm run a11y
+ROUTE=/schedule OUT=/tmp/muse-shots/schedule npm run shots   # reports h-overflow at 390px
 ```
 
 ## The design system
@@ -62,14 +71,18 @@ a role rather than reaching for `--gold` directly.
 ```
 src/
   components/   UI, one file each, styles co-located
+  data/         hardcoded content waiting on the CMS — schedule.ts today.
+                Marked as placeholder; components take it as a prop with this
+                as the default, so the Sanity swap is a prop change
   layouts/      BaseLayout — head, theme script, header/footer
   lib/          theme.ts (pre-paint script), i18n.ts, lang.ts, nav.ts,
-                pages.ts (per-route title + description), site.ts (deploy-root URLs)
-  pages/        index.astro + en/index.astro; thin wrappers over components
-                robots.txt.ts + llms.txt.ts; generated, not static
+                pages.ts (per-route title + description), site.ts (deploy-root URLs),
+                schedule.ts (class model, locale wording, Croatian pluralisation)
+  pages/        index.astro + schedule.astro, mirrored under en/; thin wrappers
+                over components. robots.txt.ts + llms.txt.ts; generated, not static
   styles/       globals.css → fonts.css + tokens.css + base.css
 public/fonts/   6 variable woff2, latin + latin-ext for Croatian
-scripts/        a11y, design-system and screenshot gates
+scripts/        a11y, design-system, screenshot and schedule-UX gates
 test/           vitest; builds the site and asserts on dist
 ```
 

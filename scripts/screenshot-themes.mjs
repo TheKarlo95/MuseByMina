@@ -9,10 +9,19 @@ const OUT = process.env.OUT ?? '/tmp/muse-shots';
 const pageUrl = (route) =>
   `${ORIGIN}${BASE.replace(/\/+$/, '')}${route === '/' ? '' : route}/`;
 
+/**
+ * Which page to shoot. The theme states and the 390px overflow check are the same
+ * questions on every page, so the route is a parameter rather than the homepage:
+ *
+ *   ROUTE=/schedule OUT=/tmp/muse-shots/schedule npm run shots
+ */
+const ROUTE = process.env.ROUTE ?? '/';
+const EN_ROUTE = ROUTE === '/' ? '/en' : `/en${ROUTE}`;
+
 mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch();
 
-async function shot(name, { route = '/', colorScheme, stored, viewport, mobile }) {
+async function shot(name, { route = ROUTE, colorScheme, stored, viewport, mobile }) {
   const ctx = await browser.newContext({
     colorScheme,
     viewport: viewport ?? { width: 1280, height: 900 },
@@ -64,6 +73,6 @@ await shot('06-mobile-light', {
   viewport: { width: 390, height: 844 },
   mobile: true,
 });
-await shot('07-en-dark', { route: '/en', colorScheme: 'dark' });
+await shot('07-en-dark', { route: EN_ROUTE, colorScheme: 'dark' });
 
 await browser.close();
