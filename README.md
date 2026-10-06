@@ -1,87 +1,90 @@
 # Muse by Mina
 
-Website for Muse by Mina — an adult bachata studio in Zagreb.
+Website for Muse by Mina — an adult bachata studio in Zagreb, Ilica 209.
 Croatian is the primary language; English follows.
 
-## Status
-
-Foundation only. The theme layer is ported and verified; no real pages or CMS yet.
+**Status:** foundation. Theme, layout, navigation and the homepage are built and verified.
+Remaining pages, the CMS and the delivery pipeline are not yet wired up.
 
 ## Stack
 
 | Layer | Choice |
 |---|---|
-| Framework | Next.js 16 (App Router), React 19, TypeScript strict |
-| Styling | Plain CSS — design tokens + CSS Modules. **No Tailwind.** |
-| CMS | Payload 3 at `/admin` — *not yet installed* |
-| Database | Postgres on Neon (EU) — *not yet provisioned* |
-| Media | Cloudflare R2 via `@payloadcms/storage-s3` — *not yet configured* |
-| Hosting | Vercel — *not yet deployed* |
+| Framework | Astro 7, static output, TypeScript strict |
+| Styling | Plain CSS — design tokens + scoped component styles. **No Tailwind.** |
+| i18n | Astro i18n; HR at `/`, EN at `/en` |
+| Hosting | GitHub Pages via Actions |
+| CMS | Sanity — *not yet wired* |
+| Video | Cloudflare R2 — *not yet wired* |
 
-**Payload was chosen over Sanity for two reasons:** it ships a Croatian admin UI
-(`@payloadcms/translations/languages/hr`), and its field-level `localized: true`
-keeps HR and EN on the *same* document — which is what lets the language switcher
-stay on the equivalent page instead of bouncing to the homepage.
+Astro rather than a React framework because this is a content site: the build ships
+**zero JavaScript files**: the theme switch, language switch and nav are small enough that
+Astro inlines them.
+
+## Commands
+
+```bash
+npm run dev        # http://localhost:4321/MuseByMina
+npm run build
+npm run typecheck  # astro check
+npm run ds         # design-system compliance
+npm run a11y       # axe on every page, both themes (needs a server running)
+npm run shots      # screenshots of all theme states → /tmp/muse-shots
+```
 
 ## The design system
 
-The brand lives in a sibling repo, `../MuseByMina2`, and
-`docs/design-system/muse-design-system.md` there is **authoritative**. Read it before
-building any component. We ported the theme, not the component package.
+The brand lives in a sibling repo: `../MuseByMina2`, where
+`docs/design-system/muse-design-system.md` is **authoritative**. We ported its theme —
+palette, role tokens, typography, spacing, fonts — rather than consuming its component
+package. Read it before building any UI.
 
-Key rules it encodes, all of which are load-bearing:
+Rules that are load-bearing rather than stylistic:
 
-- **Components reference a role token, never a brand colour.** Writing
-  `color: var(--gold)` is the bug — gold on cream is 2.02:1 and fails every threshold.
+- **Components reference a role token, never a brand colour.** Gold on cream is 2.02:1 and
+  fails every threshold, which is why `--accent` exists: it *is* gold in dark and gold-deep
+  in light. `npm run ds` fails the build on a violation.
+- **Cormorant never below 26px.** Below ~24px its `đ` crossbar disappears and the studio's
+  main call to action, *Dođi na probni sat*, renders as "Dodi".
 - **No drop shadows, in either theme.** Depth comes from surface value and hairlines.
-- **Cormorant never goes below 26px.** Below ~24px its `đ` crossbar disappears, turning
-  *Dođi na probni sat* into "Dodi".
-- Croatian runs 20–25% longer than English, so never fix a button's width.
+- Per-theme alpha values differ **on purpose** — `.56` passes on plum but fails AA on cream.
 
-### What we changed on the way in
+### The chrome band
 
-The design system shipped Cormorant as two `@font-face` blocks, weights 400 and 600,
-pointing at **byte-identical files**. All three families are actually variable fonts
-(Cormorant's `wght` axis spans 300–700), so each subset is now declared once with a
-weight *range* — real 600 works, and two redundant files are gone.
+Header and footer sit on `--surface-deep`, which is plum-ink in *both* themes, so their
+contents must not follow the page theme. That band is named as its own role set
+(`--band-surface`, `--band-text`, `--band-accent`, …) so chrome components still reference
+a role rather than reaching for `--gold` directly.
 
 ## Layout
 
 ```
 src/
-  app/            routes; layout.tsx carries the pre-paint theme script
-  components/     UI, one folder per component + co-located CSS Module
-  lib/            theme.ts (init script), useTheme.ts (store)
-  styles/         globals.css → fonts.css + tokens.css + base.css
-public/fonts/     6 variable woff2, latin + latin-ext for Croatian
+  components/   UI, one file each, styles co-located
+  layouts/      BaseLayout — head, theme script, header/footer
+  lib/          theme.ts (pre-paint script), i18n.ts, lang.ts, nav.ts
+  pages/        index.astro + en/index.astro; thin wrappers over components
+  styles/       globals.css → fonts.css + tokens.css + base.css
+public/fonts/   6 variable woff2, latin + latin-ext for Croatian
+scripts/        a11y, design-system and screenshot gates
 ```
 
-`src/styles/tokens.css` is a near-verbatim port of the design system's §1–2. Its alpha
-values differ between themes **on purpose** — `.56` gives 5.19:1 on plum but only 3.97:1
-on cream, which fails AA. Do not "simplify" them to match.
+## Theme and language
 
-## Commands
+Four theme states, all verified: no preference → dark (brand default); OS light → light;
+OS dark → dark; an explicit choice wins in both directions. The theme is stamped on `<html>`
+by a **blocking inline script in `<head>`** — without it, a viewer who chose light loads the
+dark page and watches it flip.
 
-```bash
-npm run dev        # dev server
-npm run build      # production build
-npm run typecheck  # tsc --noEmit
-npm run lint
-npm run a11y       # axe, both themes — needs the dev server running
-npm run shots      # screenshot all four theme states to /tmp/muse-shots
-```
+Language defaults from the browser's `Accept-Language`, decided client-side since static
+hosting has no edge compute. The redirect is deliberately narrow: homepage only, never if a
+choice is stored, and via `replaceState` so Back isn't trapped.
 
-## Theme behaviour
+## Deploying
 
-Four states, all verified:
+CI builds for the GitHub Pages project path. Once `muse.dance` is registered, change the
+env in `.github/workflows/deploy.yml` to `SITE=https://muse.dance` and `BASE=/`, and add a
+`CNAME`. Nothing in the code needs to change.
 
-| Viewer state | Result |
-|---|---|
-| No preference | Dark (brand default, on bare `:root`) |
-| OS light | Light |
-| OS dark | Dark |
-| Explicit choice | Wins over the OS, in both directions |
-
-The theme is stamped on `<html>` by a **blocking inline script in `<head>`**
-(`src/lib/theme.ts`) before first paint. Without it, a viewer who chose light loads the
-dark plum page and watches it flip. `useTheme` only governs later changes.
+Pages caps a published site at **1 GB**; CI fails above 900 MB. Media belongs on the Sanity
+CDN and R2, never in the repo.

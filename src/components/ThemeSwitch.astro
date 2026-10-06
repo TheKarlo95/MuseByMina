@@ -1,0 +1,143 @@
+---
+import type { Locale } from '../lib/i18n';
+
+interface Props {
+  locale: Locale;
+}
+const { locale } = Astro.props;
+
+const LABELS = {
+  hr: { group: 'Tema', dark: 'Tamno', light: 'Svijetlo', system: 'Prema sustavu' },
+  en: { group: 'Theme', dark: 'Dark', light: 'Light', system: 'Follow system' },
+}[locale];
+
+// Icon-only: three tracked words cost ~200px of header width, which is far too much
+// for a secondary control and pushed the bar past the viewport at 1280px. The names
+// still reach assistive tech via aria-label, which is what §7.1 actually requires.
+const THEMES = [
+  { value: 'dark', label: LABELS.dark },
+  { value: 'light', label: LABELS.light },
+  { value: 'system', label: LABELS.system },
+];
+---
+
+<div class="group" role="group" aria-label={LABELS.group} data-theme-switch>
+  {
+    THEMES.map((t) => (
+      <button
+        class="btn"
+        type="button"
+        value={t.value}
+        aria-pressed="false"
+        aria-label={t.label}
+        title={t.label}
+      >
+        {t.value === 'dark' && (
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z" />
+          </svg>
+        )}
+        {t.value === 'light' && (
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="4.2" />
+            <path d="M12 2v2.6M12 19.4V22M2 12h2.6M19.4 12H22M4.9 4.9l1.9 1.9M17.2 17.2l1.9 1.9M19.1 4.9l-1.9 1.9M6.8 17.2l-1.9 1.9" />
+          </svg>
+        )}
+        {t.value === 'system' && (
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="3" y="4.5" width="18" height="12" rx="1.5" />
+            <path d="M9 20h6" />
+          </svg>
+        )}
+      </button>
+    ))
+  }
+</div>
+
+<script>
+  import { THEME_STORAGE_KEY } from '../lib/theme';
+
+  const group = document.querySelector<HTMLElement>('[data-theme-switch]');
+  if (group) {
+    const buttons = [...group.querySelectorAll<HTMLButtonElement>('button')];
+
+    const current = () => {
+      try {
+        const v = localStorage.getItem(THEME_STORAGE_KEY);
+        return v === 'dark' || v === 'light' ? v : 'system';
+      } catch {
+        return 'system';
+      }
+    };
+
+    const paint = () => {
+      const now = current();
+      for (const b of buttons) b.setAttribute('aria-pressed', String(b.value === now));
+    };
+
+    for (const b of buttons) {
+      b.addEventListener('click', () => {
+        const next = b.value;
+        const el = document.documentElement;
+        if (next === 'system') el.removeAttribute('data-theme');
+        else el.setAttribute('data-theme', next);
+        try {
+          if (next === 'system') localStorage.removeItem(THEME_STORAGE_KEY);
+          else localStorage.setItem(THEME_STORAGE_KEY, next);
+        } catch {
+          /* private mode — the choice still applies for this page view */
+        }
+        paint();
+      });
+    }
+
+    // The inline <head> script owns the pre-paint stamp; this only syncs which
+    // button reads as pressed, so there is no flash and no hydration mismatch.
+    paint();
+    addEventListener('storage', paint);
+  }
+</script>
+
+<style>
+  .group {
+    display: inline-flex;
+    gap: 2px;
+    border: 1px solid var(--band-line-accent);
+    border-radius: var(--radius-full);
+    padding: 3px;
+    flex: none;
+  }
+  .btn {
+    /* 38px + 3px padding each side clears the 44px tap target */
+    width: 38px;
+    height: 38px;
+    display: grid;
+    place-content: center;
+    border: 0;
+    border-radius: var(--radius-full);
+    background: transparent;
+    color: var(--band-subtle);
+    cursor: pointer;
+    transition:
+      background var(--dur-fast) var(--ease),
+      color var(--dur-fast) var(--ease);
+  }
+  .btn svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .btn:hover {
+    color: var(--band-accent);
+  }
+  /* The header band is --surface-deep in both themes, so this pair is a fixed
+     gold-on-plum rather than theme-dependent. */
+  .btn[aria-pressed='true'] {
+    background: var(--band-accent);
+    color: var(--band-fill-text);
+  }
+</style>

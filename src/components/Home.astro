@@ -1,0 +1,299 @@
+---
+import { localeUrl, type Locale } from '../lib/i18n';
+import { CTA, STUDIO } from '../lib/nav';
+
+interface Props {
+  locale: Locale;
+}
+const { locale } = Astro.props;
+
+const t = {
+  hr: {
+    eyebrow: 'Plesni studio · Zagreb',
+    h1: 'Nauči bachatu u Zagrebu',
+    lede: 'Bez partnera, bez iskustva. Satovi traju 60 minuta i podijeljeni su u tri razine.',
+    schedule: 'Pogledaj raspored',
+    startHere: 'Nova si u plesu?',
+    startLede: 'Dvoja vrata, ne šest. Odaberi ono koje ti odgovara.',
+    flavours: 'Tri okusa, jedan ples',
+    flavoursLede:
+      'Bachata je ples u paru iz Dominikanske Republike. Kod nas je naučiš u tri izraza — ali to je i dalje jedan ples, i sve počinje istim koracima.',
+    where: 'Gdje smo',
+    openMaps: 'Otvori u Google Maps',
+    trial: 'Dođi na probni sat',
+    trialLede: 'Prvi sat je besplatan. Javi nam se i dogovorit ćemo termin.',
+    soon: 'Obrazac stiže uskoro — do tada nam piši na',
+  },
+  en: {
+    eyebrow: 'Dance studio · Zagreb',
+    h1: 'Learn bachata in Zagreb',
+    lede: 'No partner, no experience needed. Classes run 60 minutes across three levels.',
+    schedule: 'See the schedule',
+    startHere: 'New to dancing?',
+    startLede: 'Two doors, not six. Pick the one that fits.',
+    flavours: 'Three flavours, one dance',
+    flavoursLede:
+      'Bachata is a partner dance from the Dominican Republic. We teach it in three expressions — but it is still one dance, and it all starts with the same steps.',
+    where: 'Where we are',
+    openMaps: 'Open in Google Maps',
+    trial: 'Come to a trial class',
+    trialLede: 'Your first class is free. Get in touch and we will find you a slot.',
+    soon: 'A form is coming — until then, write to us at',
+  },
+}[locale];
+
+const doors =
+  locale === 'hr'
+    ? [
+        { name: 'Početni', when: 'Utorak · 19:00', who: 'Nikad nisi plesao/la. Počni ovdje.' },
+        { name: 'Srednji', when: 'Četvrtak · 20:00', who: 'Plešeš oko godinu dana.' },
+      ]
+    : [
+        { name: 'Beginner', when: 'Tuesday · 19:00', who: 'You have never danced. Start here.' },
+        { name: 'Intermediate', when: 'Thursday · 20:00', who: 'About a year of dancing.' },
+      ];
+
+const flavours =
+  locale === 'hr'
+    ? [
+        { name: 'Tradicionalna', text: 'Korijeni plesa — zaigrana, ritmična, bliska glazbi.' },
+        { name: 'Moderna', text: 'Čišće linije i okreti, s naglaskom na vođenje i praćenje.' },
+        { name: 'Sensual', text: 'Mekani pokreti tijela i valovi, uvijek kroz vezu u paru.' },
+      ]
+    : [
+        { name: 'Traditional', text: 'The roots — playful, rhythmic, close to the music.' },
+        { name: 'Moderna', text: 'Cleaner lines and turns, built on leading and following.' },
+        { name: 'Sensual', text: 'Soft body movement and waves, always through the connection.' },
+      ];
+---
+
+<section class="hero">
+  <p class="eyebrow">{t.eyebrow}</p>
+  <h1 class="display">{t.h1}</h1>
+  <p class="lede">{t.lede}</p>
+  <div class="actions">
+    <a class="btn btnPrimary" href={localeUrl(CTA.route, locale)}>{CTA.label[locale]}</a>
+    <a class="btn btnSecondary" href={localeUrl('/schedule', locale)}>{t.schedule}</a>
+  </div>
+</section>
+
+<section class="section sunken">
+  <div class="wrap">
+    <p class="eyebrow">{t.startHere}</p>
+    <h2 class="displayM">{t.startLede}</h2>
+    <ul class="cards two">
+      {
+        doors.map((d) => (
+          <li class="card">
+            <p class="cardName">{d.name}</p>
+            <p class="cardWhen">{d.when}</p>
+            <p class="cardWho">{d.who}</p>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <p class="eyebrow">{t.flavours}</p>
+    <p class="lede">{t.flavoursLede}</p>
+    <ul class="cards three">
+      {
+        flavours.map((f) => (
+          <li class="card">
+            <p class="cardName">{f.name}</p>
+            <p class="cardWho">{f.text}</p>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</section>
+
+<section class="section invert" id="trial">
+  <div class="wrap">
+    <p class="eyebrow">{t.trial}</p>
+    <h2 class="displayM">{t.trialLede}</h2>
+    <p class="lede">
+      {t.soon} <a class="inlineLink" href={`mailto:${STUDIO.email}`}>{STUDIO.email}</a>.
+    </p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <p class="eyebrow">{t.where}</p>
+    <h2 class="displayM">{STUDIO.street}, {STUDIO.city}</h2>
+    <a class="btn btnSecondary" href={STUDIO.maps} target="_blank" rel="noopener noreferrer">
+      {t.openMaps}
+    </a>
+  </div>
+</section>
+
+<style>
+  .hero {
+    max-width: 1280px;
+    margin-inline: auto;
+    padding: var(--space-9) var(--space-5) var(--space-8);
+  }
+  @media (min-width: 768px) {
+    .hero {
+      padding: var(--space-11) var(--space-7) var(--space-10);
+    }
+  }
+
+  .section {
+    padding: var(--space-8) var(--space-5);
+  }
+  @media (min-width: 768px) {
+    .section {
+      padding: var(--space-10) var(--space-7);
+    }
+  }
+  .sunken {
+    background: var(--surface-sunken);
+  }
+  .wrap {
+    max-width: 1280px;
+    margin-inline: auto;
+  }
+
+  .eyebrow {
+    font-family: var(--font-label);
+    font-weight: 300;
+    font-size: 0.75rem;
+    letter-spacing: 0.32em;
+    /* Č Ć Ž Š carry marks above the cap line — 1.4 is the floor in Croatian (§4.6) */
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+    max-width: none;
+  }
+
+  .display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(3.25rem, 12vw, 8.5rem);
+    line-height: 0.92;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: var(--space-4) 0 0;
+  }
+  .displayM {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.125rem, 5vw, 3.75rem);
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    margin: var(--space-4) 0 0;
+  }
+
+  .lede {
+    font-size: 1.125rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+    margin-top: var(--space-5);
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-4);
+    margin-top: var(--space-7);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+    padding-inline: var(--space-6);
+    border-radius: var(--radius-full);
+    border: 1px solid transparent;
+    font-family: var(--font-label);
+    font-size: 0.8125rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    text-decoration: none;
+    cursor: pointer;
+    transition:
+      transform var(--dur-fast) var(--ease),
+      filter var(--dur-fast) var(--ease);
+  }
+  @media (min-width: 768px) {
+    .btn {
+      min-height: 56px;
+    }
+  }
+  .btn:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+  }
+  .btnPrimary {
+    background: var(--btn-bg);
+    color: var(--btn-fg);
+  }
+  .btnSecondary {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .cards {
+    list-style: none;
+    display: grid;
+    gap: var(--space-4);
+    margin-top: var(--space-7);
+  }
+  @media (min-width: 768px) {
+    .cards {
+      gap: var(--space-6);
+    }
+    .cards.two {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .cards.three {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  /* No drop shadows anywhere in this system — depth is surface value plus hairlines. */
+  .card {
+    border: 1px solid var(--line-accent);
+    border-radius: var(--radius-sm);
+    padding: var(--space-5);
+  }
+  @media (min-width: 768px) {
+    .card {
+      padding: var(--space-6);
+    }
+  }
+  .cardName {
+    font-family: var(--font-display);
+    font-size: clamp(1.625rem, 3vw, 2.125rem);
+    line-height: 1.15;
+    margin: 0;
+  }
+  .cardWhen {
+    font-family: var(--font-label);
+    font-size: 0.6875rem;
+    letter-spacing: 0.2em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: var(--space-2) 0 0;
+  }
+  .cardWho {
+    font-size: 0.9375rem;
+    color: var(--text-muted);
+    margin-top: var(--space-3);
+  }
+
+  .inlineLink {
+    color: var(--accent);
+  }
+</style>

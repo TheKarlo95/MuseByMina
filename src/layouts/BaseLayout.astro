@@ -1,0 +1,98 @@
+---
+import { THEME_INIT_SCRIPT } from '../lib/theme';
+import { langInitScript } from '../lib/lang';
+import {
+  DEFAULT_LOCALE,
+  LOCALES,
+  LOCALE_HTML_LANG,
+  localeUrl,
+  routeKey,
+  type Locale,
+} from '../lib/i18n';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import '../styles/globals.css';
+
+interface Props {
+  locale: Locale;
+  title: string;
+  description: string;
+  /** Redirect non-Croatian browsers to /en. Homepage only. */
+  detectLanguage?: boolean;
+}
+
+const { locale, title, description, detectLanguage = false } = Astro.props;
+
+const route = routeKey(Astro.url.pathname);
+const canonical = new URL(localeUrl(route, locale), Astro.site).href;
+const skipLabel = locale === 'hr' ? 'Preskoči na sadržaj' : 'Skip to content';
+---
+
+<!doctype html>
+<html lang={LOCALE_HTML_LANG[locale]}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    {/* Before first paint — otherwise a viewer who chose light watches the page flip. */}
+    <script is:inline set:html={THEME_INIT_SCRIPT} />
+    {
+      detectLanguage && (
+        <script is:inline set:html={langInitScript(localeUrl('/', 'en'))} />
+      )
+    }
+
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+
+    {
+      LOCALES.map((l) => (
+        <link
+          rel="alternate"
+          hreflang={LOCALE_HTML_LANG[l]}
+          href={new URL(localeUrl(route, l), Astro.site).href}
+        />
+      ))
+    }
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href={new URL(localeUrl(route, DEFAULT_LOCALE), Astro.site).href}
+    />
+
+    {/* ds-allow: theme-color takes no CSS variable, so the two brand grounds are
+        literal here. Keep in sync with --plum / --cream in tokens.css. */}
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#420535" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F7F2EE" />
+
+    <link
+      rel="preload"
+      href={`${import.meta.env.BASE_URL}fonts/cormorant-garamond-latin.woff2`.replace('//', '/')}
+      as="font"
+      type="font/woff2"
+      crossorigin="anonymous"
+    />
+    <link
+      rel="preload"
+      href={`${import.meta.env.BASE_URL}fonts/inter-400-600-latin.woff2`.replace('//', '/')}
+      as="font"
+      type="font/woff2"
+      crossorigin="anonymous"
+    />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+  </head>
+
+  <body>
+    <a class="skip-link" href="#main">{skipLabel}</a>
+    <Header locale={locale} />
+    <main id="main">
+      <slot />
+    </main>
+    <Footer locale={locale} />
+  </body>
+</html>

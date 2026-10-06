@@ -1,0 +1,173 @@
+---
+import { MORE_NAV, PRIMARY_NAV, STUDIO } from '../lib/nav';
+import { localeUrl, type Locale } from '../lib/i18n';
+
+interface Props {
+  locale: Locale;
+}
+const { locale } = Astro.props;
+
+const t = {
+  hr: { links: 'Brzi linkovi', find: 'Gdje smo', openMaps: 'Otvori u Google Maps', social: 'Pratite nas' },
+  en: { links: 'Quick links', find: 'Find us', openMaps: 'Open in Google Maps', social: 'Follow us' },
+}[locale];
+
+const quick = [...PRIMARY_NAV.filter((i) => !i.mobileOnly), ...MORE_NAV.slice(0, 4)];
+const year = 2026;
+---
+
+<footer class="footer">
+  <div class="inner">
+    <div class="col">
+      <p class="logoMark">Muse</p>
+      <p class="logoSub">by Mina</p>
+      <p class="blurb">
+        {
+          locale === 'hr'
+            ? 'Plesni studio u Zagrebu. Bachata za odrasle — bez partnera, bez iskustva.'
+            : 'A dance studio in Zagreb. Bachata for adults — no partner, no experience needed.'
+        }
+      </p>
+    </div>
+
+    <nav class="col" aria-label={t.links}>
+      <h2 class="h">{t.links}</h2>
+      <ul>
+        {
+          quick.map((i) => (
+            <li>
+              <a href={localeUrl(i.route, locale)}>{i.label[locale]}</a>
+            </li>
+          ))
+        }
+      </ul>
+    </nav>
+
+    <div class="col">
+      <h2 class="h">{t.find}</h2>
+      <address>
+        {STUDIO.street}<br />
+        {STUDIO.city}, {STUDIO.country[locale]}
+      </address>
+      {/* Link-out, not an iframe: no third-party cookies and no LCP hit. */}
+      <a class="mapLink" href={STUDIO.maps} target="_blank" rel="noopener noreferrer">
+        {t.openMaps}
+      </a>
+      <a class="mail" href={`mailto:${STUDIO.email}`}>{STUDIO.email}</a>
+    </div>
+
+    <div class="col">
+      <h2 class="h">{t.social}</h2>
+      <ul>
+        <li><a href={STUDIO.instagram} target="_blank" rel="noopener noreferrer me">Instagram</a></li>
+        <li><a href={STUDIO.facebook} target="_blank" rel="noopener noreferrer me">Facebook</a></li>
+        <li><a href={STUDIO.linktree} target="_blank" rel="noopener noreferrer me">Linktree</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="bottom">© {year} {STUDIO.name}</p>
+</footer>
+
+<style>
+  /* --surface-deep is plum-ink in BOTH themes, so the footer is a constant anchor
+     at the bottom of every page. Design system §7.1. */
+  .footer {
+    background: var(--band-surface);
+    color: var(--band-text);
+    margin-top: var(--space-10);
+  }
+
+  .inner {
+    max-width: 1280px;
+    margin-inline: auto;
+    padding: var(--space-8) var(--space-5);
+    display: grid;
+    gap: var(--space-7);
+  }
+  @media (min-width: 768px) {
+    .inner {
+      grid-template-columns: 1.4fr 1fr 1fr 1fr;
+      padding: var(--space-9) var(--space-7);
+      gap: var(--space-6);
+    }
+  }
+
+  .logoMark {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    line-height: 1;
+    margin: 0;
+  }
+  .logoSub {
+    font-family: var(--font-label);
+    font-size: 0.5625rem;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--band-accent);
+    margin: 4px 0 var(--space-4);
+  }
+  .blurb {
+    font-size: 0.875rem;
+    color: var(--band-muted);
+    max-width: 34ch;
+  }
+
+  .h {
+    font-family: var(--font-label);
+    font-size: 0.6875rem;
+    font-weight: 400;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--band-accent);
+    margin: 0 0 var(--space-4);
+  }
+
+  ul {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  a {
+    color: var(--band-muted);
+    text-decoration: none;
+    font-size: 0.875rem;
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    transition: color var(--dur-fast) var(--ease);
+  }
+  a:hover {
+    color: var(--band-accent);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  address {
+    font-style: normal;
+    font-size: 0.875rem;
+    line-height: 1.7;
+    color: var(--band-muted);
+    margin-bottom: var(--space-2);
+  }
+  .mapLink,
+  .mail {
+    display: block;
+  }
+  .mapLink {
+    color: var(--band-accent);
+  }
+
+  .bottom {
+    border-top: 1px solid var(--band-line);
+    margin: 0;
+    padding: var(--space-5);
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--band-subtle);
+    max-width: none;
+  }
+</style>

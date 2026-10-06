@@ -18,6 +18,8 @@ html {
 body {
   margin: 0;
   min-height: 100dvh;
+  /* clears the fixed header */
+  padding-top: 64px;
   background: var(--surface);
   color: var(--text);
   font-family: var(--font-body);
@@ -47,6 +49,19 @@ svg,
 video {
   display: block;
   max-width: 100%;
+}
+
+@media (min-width: 900px) {
+  body { padding-top: 80px; }
+}
+
+/* Anchor targets must clear the fixed header too, or #trial lands under it. */
+:target {
+  scroll-margin-top: 96px;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 /* Prose measure — design system §5: caps at 68ch */
@@ -87,6 +102,38 @@ a {
 }
 .skip-link:focus {
   left: var(--space-3);
+}
+
+/* Inverted island — a cream band inside a dark page, or a plum band inside a light
+   one. Reads the --o-* set that every theme block defines as "the other theme", so
+   children need no changes at all. Design system §2.
+   Nested inverts are not supported. Max twice per page — it is punctuation. */
+.invert {
+  --surface: var(--o-surface);
+  --surface-sunken: var(--o-surface);
+  --surface-raised: var(--o-surface-raised);
+  --surface-contrast: var(--o-contrast);
+
+  --text: var(--o-text-inv);
+  --text-muted: var(--o-text-muted);
+  --text-subtle: var(--o-text-subtle);
+  --text-on-contrast: var(--o-text);
+
+  --accent: var(--o-accent);
+  --accent-fill: var(--o-accent-fill);
+  --accent-fill-text: var(--o-accent-fill-text);
+
+  --btn-bg: var(--o-btn-bg);
+  --btn-fg: var(--o-btn-fg);
+
+  --line: var(--o-line);
+  --line-accent: var(--o-line-accent);
+
+  --error: var(--o-error);
+  --success: var(--o-success);
+
+  background: var(--surface);
+  color: var(--text);
 }
 
 /* Design system §8: reveals degrade to VISIBLE, never to hidden. */

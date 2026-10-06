@@ -1,0 +1,76 @@
+---
+import { LOCALES, LOCALE_LABEL, localeUrl, routeKey, type Locale } from '../lib/i18n';
+
+interface Props {
+  locale: Locale;
+}
+const { locale } = Astro.props;
+
+// The equivalent page, not the homepage. Because paths are English and shared
+// across locales, this is a straight prefix swap with no slug table to maintain.
+const route = routeKey(Astro.url.pathname);
+const label = locale === 'hr' ? 'Jezik' : 'Language';
+---
+
+<div class="group" role="group" aria-label={label} data-locale-switch>
+  {
+    LOCALES.map((l) => (
+      <a
+        href={localeUrl(route, l)}
+        hreflang={l}
+        lang={l}
+        data-locale={l}
+        aria-current={l === locale ? 'true' : undefined}
+      >
+        {LOCALE_LABEL[l]}
+      </a>
+    ))
+  }
+</div>
+
+<script>
+  import { LANG_STORAGE_KEY } from '../lib/lang';
+
+  // An explicit choice must stick, or the homepage auto-redirect would keep
+  // overriding it on the next visit.
+  document.querySelectorAll<HTMLAnchorElement>('[data-locale-switch] a').forEach((a) => {
+    a.addEventListener('click', () => {
+      try {
+        localStorage.setItem(LANG_STORAGE_KEY, a.dataset.locale ?? '');
+      } catch {
+        /* private mode — the navigation still happens */
+      }
+    });
+  });
+</script>
+
+<style>
+  .group {
+    display: inline-flex;
+    align-items: center;
+  }
+  .group a {
+    /* 44px tap target without inflating the type — design system §7.1 */
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-label);
+    font-size: 0.75rem;
+    letter-spacing: 0.2em;
+    line-height: 1.4;
+    text-decoration: none;
+    color: var(--band-subtle);
+    transition: color var(--dur-fast) var(--ease);
+  }
+  .group a:hover {
+    color: var(--band-accent);
+  }
+  .group a[aria-current='true'] {
+    color: var(--band-accent);
+  }
+  .group a + a {
+    border-left: 1px solid var(--band-line);
+  }
+</style>

@@ -1,0 +1,433 @@
+---
+import { PRIMARY_NAV, MORE_NAV, CTA } from '../lib/nav';
+import { localeUrl, routeKey, type Locale } from '../lib/i18n';
+import LocaleSwitch from './LocaleSwitch.astro';
+import ThemeSwitch from './ThemeSwitch.astro';
+
+interface Props {
+  locale: Locale;
+}
+const { locale } = Astro.props;
+
+const here = routeKey(Astro.url.pathname);
+const t = {
+  menu: locale === 'hr' ? 'Izbornik' : 'Menu',
+  more: locale === 'hr' ? 'Više' : 'More',
+  home: locale === 'hr' ? 'Muse by Mina — početna' : 'Muse by Mina — home',
+};
+---
+
+<header class="header" data-header>
+  <div class="inner">
+    <a class="logo" href={localeUrl('/', locale)} aria-label={t.home}>
+      <span class="logoMark">Muse</span>
+      <span class="logoSub">by Mina</span>
+    </a>
+
+    <button
+      class="menuBtn"
+      type="button"
+      aria-controls="primary-nav"
+      aria-expanded="false"
+      data-menu-btn
+    >
+      <span class="srOnly">{t.menu}</span>
+      <span class="bars" aria-hidden="true"></span>
+    </button>
+
+    <nav id="primary-nav" class="nav" data-nav aria-label={t.menu}>
+      <ul class="navList">
+        {
+          PRIMARY_NAV.map((item) => (
+            <li class:list={['navItem', item.mobileOnly && 'mobileOnly']}>
+              <a
+                href={localeUrl(item.route, locale)}
+                aria-current={here === item.route ? 'page' : undefined}
+              >
+                {item.label[locale]}
+              </a>
+            </li>
+          ))
+        }
+
+        <li class="navItem hasMore">
+          {/*
+            A real disclosure, not a hover trap. axcentdance's "More" is hover-only on a
+            button with no aria-expanded and no key handling, so keyboard and touch users
+            simply cannot open it. Click/Enter/Space opens; Escape closes; hover is only
+            an enhancement layered on top.
+          */}
+          <button
+            class="moreBtn"
+            type="button"
+            aria-controls="more-menu"
+            aria-expanded="false"
+            data-more-btn
+          >
+            {t.more}
+            <span class="chev" aria-hidden="true"></span>
+          </button>
+          <ul id="more-menu" class="moreMenu" data-more-menu hidden>
+            {
+              MORE_NAV.map((item) => (
+                <li>
+                  <a
+                    href={localeUrl(item.route, locale)}
+                    aria-current={here === item.route ? 'page' : undefined}
+                  >
+                    {item.label[locale]}
+                  </a>
+                </li>
+              ))
+            }
+          </ul>
+        </li>
+      </ul>
+
+      <div class="chrome">
+        <a class="cta" href={localeUrl(CTA.route, locale)}>{CTA.label[locale]}</a>
+        <LocaleSwitch locale={locale} />
+        <ThemeSwitch locale={locale} />
+      </div>
+    </nav>
+  </div>
+</header>
+
+<script>
+  const header = document.querySelector<HTMLElement>('[data-header]');
+  const menuBtn = document.querySelector<HTMLButtonElement>('[data-menu-btn]');
+  const nav = document.querySelector<HTMLElement>('[data-nav]');
+  const moreBtn = document.querySelector<HTMLButtonElement>('[data-more-btn]');
+  const moreMenu = document.querySelector<HTMLElement>('[data-more-menu]');
+
+  // Densify on scroll rather than starting transparent over the hero — avoids the
+  // contrast bug that a transparent-over-photography header always invites.
+  const onScroll = () => header?.classList.toggle('scrolled', window.scrollY > 50);
+  onScroll();
+  addEventListener('scroll', onScroll, { passive: true });
+
+  const setMenu = (open: boolean) => {
+    menuBtn?.setAttribute('aria-expanded', String(open));
+    nav?.classList.toggle('open', open);
+    document.body.style.overflow = open ? 'hidden' : '';
+  };
+
+  const setMore = (open: boolean) => {
+    moreBtn?.setAttribute('aria-expanded', String(open));
+    if (moreMenu) moreMenu.hidden = !open;
+  };
+
+  menuBtn?.addEventListener('click', () =>
+    setMenu(menuBtn.getAttribute('aria-expanded') !== 'true'),
+  );
+  moreBtn?.addEventListener('click', () =>
+    setMore(moreBtn.getAttribute('aria-expanded') !== 'true'),
+  );
+
+  // Closing returns focus to the control that opened it, so keyboard users aren't
+  // dumped at the top of the document.
+  addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (moreBtn?.getAttribute('aria-expanded') === 'true') {
+      setMore(false);
+      moreBtn.focus();
+    } else if (menuBtn?.getAttribute('aria-expanded') === 'true') {
+      setMenu(false);
+      menuBtn.focus();
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    const target = e.target as Node;
+    if (moreBtn && moreMenu && !moreBtn.contains(target) && !moreMenu.contains(target)) {
+      setMore(false);
+    }
+    if ((target as HTMLElement).closest?.('[data-nav] a')) setMenu(false);
+  });
+</script>
+
+<style>
+  .header {
+    position: fixed;
+    inset: 0 0 auto;
+    z-index: 100;
+    /* Opaque in BOTH themes. A translucent band composites plum-ink over cream in
+       the light theme (#594553), which drops gold to 3.88:1 and fails AA — caught by
+       the a11y gate. Translucency only works over hero photography with a scrim;
+       revisit when that imagery exists. */
+    background: var(--band-surface);
+    border-bottom: 1px solid transparent;
+    transition:
+      background var(--dur-fast) var(--ease),
+      border-color var(--dur-fast) var(--ease);
+  }
+  .header.scrolled {
+    border-bottom-color: var(--band-line);
+  }
+
+  .inner {
+    max-width: 1280px;
+    margin-inline: auto;
+    padding: 0 var(--space-5);
+    height: 64px;
+    display: flex;
+    align-items: center;
+    gap: var(--space-5);
+  }
+  @media (min-width: 900px) {
+    .inner {
+      height: 80px;
+      padding-inline: var(--space-7);
+    }
+  }
+
+  /* The header band is --surface-deep in BOTH themes, so its contents are always
+     the light-on-dark pairing — never theme-dependent. Design system §12. */
+  .logo {
+    display: flex;
+    flex-direction: column;
+    line-height: 1;
+    text-decoration: none;
+    color: var(--band-text);
+    margin-right: auto;
+  }
+  .logoMark {
+    font-family: var(--font-display);
+    font-size: 1.625rem;
+    letter-spacing: 0.01em;
+  }
+  .logoSub {
+    font-family: var(--font-label);
+    font-size: 0.5625rem;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--band-accent);
+    margin-top: 2px;
+  }
+
+  .srOnly {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .menuBtn {
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-content: center;
+    border: 1px solid var(--band-line-accent);
+    border-radius: var(--radius-full);
+    background: transparent;
+    cursor: pointer;
+  }
+  .bars,
+  .bars::before,
+  .bars::after {
+    display: block;
+    width: 16px;
+    height: 1px;
+    background: var(--band-accent);
+    transition: transform var(--dur-fast) var(--ease);
+  }
+  .bars::before,
+  .bars::after {
+    content: '';
+    position: relative;
+  }
+  .bars::before {
+    top: -5px;
+  }
+  .bars::after {
+    top: 4px;
+  }
+  [aria-expanded='true'] .bars {
+    background: transparent;
+  }
+  [aria-expanded='true'] .bars::before {
+    transform: translateY(5px) rotate(45deg);
+  }
+  [aria-expanded='true'] .bars::after {
+    transform: translateY(-5px) rotate(-45deg);
+  }
+  @media (min-width: 900px) {
+    .menuBtn {
+      display: none;
+    }
+  }
+
+  /* --- mobile panel --- */
+  .nav {
+    position: fixed;
+    inset: 64px 0 0;
+    background: var(--band-surface);
+    padding: var(--space-6) var(--space-5) var(--space-8);
+    overflow-y: auto;
+    display: none;
+    flex-direction: column;
+    gap: var(--space-6);
+  }
+  .nav.open {
+    display: flex;
+  }
+
+  .navList {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+  .navList a,
+  .moreBtn {
+    font-family: var(--font-display);
+    font-size: 1.625rem;
+    color: var(--band-text);
+    text-decoration: none;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: 44px;
+  }
+  .navList a[aria-current='page'] {
+    color: var(--band-accent);
+  }
+
+  /* Must beat the `display: flex` below — otherwise [hidden] does nothing and the
+     dropdown renders permanently open. */
+  .moreMenu[hidden] {
+    display: none;
+  }
+
+  .moreMenu {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-3) 0 0 var(--space-4);
+    border-left: 1px solid var(--band-line);
+    margin-top: var(--space-3);
+  }
+  .moreMenu a {
+    font-family: var(--font-body);
+    font-size: 1rem;
+    color: var(--band-muted);
+  }
+
+  .chev {
+    width: 7px;
+    height: 7px;
+    border-right: 1px solid var(--band-accent);
+    border-bottom: 1px solid var(--band-accent);
+    transform: rotate(45deg) translate(-2px, -2px);
+    transition: transform var(--dur-fast) var(--ease);
+  }
+  [aria-expanded='true'] > .chev {
+    transform: rotate(-135deg) translate(-3px, -3px);
+  }
+
+  .chrome {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-4);
+    margin-top: auto;
+    padding-top: var(--space-5);
+    border-top: 1px solid var(--band-line);
+  }
+
+  .cta {
+    display: inline-flex;
+    align-items: center;
+    min-height: 48px;
+    padding-inline: var(--space-6);
+    border-radius: var(--radius-full);
+    background: var(--band-accent);
+    color: var(--band-fill-text);
+    font-family: var(--font-label);
+    font-size: 0.8125rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    text-decoration: none;
+    white-space: nowrap;
+    transition:
+      transform var(--dur-fast) var(--ease),
+      filter var(--dur-fast) var(--ease);
+  }
+  .cta:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+  }
+
+  /* --- desktop bar --- */
+  @media (min-width: 900px) {
+    .nav {
+      position: static;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: var(--space-5);
+      background: none;
+      padding: 0;
+      overflow: visible;
+      inset: auto;
+    }
+    .navList {
+      flex-direction: row;
+      align-items: center;
+      gap: var(--space-5);
+    }
+    /* Home and Contact live only in the mobile panel — this is the whole trick. */
+    .navItem.mobileOnly {
+      display: none;
+    }
+    .navList a,
+    .moreBtn {
+      font-family: var(--font-label);
+      font-size: 0.875rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      min-height: 0;
+      white-space: nowrap;
+    }
+    .hasMore {
+      position: relative;
+    }
+    .moreMenu {
+      position: absolute;
+      top: calc(100% + var(--space-4));
+      left: 50%;
+      translate: -50% 0;
+      min-width: 240px;
+      background: var(--band-surface);
+      border: 1px solid var(--band-line-accent);
+      border-radius: var(--radius-sm);
+      padding: var(--space-4);
+      margin: 0;
+      gap: var(--space-2);
+    }
+    .moreMenu a {
+      white-space: nowrap;
+    }
+    .chrome {
+      margin: 0;
+      padding: 0;
+      border: 0;
+      flex-wrap: nowrap;
+      gap: var(--space-3);
+    }
+    .cta {
+      min-height: 52px;
+      font-size: 0.75rem;
+      letter-spacing: 0.2em;
+      padding-inline: var(--space-5);
+    }
+  }
+</style>

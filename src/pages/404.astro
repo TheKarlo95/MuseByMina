@@ -1,0 +1,70 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { localeUrl } from '../lib/i18n';
+---
+
+<BaseLayout
+  locale="hr"
+  title="Stranica nije pronađena"
+  description="Tražena stranica ne postoji."
+>
+  <section class="wrap">
+    <p class="eyebrow">404</p>
+    <h1 class="display">Ova stranica još ne postoji.</h1>
+    <p class="lede">Vrati se na početnu i pronađi što tražiš.</p>
+    <a class="btn" href={localeUrl('/', 'hr')}>Početna</a>
+  </section>
+</BaseLayout>
+
+<style>
+  .wrap {
+    max-width: 1280px;
+    margin-inline: auto;
+    padding: var(--space-10) var(--space-5);
+  }
+  @media (min-width: 768px) {
+    .wrap {
+      padding: var(--space-11) var(--space-7);
+    }
+  }
+  .eyebrow {
+    font-family: var(--font-label);
+    font-weight: 300;
+    font-size: 0.75rem;
+    letter-spacing: 0.32em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+  }
+  .display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.75rem, 8vw, 5.5rem);
+    line-height: 0.96;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: var(--space-4) 0 0;
+  }
+  .lede {
+    font-size: 1.125rem;
+    color: var(--text-muted);
+    margin-top: var(--space-5);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    min-height: 48px;
+    margin-top: var(--space-7);
+    padding-inline: var(--space-6);
+    border-radius: var(--radius-full);
+    background: var(--btn-bg);
+    color: var(--btn-fg);
+    font-family: var(--font-label);
+    font-size: 0.8125rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    text-decoration: none;
+  }
+</style>

@@ -263,3 +263,25 @@
 
   color-scheme: dark;
 }
+
+
+/* ---------- 3 · fixed chrome band ----------
+   The header and footer sit on --surface-deep, which is plum-ink in BOTH themes
+   (§12), so their contents must NOT follow the page theme — a light page still
+   gets the white lockup and gold accents up there.
+
+   Naming that band as its own role set means chrome components still reference a
+   role rather than reaching for --gold or --cream directly, which keeps the
+   "never a brand colour in a component" rule intact and machine-checkable.
+   ------------------------------------------- */
+:root {
+  --band-surface:    var(--plum-ink);
+  --band-text:       var(--cream);
+  --band-muted:      rgba(247, 242, 238, .72);
+  --band-subtle:     rgba(247, 242, 238, .56);
+  --band-accent:     var(--gold);
+  --band-line:       rgba(247, 242, 238, .14);
+  --band-line-accent: rgba(200, 169, 106, .32);
+  --band-fill:       var(--gold);
+  --band-fill-text:  var(--plum);
+}

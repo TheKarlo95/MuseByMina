@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Agent-authored PRs push repeatedly; cancel superseded runs rather than queue them.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: typecheck & build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx astro check
+      - run: npm run build
+      - name: Guard the GitHub Pages 1 GB site limit
+        run: |
+          size=$(du -sm dist | cut -f1)
+          echo "dist is ${size} MB"
+          if [ "$size" -gt 900 ]; then
+            echo "::error::dist is ${size} MB — approaching the 1 GB Pages limit. Media belongs on a CDN, not in the repo."
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          retention-days: 3
+
+  a11y:
+    name: accessibility (both themes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Serve and audit
+        run: |
+          npx astro preview --port 4321 &
+          npx wait-on http://localhost:4321/MuseByMina --timeout 60000
+          npm run a11y
+
+  designsystem:
+    name: design-system compliance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node scripts/check-tokens.mjs
