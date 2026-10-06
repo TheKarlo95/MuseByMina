@@ -128,3 +128,124 @@ export function alternates(block: string): Map<string, string> {
   }
   return out;
 }
+
+const ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  '#39': "'",
+};
+
+/** Enough HTML entity decoding for attribute values Astro escapes on output. */
+function decodeEntities(text: string): string {
+  return text.replace(/&(#?\w+);/g, (whole, name: string) => ENTITIES[name] ?? whole);
+}
+
+/**
+ * The `<meta name="description">` a built page serves, decoded.
+ *
+ * Reading it out of the HTML rather than out of `src/lib/pages.ts` is the whole point:
+ * it is the second, independent renderer of the same string, so `llms.txt` can be
+ * checked against what a visitor actually gets.
+ */
+export function metaDescription(html: string): string | undefined {
+  for (const m of html.matchAll(/<meta\b[^>]*>/g)) {
+    if (!/\bname="description"/.test(m[0])) continue;
+    const content = /\bcontent="([^"]*)"/.exec(m[0])?.[1];
+    if (content !== undefined) return decodeEntities(content);
+  }
+  return undefined;
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Matches a markdown link whose target is exactly `url`, trailing slash optional.
+ *
+ * Anchored on the closing paren on purpose. A substring test would let `/` match every
+ * line in the file, and `/blog` match the `/blog/post` line — so a page could be missing
+ * from `llms.txt` entirely and still look present.
+ */
+export function markdownLinkTo(url: string): RegExp {
+  return new RegExp(`\\]\\(\\s*${escapeRegExp(url)}/?\\s*\\)`);
+}
+
+/** The description half of `- [Name](url): description`, or `undefined`. */
+export function linkDescription(line: string): string | undefined {
+  return /\]\([^)]*\):\s*(\S.*)$/.exec(line)?.[1]?.trim();
+}
+
+/** One `User-agent` record: the agents it names and the rules that apply to them. */
+export interface RobotsGroup {
+  agents: string[];
+  allow: string[];
+  disallow: string[];
+}
+
+/**
+ * robots.txt parsed into user-agent groups (RFC 9309 §2.2).
+ *
+ * Groups are what make the file mean anything: a `Disallow` only applies to the agents
+ * named in its own group. Consecutive `User-agent` lines share one group; the next
+ * `User-agent` after a rule starts a new one. Comments and unknown directives are
+ * dropped, as crawlers drop them.
+ */
+export function robotsGroups(txt: string): RobotsGroup[] {
+  const groups: RobotsGroup[] = [];
+  let current: RobotsGroup | undefined;
+  let acceptingAgents = false;
+
+  for (const raw of txt.split(/\r?\n/)) {
+    const line = raw.replace(/#.*$/, '').trim();
+    if (!line) continue;
+
+    const match = /^([A-Za-z-]+)\s*:\s*(.*)$/.exec(line);
+    if (!match) continue;
+    const field = match[1]!.toLowerCase();
+    const value = match[2]!.trim();
+
+    if (field === 'user-agent') {
+      if (!current || !acceptingAgents) {
+        current = { agents: [], allow: [], disallow: [] };
+        groups.push(current);
+        acceptingAgents = true;
+      }
+      current.agents.push(value.toLowerCase());
+      continue;
+    }
+
+    if (field !== 'allow' && field !== 'disallow') continue;
+    if (!current) continue; // A rule outside any group applies to nobody.
+    acceptingAgents = false;
+    // An empty `Disallow:` is the canonical "nothing is disallowed"; it is not a rule.
+    if (field === 'disallow' && value === '') continue;
+    current[field].push(value);
+  }
+
+  return groups;
+}
+
+/**
+ * Does a robots.txt path pattern match `path`?
+ *
+ * Patterns are prefix matches with two wildcards (RFC 9309 §2.2.3): `*` stands for any
+ * run of characters and a trailing `$` anchors the end. `/` and `/*` therefore both
+ * match every path on the site — which is the case a plain `/^Disallow:\s*\/$/` grep
+ * misses.
+ */
+export function robotsPathMatches(pattern: string, path: string): boolean {
+  if (pattern === '') return false;
+  const anchored = pattern.endsWith('$');
+  const body = anchored ? pattern.slice(0, -1) : pattern;
+  const source = body.split('*').map(escapeRegExp).join('[\\s\\S]*');
+  return new RegExp(`^${source}${anchored ? '$' : ''}`).test(path);
+}
+
+/** The group a crawler calling itself `agent` would obey, or `undefined`. */
+export function groupFor(groups: RobotsGroup[], agent: string): RobotsGroup | undefined {
+  return groups.find((g) => g.agents.includes(agent.toLowerCase()));
+}

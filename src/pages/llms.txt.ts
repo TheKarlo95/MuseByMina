@@ -10,7 +10,9 @@ import { STUDIO } from '../lib/nav';
  *
  * Same reason as `robots.txt` for generating it: every URL is absolute and the origin
  * comes from `SITE`/`BASE`. Descriptions come from `src/lib/pages.ts`, which is also
- * what the pages themselves render, so this index cannot drift from the site.
+ * what the pages themselves render, so this index cannot drift from the site — and
+ * `test/seo.test.ts` holds that to account by comparing each line below against the
+ * `<meta name="description">` in that route's built HTML, not against the registry.
  */
 const LOCALE_HEADING: Record<Locale, string> = {
   hr: 'Hrvatski (hr)',

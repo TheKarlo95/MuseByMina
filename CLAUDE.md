@@ -36,8 +36,15 @@ npm run shots      # screenshots of all theme states to /tmp/muse-shots
   shared component from `src/components/`.
 - Interactive behaviour goes in a component `<script>`; keep pages static.
 - A page's `<title>` and `description` live in `src/lib/pages.ts`, not in the page. `llms.txt`
-  publishes the same strings, so a new page must be registered there or the build fails.
-- Nothing may name the deploy host. `sitemap`, `robots.txt` and `llms.txt` all derive their
-  origin from `SITE`/`BASE`; `test/seo.test.ts` rebuilds under a second target to prove it.
+  publishes the same strings, so a new page must be registered there. **`astro build` will not
+  catch an omission** — it exits 0 and quietly leaves the page out of the index. `npm test` is
+  the gate: `test/seo.test.ts` reads the page list off `src/pages/` rather than off the
+  registry, and compares each `llms.txt` description against the `<meta name="description">`
+  in that route's built HTML — so the index cannot drift from the pages.
+- No file under `src/` or `public/` may name the deploy host; that is the tree
+  `test/seo.test.ts` walks. The host lives in exactly one place, `astro.config.mjs`, as the
+  overridable `SITE`/`BASE` default. `sitemap`, `robots.txt` and `llms.txt` all derive their
+  origin from it, and the suite rebuilds under a second target to prove a domain move is a
+  config change.
 - The theme is stamped pre-paint by an inline script (`src/lib/theme.ts`). Never move that
   into a component — it exists to prevent a flash.

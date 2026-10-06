@@ -95,8 +95,14 @@ absolute and the origin comes from `SITE`/`BASE`:
 | `robots.txt` | `src/pages/robots.txt.ts` |
 | `llms.txt` | `src/pages/llms.txt.ts`, listing each page with its own `<meta description>` |
 
-`llms.txt` descriptions come from `src/lib/pages.ts`, which is also what the pages render,
-so the index cannot drift from the site. **Add a page → add it there**, or the build fails.
+`llms.txt` descriptions come from `src/lib/pages.ts`, which is also what the pages render, so
+the index cannot drift from the site — and `test/seo.test.ts` enforces that rather than
+assuming it, comparing every `llms.txt` description against the `<meta name="description">`
+parsed out of that route's built HTML.
+
+**Add a page → add it there.** Forgetting is not a build error: `astro build` exits 0 and
+silently omits the page from both the index and the sitemap. `npm test` is what fails — it
+derives the expected page list from `src/pages/`, not from the registry.
 
 One caveat worth knowing: on the GitHub Pages project URL these land at
 `/MuseByMina/robots.txt`, not the origin root, so crawlers will not find `robots.txt` until

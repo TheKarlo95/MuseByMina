@@ -8,9 +8,15 @@ import {
   alternates,
   APEX_DEPLOY,
   buildSite,
+  groupFor,
+  linkDescription,
   locs,
+  markdownLinkTo,
+  metaDescription,
   normalise,
   PAGES_DEPLOY,
+  robotsGroups,
+  robotsPathMatches,
   urlEntries,
   type Build,
 } from './helpers/build';
@@ -26,7 +32,13 @@ import {
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PAGES_DIR = join(ROOT, 'src/pages');
 
-/** Error routes are deliberately not indexable and are not "pages" for SEO. */
+/**
+ * Error routes are deliberately not indexable and are not "pages" for SEO.
+ *
+ * Keyed by locale-independent route, so `/404` and `/en/404` are both excluded. Hardcoding
+ * the literal paths would make adding `src/pages/en/404.astro` unsatisfiable: the page
+ * exists, but `@astrojs/sitemap` is right to leave it out.
+ */
 const NOT_A_PAGE = new Set(['/404']);
 
 function walk(dir: string): string[] {
@@ -42,7 +54,7 @@ function pageRoutes(): string[] {
     .filter((f) => f.endsWith('.astro'))
     .map((f) => '/' + relative(PAGES_DIR, f).replace(/\.astro$/, '').replace(/\\/g, '/'))
     .map((r) => (r.endsWith('/index') ? r.slice(0, -'/index'.length) || '/' : r))
-    .filter((r) => !NOT_A_PAGE.has(r))
+    .filter((r) => !NOT_A_PAGE.has(routeKey(r)))
     .sort();
 }
 
@@ -65,6 +77,16 @@ function absolute(build: Build, route: string): string {
   return normalise(`${build.origin}${route === '/' ? '' : route}`);
 }
 
+/** The HTML actually published for `route`. `build.format: 'directory'`, so `/x/index.html`. */
+function builtHtml(build: Build, route: string): string {
+  return build.read(route === '/' ? 'index.html' : `${route}/index.html`);
+}
+
+/** The path a crawler would request for `route`, including the deploy base. */
+function pathOf(build: Build, route: string): string {
+  return new URL(absolute(build, route)).pathname || '/';
+}
+
 const ROUTES = pageRoutes();
 
 let pages: Build;
@@ -76,10 +98,21 @@ beforeAll(async () => {
 }, 240_000);
 
 describe('the page list these tests are built from', () => {
-  it('finds both locale homepages and excludes 404', () => {
+  it('finds both locale homepages and excludes 404 in either locale', () => {
     expect(ROUTES).toContain('/');
     expect(ROUTES).toContain('/en');
     expect(ROUTES).not.toContain('/404');
+    expect(ROUTES).not.toContain('/en/404');
+  });
+
+  it('excludes an error route in any locale, not just the unprefixed one', () => {
+    // Guards the exclusion rule itself: `src/pages/en/404.astro` does not exist yet, and
+    // adding it must not make the sitemap assertions unsatisfiable.
+    for (const notAPage of NOT_A_PAGE) {
+      for (const locale of ['hr', 'en'] as const) {
+        expect(ROUTES).not.toContain(routeIn(notAPage, locale));
+      }
+    }
   });
 });
 
@@ -150,7 +183,7 @@ describe('AC1: /sitemap-index.xml', () => {
     const entries = allUrlEntries(pages);
 
     for (const route of ROUTES) {
-      const html = pages.read(route === '/' ? 'index.html' : `${route}/index.html`);
+      const html = builtHtml(pages, route);
       const declared = new Map<string, string>();
       for (const m of html.matchAll(/<link\b[^>]*rel="alternate"[^>]*>/g)) {
         const hreflang = /hreflang="([^"]+)"/.exec(m[0])?.[1];
@@ -184,12 +217,30 @@ describe('AC2: /robots.txt', () => {
     expect(pages.has('robots.txt')).toBe(true);
   });
 
-  it('allows crawling for every user-agent', () => {
-    const txt = pages.read('robots.txt');
-    expect(txt).toMatch(/^User-agent:\s*\*$/m);
-    expect(txt).toMatch(/^Allow:\s*\/$/m);
-    // A blanket block would make the rest of the ticket pointless.
-    expect(txt).not.toMatch(/^Disallow:\s*\/\s*$/m);
+  it('has a group that applies to every user-agent', () => {
+    expect(groupFor(robotsGroups(pages.read('robots.txt')), '*')).toBeDefined();
+  });
+
+  it('lets a crawler fetch the site root', () => {
+    const wildcard = groupFor(robotsGroups(pages.read('robots.txt')), '*')!;
+    const root = pathOf(pages, '/');
+
+    // The directive is what a crawler obeys, not the line's spelling: `Disallow: /`,
+    // `Disallow: /*` and `Disallow: /M` all block the root. A line-grep for the first
+    // spelling passes a file that blocks the entire site. An *absent* rule, or a bare
+    // `Disallow:`, is the canonical "crawl everything" — neither needs an `Allow:` line.
+    const blocking = wildcard.disallow.filter((rule) => robotsPathMatches(rule, root));
+    expect(blocking, `Disallow rules blocking ${root}`).toEqual([]);
+  });
+
+  it('lets a crawler fetch every page the sitemap advertises', () => {
+    const wildcard = groupFor(robotsGroups(pages.read('robots.txt')), '*')!;
+
+    for (const route of ROUTES) {
+      const path = pathOf(pages, route);
+      const blocking = wildcard.disallow.filter((rule) => robotsPathMatches(rule, path));
+      expect(blocking, `Disallow rules blocking ${path}`).toEqual([]);
+    }
   });
 
   it('points at the sitemap index by absolute URL', () => {
@@ -208,32 +259,58 @@ describe('AC3: /llms.txt', () => {
     expect(pages.has('llms.txt')).toBe(true);
   });
 
-  it('lists every page with a non-empty description on the same line', () => {
-    const lines = pages.read('llms.txt').split('\n');
+  /**
+   * The `- [Name](url): description` lines whose link target is exactly `route`.
+   *
+   * Matched on the closing paren, not by substring. `absolute(build, '/')` is a prefix of
+   * every URL in the file, so a substring test makes the root route match the `/en` line
+   * and borrow its description — and makes `/blog` match the `/blog/post` line, so a
+   * missing page looks present. One line per route, so this asserts exactly one match.
+   */
+  function entryFor(build: Build, route: string): string {
+    const url = absolute(build, route);
+    const matching = build
+      .read('llms.txt')
+      .split('\n')
+      .filter((l) => markdownLinkTo(url).test(l));
+    expect(matching, `llms.txt lines linking to exactly ${url}`).toHaveLength(1);
+    return matching[0]!;
+  }
 
+  it('lists every page exactly once, with a one-line description', () => {
     for (const route of ROUTES) {
-      const url = absolute(pages, route);
-      const matching = lines.filter((l) => l.includes(url) || l.includes(`${url}/`));
-      expect(matching.length, `no llms.txt line for ${url}`).toBeGreaterThan(0);
+      const description = linkDescription(entryFor(pages, route));
+      expect(description, `no one-line description for ${route}`).toBeDefined();
+      expect(description!.length, `description for ${route} is a stub`).toBeGreaterThan(10);
+    }
+  });
 
-      // llms.txt format: `- [Name](url): one-line description`
-      const described = matching.find((l) => /\]\([^)]+\):\s*\S/.test(l));
-      expect(described, `no one-line description for ${url}\n${matching.join('\n')}`)
-        .toBeDefined();
-
-      const description = /\]\([^)]+\):\s*(.+)$/.exec(described!)?.[1]?.trim() ?? '';
-      expect(description.length).toBeGreaterThan(10);
-      expect(description).not.toContain('\n');
+  /**
+   * AC3's real content, and the claim `src/lib/pages.ts` exists to make: the index and the
+   * page cannot disagree. `llms.txt` and the `<head>` are two independent renderers of the
+   * same registry entry, so comparing them catches a page that stops using the registry —
+   * which nothing else here would notice. Same shape as the hreflang cross-check above.
+   */
+  it('publishes, for each page, the description that page actually serves', () => {
+    for (const route of ROUTES) {
+      const served = metaDescription(builtHtml(pages, route));
+      expect(served, `${route} serves no <meta name="description">`).toBeTruthy();
+      expect(linkDescription(entryFor(pages, route)), `llms.txt disagrees with ${route}`)
+        .toBe(served);
     }
   });
 
   it('describes a page in the language of that page', () => {
-    const txt = pages.read('llms.txt');
-    const hrLine = txt.split('\n').find((l) => l.includes(absolute(pages, '/') + ')'));
-    const enLine = txt.split('\n').find((l) => l.includes(absolute(pages, '/en') + ')'));
-    expect(hrLine, 'hr homepage line').toBeDefined();
-    expect(enLine, 'en homepage line').toBeDefined();
-    expect(hrLine).not.toEqual(enLine);
+    // Per locale, not once for the file: an index that publishes Croatian copy under its
+    // English heading is half an index. Comparing the descriptions — not the whole lines,
+    // which differ by URL whatever the copy says — is what makes this able to fail.
+    for (const key of [...new Set(ROUTES.map(routeKey))]) {
+      const hr = linkDescription(entryFor(pages, routeIn(key, 'hr')));
+      const en = linkDescription(entryFor(pages, routeIn(key, 'en')));
+      expect(hr, `hr description for ${key}`).toBeTruthy();
+      expect(en, `en description for ${key}`).toBeTruthy();
+      expect(en, `${key} reuses one locale's description for both`).not.toBe(hr);
+    }
   });
 
   it('is markdown with a title, as the llms.txt format requires', () => {
