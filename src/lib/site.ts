@@ -1,10 +1,14 @@
 /**
  * Deploy-root URLs.
  *
- * `sitemap-index.xml`, `robots.txt` and `llms.txt` all sit at the root of the build
- * output, which is the root of the *deployed* site — `/MuseByMina` on GitHub Pages
- * today, `/` once a custom domain is live. Both come from `SITE`/`BASE` in
- * `astro.config.mjs`, so nothing here may name a host.
+ * `sitemap-index.xml`, `robots.txt`, `llms.txt` and everything copied out of `public/`
+ * all sit at the root of the build output, which is the root of the *deployed* site —
+ * `/MuseByMina` on GitHub Pages today, `/` once a custom domain is live. Both come from
+ * `SITE`/`BASE` in `astro.config.mjs`, so nothing here may name a host.
+ *
+ * Asset paths are joined here rather than at the call site: `BASE_URL` has no trailing
+ * slash under `trailingSlash: 'never'`, so interpolating it — `${BASE_URL}fonts/x` —
+ * yields `/MuseByMinafonts/x`, a 404 that only shows up on the sub-path deploy (MUSE-8).
  */
 const BASE = import.meta.env.BASE_URL.replace(/\/+$/, '');
 

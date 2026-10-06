@@ -6,8 +6,9 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
@@ -62,6 +63,18 @@ export interface Build {
   read(file: string): string;
   has(file: string): boolean;
   files(): string[];
+  /** Is `file` an existing regular file? A directory is not something a browser can fetch. */
+  isFile(file: string): boolean;
+  /** Every `.html` page in the output, as output-relative paths. */
+  htmlFiles(): string[];
+}
+
+/** Every file under `dir`, recursively, as absolute paths. */
+function walkOutput(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = join(dir, entry.name);
+    return entry.isDirectory() ? walkOutput(full) : [full];
+  });
 }
 
 /**
@@ -93,7 +106,137 @@ export function buildSite(deploy: Deploy): Build {
     read: (file) => readFileSync(join(outDir, file), 'utf8'),
     has: (file) => existsSync(join(outDir, file)),
     files: () => readdirSync(outDir),
+    isFile: (file) => {
+      try {
+        return statSync(join(outDir, file)).isFile();
+      } catch {
+        return false;
+      }
+    },
+    htmlFiles: () =>
+      walkOutput(outDir)
+        .filter((f) => f.endsWith('.html'))
+        .map((f) => relative(outDir, f).replace(/\\/g, '/'))
+        .sort(),
   };
+}
+
+/**
+ * The URL space the deploy owns, with a trailing slash so it can be a `new URL` base.
+ *
+ * `https://host/MuseByMina/` on Pages, `https://host/` on an apex domain. Anything the
+ * host serves lives under this prefix and nothing else does.
+ */
+function deployRoot(build: Build): URL {
+  return new URL(`${build.origin}/`);
+}
+
+/** A subresource a built page tells the browser to fetch. */
+export interface AssetRef {
+  /** Where it came from, for failure messages — e.g. `<link rel="preload">`. */
+  source: string;
+  /** The attribute value as emitted, undecoded. */
+  url: string;
+}
+
+/**
+ * `<link>` rel values that name a file the deploy has to serve.
+ *
+ * Deliberately not `canonical`, `alternate` or an `<a href>`: those are page URLs, which
+ * are the trailing-slash question (MUSE-9) rather than the does-this-file-exist question.
+ */
+const ASSET_RELS = new Set([
+  'preload',
+  'modulepreload',
+  'prefetch',
+  'stylesheet',
+  'icon',
+  'apple-touch-icon',
+  'mask-icon',
+  'manifest',
+]);
+
+function attr(tag: string, name: string): string | undefined {
+  return new RegExp(`\\b${name}="([^"]*)"`).exec(tag)?.[1];
+}
+
+/**
+ * Every subresource URL in a built page, read off the markup.
+ *
+ * Derived from the HTML rather than from a list of the tags we happen to emit today, so
+ * the next asset reference anyone adds is covered the day it lands.
+ */
+export function assetRefs(html: string): AssetRef[] {
+  const refs: AssetRef[] = [];
+
+  for (const m of html.matchAll(/<link\b[^>]*>/g)) {
+    const rels = (attr(m[0], 'rel') ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+    const named = rels.filter((rel) => ASSET_RELS.has(rel));
+    const href = attr(m[0], 'href');
+    if (named.length === 0 || href === undefined) continue;
+    refs.push({ source: `<link rel="${rels.join(' ')}">`, url: href });
+  }
+
+  for (const [tag, pattern] of [
+    ['script', /<script\b[^>]*>/g],
+    ['img', /<img\b[^>]*>/g],
+    ['source', /<source\b[^>]*>/g],
+  ] as const) {
+    for (const m of html.matchAll(pattern)) {
+      const url = attr(m[0], 'src');
+      if (url !== undefined) refs.push({ source: `<${tag} src>`, url });
+    }
+  }
+
+  return refs;
+}
+
+/** `href` of every `<link>` carrying exactly `rel`, in document order. */
+export function linkHrefs(html: string, rel: string): string[] {
+  return assetRefs(html)
+    .filter((ref) => ref.source === `<link rel="${rel}">`)
+    .map((ref) => ref.url);
+}
+
+/**
+ * Is `url` something this deploy itself must serve?
+ *
+ * False for another origin, a `data:` URI and a bare fragment — real references the suite
+ * has no business resolving against `dist`.
+ */
+export function isOwnAsset(build: Build, url: string): boolean {
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.startsWith('#')) return false;
+  let resolved: URL;
+  try {
+    resolved = new URL(trimmed, deployRoot(build));
+  } catch {
+    return false;
+  }
+  if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return false;
+  return resolved.origin === deployRoot(build).origin;
+}
+
+/**
+ * The output file `url` is served from, or `undefined` if nothing serves it.
+ *
+ * Answers the question the way the host does: resolve the reference, then look it up
+ * *under the deploy base path*. A same-origin URL outside that prefix — `/MuseByMina…`
+ * rather than `/MuseByMina/…`, which is MUSE-8 — is a 404 however many matching bytes
+ * sit in `dist`, so it gets no file at all rather than one that happens to exist.
+ */
+export function assetFile(build: Build, url: string): string | undefined {
+  const root = deployRoot(build);
+  let resolved: URL;
+  try {
+    resolved = new URL(url.trim(), root);
+  } catch {
+    return undefined;
+  }
+  if (resolved.origin !== root.origin) return undefined;
+  if (!resolved.pathname.startsWith(root.pathname)) return undefined;
+  const path = decodeURIComponent(resolved.pathname.slice(root.pathname.length));
+  return path === '' ? 'index.html' : path;
 }
 
 /** Trailing slashes are not semantic here; the site sets `trailingSlash: 'never'`. */

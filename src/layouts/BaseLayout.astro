@@ -9,6 +9,7 @@ import {
   routeKey,
   type Locale,
 } from '../lib/i18n';
+import { rootPath } from '../lib/site';
 import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
 import '../styles/globals.css';
@@ -66,16 +67,19 @@ const skipLabel = locale === 'hr' ? 'Preskoči na sadržaj' : 'Skip to content';
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#420535" />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F7F2EE" />
 
+    {/* `rootPath` joins the deploy base; `BASE_URL` has no trailing slash under
+        `trailingSlash: 'never'`, so interpolating it directly emits
+        `/MuseByMinafonts/…` and the preload 404s on the sub-path deploy (MUSE-8). */}
     <link
       rel="preload"
-      href={`${import.meta.env.BASE_URL}fonts/cormorant-garamond-latin.woff2`.replace('//', '/')}
+      href={rootPath('fonts/cormorant-garamond-latin.woff2')}
       as="font"
       type="font/woff2"
       crossorigin="anonymous"
     />
     <link
       rel="preload"
-      href={`${import.meta.env.BASE_URL}fonts/inter-400-600-latin.woff2`.replace('//', '/')}
+      href={rootPath('fonts/inter-400-600-latin.woff2')}
       as="font"
       type="font/woff2"
       crossorigin="anonymous"
