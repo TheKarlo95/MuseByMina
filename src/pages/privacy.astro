@@ -1,0 +1,11 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Privacy from '../components/Privacy.astro';
+import { pageMeta } from '../lib/pages';
+
+const meta = pageMeta('/privacy');
+---
+
+<BaseLayout locale="hr" title={meta.title.hr} description={meta.description.hr}>
+  <Privacy locale="hr" />
+</BaseLayout>

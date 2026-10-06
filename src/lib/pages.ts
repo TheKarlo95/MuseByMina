@@ -45,6 +45,30 @@ export const PAGES: PageMeta[] = [
       en: 'The weekly bachata class schedule in Zagreb — day, time, level and instructor for traditional, moderna and sensual bachata.',
     },
   },
+  {
+    route: '/contact',
+    name: { hr: 'Kontakt', en: 'Contact' },
+    title: {
+      hr: 'Prijava za probni sat — Muse by Mina',
+      en: 'Trial class sign-up — Muse by Mina',
+    },
+    description: {
+      hr: 'Prijavi se na besplatni probni sat bachate u Zagrebu. Ispuni obrazac ili nam piši — javljamo se u roku od jednog radnog dana.',
+      en: 'Sign up for a free bachata trial class in Zagreb. Fill in the form or write to us — we answer within one working day.',
+    },
+  },
+  {
+    route: '/privacy',
+    name: { hr: 'Izjava o privatnosti', en: 'Privacy notice' },
+    title: {
+      hr: 'Izjava o privatnosti — Muse by Mina',
+      en: 'Privacy notice — Muse by Mina',
+    },
+    description: {
+      hr: 'Što obrazac za probni sat prikuplja, zašto, kome se prenosi, koliko dugo ga čuvamo i koja su tvoja prava prema GDPR-u.',
+      en: 'What the trial-class form collects, why, who it is passed to, how long we keep it and what your rights are under the GDPR.',
+    },
+  },
 ];
 
 export function pageMeta(route: string): PageMeta {

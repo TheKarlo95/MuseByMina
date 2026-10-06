@@ -30,6 +30,14 @@ jobs:
         env:
           SITE: https://thekarlo95.github.io
           BASE: /MuseByMina
+          # The Formspark endpoint for the trial-class form (MUSE-7). The form id ships
+          # inside every page, so this is a repository *variable*, not a secret — but it
+          # is still not committed, so the form can be repointed without a code change.
+          # Set it at Settings → Secrets and variables → Actions → Variables:
+          #   PUBLIC_FORM_ENDPOINT = https://submit-form.com/<form-id>
+          # Until it is set the form renders and validates, but reports that it could not
+          # deliver and offers the studio inbox instead.
+          PUBLIC_FORM_ENDPOINT: ${{ vars.PUBLIC_FORM_ENDPOINT }}
         run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

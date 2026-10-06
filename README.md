@@ -78,8 +78,9 @@ src/
   lib/          theme.ts (pre-paint script), i18n.ts, lang.ts, nav.ts,
                 pages.ts (per-route title + description), site.ts (deploy-root URLs),
                 schedule.ts (class model, locale wording, Croatian pluralisation)
-  pages/        index.astro + schedule.astro, mirrored under en/; thin wrappers
-                over components. robots.txt.ts + llms.txt.ts; generated, not static
+                forms.ts (trial-form fields, endpoint and HR/EN copy)
+  pages/        thin wrappers over components, one per locale
+                robots.txt.ts + llms.txt.ts; generated, not static
   styles/       globals.css → fonts.css + tokens.css + base.css
 public/fonts/   6 variable woff2, latin + latin-ext for Croatian
 scripts/        a11y, design-system, screenshot and schedule-UX gates
@@ -121,6 +122,32 @@ One caveat worth knowing: on the GitHub Pages project URL these land at
 `/MuseByMina/robots.txt`, not the origin root, so crawlers will not find `robots.txt` until
 the custom domain is live and `BASE=/`. Project Pages cannot serve the origin root at all —
 this is not something the build can fix.
+
+## The trial-class form
+
+`src/components/TrialForm.astro` is the site's one conversion path. It renders in two
+places — the homepage `#trial` band and `/contact/` — from a single component, so the two
+cannot drift apart. Field list and copy live in `src/lib/forms.ts`.
+
+There is no backend, so submissions go to **Formspark** (`submit-form.com`), chosen because
+it keeps submission data inside the EEA — Ireland and Germany — and its DPA is part of the
+terms rather than a paid add-on. Spam is handled by a `_gotcha` honeypot plus Formspark's
+own filtering: no CAPTCHA script, no third-party request on page load, and therefore no
+cookie banner.
+
+```bash
+PUBLIC_FORM_ENDPOINT=https://submit-form.com/<form-id> npm run build
+```
+
+The form id ships inside every page, so it is configuration rather than a secret — hence the
+`PUBLIC_` prefix, and hence nothing to keep out of the repo. **It is not set by default.**
+Unset, the form still renders, still validates and is still completable by keyboard;
+submitting reports that it could not be delivered and offers the studio inbox instead. CI and
+`npm test` build without it on purpose.
+
+`/privacy/` is the notice the form links to. It is footer-only and deliberately absent from
+the nav: it exists because the form collects a name, an email address and a phone number,
+which is personal data under the GDPR whether or not this site stores any of it.
 
 ## Deploying
 

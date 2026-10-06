@@ -1,0 +1,11 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Contact from '../components/Contact.astro';
+import { pageMeta } from '../lib/pages';
+
+const meta = pageMeta('/contact');
+---
+
+<BaseLayout locale="hr" title={meta.title.hr} description={meta.description.hr}>
+  <Contact locale="hr" />
+</BaseLayout>

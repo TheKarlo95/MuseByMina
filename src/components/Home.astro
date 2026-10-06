@@ -1,4 +1,5 @@
 ---
+import TrialForm from './TrialForm.astro';
 import { localeUrl, type Locale } from '../lib/i18n';
 import { CTA, STUDIO } from '../lib/nav';
 
@@ -22,7 +23,6 @@ const t = {
     openMaps: 'Otvori u Google Maps',
     trial: 'Dođi na probni sat',
     trialLede: 'Prvi sat je besplatan. Javi nam se i dogovorit ćemo termin.',
-    soon: 'Obrazac stiže uskoro — do tada nam piši na',
   },
   en: {
     eyebrow: 'Dance studio · Zagreb',
@@ -38,7 +38,6 @@ const t = {
     openMaps: 'Open in Google Maps',
     trial: 'Come to a trial class',
     trialLede: 'Your first class is free. Get in touch and we will find you a slot.',
-    soon: 'A form is coming — until then, write to us at',
   },
 }[locale];
 
@@ -116,9 +115,12 @@ const flavours =
   <div class="wrap">
     <p class="eyebrow">{t.trial}</p>
     <h2 class="displayM">{t.trialLede}</h2>
-    <p class="lede">
-      {t.soon} <a class="inlineLink" href={`mailto:${STUDIO.email}`}>{STUDIO.email}</a>.
-    </p>
+    {/*
+      MUSE-7: the form itself, not a "coming soon" email address. Every CTA on the site
+      points here, so this is the conversion path. `:target { scroll-margin-top }` in
+      base.css is what keeps the landing clear of the fixed header.
+    */}
+    <TrialForm locale={locale} />
   </div>
 </section>
 
@@ -291,9 +293,5 @@ const flavours =
     font-size: 0.9375rem;
     color: var(--text-muted);
     margin-top: var(--space-3);
-  }
-
-  .inlineLink {
-    color: var(--accent);
   }
 </style>
