@@ -93,5 +93,26 @@ anything you are unsure about. Then stop.
 **A human merges.** Agents do not merge, and do not try to approve — Anthropic blocks
 self-approval by design, and the merge decision is deliberately yours.
 
-After a merge, QA runs against the live site and the ticket moves QA Testing → QA Approved →
-Done.
+## 8. After the merge — QA is a separate pass
+
+On merge the ticket moves to **QA Ready** and waits there. QA Ready is a queue, not a
+status: it means "deployed and nobody has verified it yet".
+
+**Do not QA your own work inline.** Spawn a fresh subagent for it, with no knowledge of how
+the thing was built. Whoever just implemented a change is the worst person to check it —
+they will verify what they intended rather than what shipped, and they already believe it
+works. The separation is the entire point of the stage.
+
+The QA subagent:
+
+1. Moves the ticket to **QA Testing**.
+2. Verifies **against the deployed site**, not a local build — the artefact a visitor gets
+   is the only one that counts. A green CI run is not QA.
+3. Works from the ticket's acceptance criteria alone, re-reading them from Linear rather
+   than from the PR description. Checking against the PR means checking the work against
+   its own author's account of itself.
+4. Looks for collateral damage outside the ticket's scope too. Two live defects on this
+   project were found exactly that way, by a reviewer probing the deployed site while
+   checking something unrelated.
+5. On pass → **QA Approved** → **Done**. On fail → back to **Todo** with a comment saying
+   what broke, or a new ticket if it is pre-existing rather than a regression.
