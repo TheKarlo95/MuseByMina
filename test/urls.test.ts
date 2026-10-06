@@ -163,7 +163,9 @@ describe('AC1: declared canonicals are non-redirecting', () => {
   }
 
   it('every indexable page declares a canonical, so the check above is not vacuous', () => {
-    const indexable = pages.htmlFiles().filter((f) => f !== '404.html');
+    // Any locale's error route, so adding `src/pages/en/404.astro` stays satisfiable —
+    // the same reasoning as NOT_A_PAGE in seo.test.ts.
+    const indexable = pages.htmlFiles().filter((f) => !f.endsWith('404.html'));
     expect(indexable.length).toBeGreaterThan(0);
     for (const page of indexable) {
       expect(canonicalOf(pages.read(page)), `${page} declares no canonical`).toBeDefined();
