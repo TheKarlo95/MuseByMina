@@ -1,0 +1,708 @@
+---
+import {
+  FORM_COPY,
+  FORM_ENDPOINT,
+  FORM_FIELDS,
+  HONEYPOT_FIELD,
+  requiredMessage,
+} from '../lib/forms';
+import { localeUrl, type Locale } from '../lib/i18n';
+import { STUDIO } from '../lib/nav';
+
+/**
+ * The trial-class form — the site's one conversion path, rendered identically at
+ * `/#trial` and on `/contact` so the two cannot drift.
+ *
+ * Shape and behaviour come from design system §7.2 and §11.5: a visible label above
+ * every field, transparent fields with a bottom rule only, and errors that carry an icon
+ * and words rather than a colour. Validation is ours rather than the browser's, because
+ * a native validation bubble cannot be styled, is announced inconsistently, and vanishes
+ * the moment focus moves — none of which is acceptable on the page that decides whether
+ * someone turns up to class.
+ *
+ * Progressive enhancement: the `<form>` has a real `action`/`method`, so with JavaScript
+ * off it still posts and the provider shows its own confirmation. The in-page
+ * confirmation, the inline errors and the honeypot short-circuit are all the enhanced
+ * path. See the `<noscript>` note for what a visitor without JS is told.
+ *
+ * The copy lives in `src/lib/forms.ts` and reaches the browser as `data-msg-*`
+ * attributes: that keeps the `<script>` locale-agnostic (so it stays bundled and
+ * type-checked, unlike a `define:vars` script) and keeps one HR/EN table to review.
+ */
+interface Props {
+  locale: Locale;
+}
+const { locale } = Astro.props;
+const copy = FORM_COPY[locale];
+
+const mailto = `mailto:${STUDIO.email}`;
+const privacyHref = localeUrl('/privacy', locale);
+---
+
+<div class="formBlock" data-form-wrap>
+  <form
+    class="form"
+    data-trial-form
+    aria-label={copy.formLabel}
+    method="post"
+    action={FORM_ENDPOINT || undefined}
+    data-endpoint={FORM_ENDPOINT}
+    data-msg-invalid={copy.invalid}
+    data-msg-sending={copy.sending}
+    data-msg-submit={copy.submit}
+    data-msg-fail-title={copy.failTitle}
+    data-msg-fail-body={copy.failBody}
+    novalidate
+  >
+    {/*
+      The honeypot. Inside a `hidden` wrapper rather than offscreen, so it is out of the
+      accessibility tree and out of the tab order entirely — an offscreen decoy with a
+      real label is a trap for screen-reader users. A bot that fills every input it finds
+      still fills this one, and both this component and Formspark drop the submission.
+    */}
+    <div hidden>
+      <label for="trial-honeypot">{copy.honeypotLabel}</label>
+      <input
+        id="trial-honeypot"
+        type="text"
+        name={HONEYPOT_FIELD}
+        value=""
+        tabindex="-1"
+        autocomplete="off"
+        data-honeypot
+      />
+    </div>
+
+    <div class="grid">
+      {
+        FORM_FIELDS.map((field) => {
+          const id = `trial-${field.name}`;
+          const hint = copy.hints[field.name];
+          return (
+            <div class:list={['field', field.kind === 'textarea' && 'wide']}>
+              <label class="label" for={id}>
+                {copy.labels[field.name]}
+                {!field.required && <span class="optional">({copy.optional})</span>}
+              </label>
+
+              {hint && (
+                <p class="hint" id={`${id}-hint`}>
+                  {hint}
+                </p>
+              )}
+
+              {field.kind === 'select' ? (
+                <div class="selectWrap">
+                  <select
+                    class="control inSelect"
+                    id={id}
+                    name={field.name}
+                    data-control
+                    aria-describedby={hint ? `${id}-hint` : undefined}
+                    data-msg-required={requiredMessage(copy, field.name)}
+                    data-msg-toolong={copy.tooLong}
+                  >
+                    {copy.levels.map((option) => (
+                      <option value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  <span class="chev" aria-hidden="true" />
+                </div>
+              ) : field.kind === 'textarea' ? (
+                <textarea
+                  class="control area"
+                  id={id}
+                  name={field.name}
+                  rows="4"
+                  maxlength={field.maxlength}
+                  data-control
+                  aria-describedby={hint ? `${id}-hint` : undefined}
+                  data-msg-required={requiredMessage(copy, field.name)}
+                  data-msg-toolong={copy.tooLong}
+                />
+              ) : (
+                <input
+                  class="control"
+                  id={id}
+                  name={field.name}
+                  type={field.kind}
+                  required={field.required || undefined}
+                  autocomplete={field.autocomplete}
+                  maxlength={field.maxlength}
+                  data-control
+                  aria-describedby={hint ? `${id}-hint` : undefined}
+                  data-msg-required={requiredMessage(copy, field.name)}
+                  data-msg-format={copy.format[field.name]}
+                  data-msg-toolong={copy.tooLong}
+                />
+              )}
+
+              {/*
+                Icon plus words, never the colour on its own (§7.2, §11.5). The icon is in
+                the markup from the start so it can never be the half that is forgotten;
+                the script only fills in the text and unhides the row.
+              */}
+              <p class="error" id={`${id}-error`} data-error-for={field.name} hidden>
+                <svg
+                  class="errorIcon"
+                  viewBox="0 0 16 16"
+                  width="15"
+                  height="15"
+                  aria-hidden="true"
+                  focusable="false"
+                >
+                  <path
+                    d="M8 1.6 15.1 14.2H.9L8 1.6Z"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.3"
+                    stroke-linejoin="round"
+                  />
+                  <path d="M8 5.9v3.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+                  <circle cx="8" cy="11.9" r="0.85" fill="currentColor" />
+                </svg>
+                <span data-error-text />
+              </p>
+            </div>
+          );
+        })
+      }
+    </div>
+
+    {/*
+      GDPR Art. 13 in one sentence, where the data is actually being asked for. There is
+      deliberately no consent tick-box: replying to an enquiry is Art. 6(1)(b)/(f), and a
+      box you cannot decline and still get an answer is not consent.
+    */}
+    <p class="privacy" data-privacy-note>
+      {copy.privacy}{' '}
+      <a class="privacyLink" href={privacyHref} data-privacy-link>{copy.privacyLink}</a>
+    </p>
+
+    <div class="actions">
+      <button class="submit" id="trial-submit" type="submit" data-submit>
+        <span data-submit-label>{copy.submit}</span>
+      </button>
+    </div>
+
+    <div class="status" data-form-status role="alert" hidden>
+      <svg
+        class="statusIcon"
+        viewBox="0 0 16 16"
+        width="17"
+        height="17"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <path
+          d="M8 1.6 15.1 14.2H.9L8 1.6Z"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.3"
+          stroke-linejoin="round"
+        />
+        <path d="M8 5.9v3.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+        <circle cx="8" cy="11.9" r="0.85" fill="currentColor" />
+      </svg>
+      <div>
+        <p class="statusTitle" data-status-title></p>
+        <p class="statusText" data-status-body hidden></p>
+        <p class="statusMail" data-fail-mail hidden>
+          <a href={mailto}>{STUDIO.email}</a>
+        </p>
+        {/* What actually failed. "Something went wrong" is not an explanation. */}
+        <p class="statusDetail" data-fail-detail hidden></p>
+      </div>
+    </div>
+  </form>
+
+  <div class="sent" id="trial-sent" data-sent role="status" tabindex="-1" hidden>
+    <svg
+      class="sentIcon"
+      viewBox="0 0 16 16"
+      width="26"
+      height="26"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        d="M2.2 8.6 6 12.4l7.8-8.8"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.4"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+    <h3 class="sentTitle">{copy.sentTitle}</h3>
+    <p class="sentBody">{copy.sentBody}</p>
+  </div>
+
+  <noscript>
+    <p class="noscript">
+      {copy.noscript}{' '}
+      <a class="privacyLink" href={mailto}>{STUDIO.email}</a>
+    </p>
+  </noscript>
+</div>
+
+<script>
+  type Control = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+
+  /**
+   * Deliberately permissive. A validator that rejects a deliverable address costs a
+   * student; one that accepts an undeliverable one costs a bounced email. `a@b.co` is the
+   * shortest thing worth accepting, and nothing short of sending mail can do better.
+   */
+  const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  /** Digits, spaces and the punctuation Croatian numbers are actually written with. */
+  const PHONE = /^[+()\d\s./-]{6,}$/;
+
+  for (const form of document.querySelectorAll<HTMLFormElement>('[data-trial-form]')) {
+    const wrap = form.closest<HTMLElement>('[data-form-wrap]');
+    const sent = wrap?.querySelector<HTMLElement>('[data-sent]');
+    const honeypot = form.querySelector<HTMLInputElement>('[data-honeypot]');
+    const controls = [...form.querySelectorAll<Control>('[data-control]')];
+    const submit = form.querySelector<HTMLButtonElement>('[data-submit]');
+    const submitLabel = form.querySelector<HTMLElement>('[data-submit-label]');
+    const status = form.querySelector<HTMLElement>('[data-form-status]');
+    const statusTitle = form.querySelector<HTMLElement>('[data-status-title]');
+    const statusBody = form.querySelector<HTMLElement>('[data-status-body]');
+    const statusDetail = form.querySelector<HTMLElement>('[data-fail-detail]');
+    const statusMail = form.querySelector<HTMLElement>('[data-fail-mail]');
+
+    if (!sent || !submit || !submitLabel || !status || !statusTitle) continue;
+
+    const errorBox = (control: Control): HTMLElement | null =>
+      form.querySelector<HTMLElement>(`[data-error-for="${control.name}"]`);
+
+    /** The message `control` should be showing, or `null` if it is fine. */
+    const messageFor = (control: Control): string | null => {
+      const value = control.value.trim();
+      if (!value) return control.required ? (control.dataset.msgRequired ?? '') : null;
+
+      const format = control.dataset.msgFormat;
+      const kind = control.getAttribute('type');
+      if (format && kind === 'email' && !EMAIL.test(value)) return format;
+      if (format && kind === 'tel' && !PHONE.test(value)) return format;
+
+      const max = Number(control.getAttribute('maxlength') ?? '0');
+      if (max > 0 && value.length > max) return control.dataset.msgTooLong ?? '';
+      return null;
+    };
+
+    /**
+     * Show or clear a field's error.
+     *
+     * `aria-describedby` is edited rather than set, so the error joins the hint instead of
+     * replacing it — and is removed again when the field is corrected, which is what stops
+     * a screen reader reading a stale error on a field that is now valid.
+     */
+    const setError = (control: Control, message: string | null): void => {
+      const box = errorBox(control);
+      if (!box) return;
+      const text = box.querySelector<HTMLElement>('[data-error-text]');
+      const others = (control.getAttribute('aria-describedby') ?? '')
+        .split(/\s+/)
+        .filter((id) => id && id !== box.id);
+
+      if (message) {
+        if (text) text.textContent = message;
+        box.hidden = false;
+        control.setAttribute('aria-invalid', 'true');
+        control.setAttribute('aria-describedby', [...others, box.id].join(' '));
+        return;
+      }
+
+      box.hidden = true;
+      if (text) text.textContent = '';
+      control.removeAttribute('aria-invalid');
+      if (others.length > 0) control.setAttribute('aria-describedby', others.join(' '));
+      else control.removeAttribute('aria-describedby');
+    };
+
+    const hideStatus = (): void => {
+      status.hidden = true;
+    };
+
+    /**
+     * Raise the single form-level alert.
+     *
+     * Hidden first, then shown: `role="alert"` only announces on a change, and a second
+     * identical failure has to be announced too.
+     */
+    const showStatus = (
+      title: string,
+      body?: string,
+      detail?: string,
+      offerEmail = false,
+    ): void => {
+      status.hidden = true;
+      statusTitle.textContent = title;
+      if (statusBody) {
+        statusBody.textContent = body ?? '';
+        statusBody.hidden = !body;
+      }
+      if (statusDetail) {
+        statusDetail.textContent = detail ?? '';
+        statusDetail.hidden = !detail;
+      }
+      if (statusMail) statusMail.hidden = !offerEmail;
+      status.hidden = false;
+    };
+
+    const setBusy = (busy: boolean): void => {
+      submit.disabled = busy;
+      form.setAttribute('aria-busy', String(busy));
+      submitLabel.textContent = busy
+        ? (form.dataset.msgSending ?? '')
+        : (form.dataset.msgSubmit ?? '');
+    };
+
+    const showSent = (): void => {
+      hideStatus();
+      form.hidden = true;
+      sent.hidden = false;
+      sent.scrollIntoView({ block: 'center' });
+      // Focus follows, or a keyboard user is left on a button that no longer exists.
+      sent.focus({ preventScroll: true });
+    };
+
+    const send = async (): Promise<void> => {
+      hideStatus();
+
+      // A bot that filled the decoy sees exactly what a person sees, and nothing is
+      // forwarded. Telling it that it was caught only teaches it to stop filling the field.
+      if (honeypot && honeypot.value.trim() !== '') {
+        showSent();
+        return;
+      }
+
+      let firstInvalid: Control | null = null;
+      for (const control of controls) {
+        const message = messageFor(control);
+        setError(control, message);
+        if (message && !firstInvalid) firstInvalid = control;
+      }
+      if (firstInvalid) {
+        showStatus(form.dataset.msgInvalid ?? '');
+        firstInvalid.focus();
+        return;
+      }
+
+      const payload: Record<string, string> = {};
+      for (const [key, value] of new FormData(form).entries()) {
+        if (typeof value === 'string') payload[key] = value;
+      }
+
+      setBusy(true);
+      try {
+        const endpoint = form.dataset.endpoint ?? '';
+        if (!endpoint) throw new Error('PUBLIC_FORM_ENDPOINT is not configured');
+
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status} ${response.statusText}`.trim());
+        }
+        showSent();
+      } catch (error) {
+        // Nothing is cleared: every answer is still in the form, ready for a retry.
+        showStatus(
+          form.dataset.msgFailTitle ?? '',
+          form.dataset.msgFailBody ?? '',
+          error instanceof Error ? error.message : String(error),
+          true,
+        );
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      void send();
+    });
+
+    // Only ever relaxes a field that is already flagged. Validating as someone types for
+    // the first time means telling them their half-typed address is wrong.
+    for (const control of controls) {
+      const revalidate = (): void => {
+        if (control.getAttribute('aria-invalid') === 'true') {
+          setError(control, messageFor(control));
+        }
+      };
+      control.addEventListener('input', revalidate);
+      control.addEventListener('change', revalidate);
+      control.addEventListener('blur', revalidate);
+    }
+  }
+</script>
+
+<style>
+  /* `[hidden]` is a UA rule, so any author `display` here would silently beat it and
+     render the confirmation and every error permanently open. */
+  .form[hidden],
+  .status[hidden],
+  .error[hidden],
+  .sent[hidden],
+  .statusText[hidden],
+  .statusDetail[hidden],
+  .statusMail[hidden] {
+    display: none;
+  }
+
+  .formBlock {
+    margin-top: var(--space-7);
+    max-width: 680px;
+  }
+
+  .form {
+    display: grid;
+    gap: var(--space-6);
+  }
+
+  .grid {
+    display: grid;
+    gap: var(--space-5) var(--space-6);
+  }
+  @media (min-width: 640px) {
+    .grid {
+      grid-template-columns: 1fr 1fr;
+    }
+    .wide {
+      grid-column: 1 / -1;
+    }
+  }
+
+  .field {
+    display: grid;
+    align-content: start;
+  }
+
+  .label {
+    font-family: var(--font-label);
+    font-size: 0.6875rem;
+    letter-spacing: 0.2em;
+    /* Č Ć Ž Š carry marks above the cap line — 1.4 is the floor in Croatian (§4.6) */
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  /* Lower case and untracked, so it reads as an aside rather than a second label. */
+  .optional {
+    margin-left: 0.5ch;
+    font-size: 0.6875rem;
+    letter-spacing: 0.04em;
+    text-transform: none;
+    color: var(--text-subtle);
+  }
+
+  .hint {
+    margin-top: var(--space-2);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--text-subtle);
+    max-width: 44ch;
+  }
+
+  /* Design system §7.2: transparent, bottom border only, square corners, 48px tall. */
+  .control {
+    width: 100%;
+    min-height: 48px;
+    margin-top: var(--space-2);
+    padding: var(--space-2) 0;
+    font-family: var(--font-body);
+    font-size: 1rem;
+    line-height: 1.5;
+    color: var(--text);
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: var(--radius-none);
+    appearance: none;
+    transition: border-color var(--dur-fast) var(--ease);
+  }
+  .control:hover {
+    border-bottom-color: var(--line-accent);
+  }
+  /* §7.2 again: a 2px accent bottom border *plus* the standard §11.2 ring. The radius is
+     re-flattened because base.css rounds the generic ring to 2px, and these corners are
+     square. `padding-bottom` absorbs the extra border so focus does not shift the layout. */
+  .control:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-none);
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: calc(var(--space-2) - 1px);
+  }
+
+  .area {
+    min-height: 120px;
+    line-height: 1.6;
+    resize: vertical;
+  }
+
+  .selectWrap {
+    position: relative;
+    display: grid;
+  }
+  .inSelect {
+    padding-right: var(--space-6);
+  }
+  .chev {
+    position: absolute;
+    right: var(--space-2);
+    bottom: 18px;
+    width: 7px;
+    height: 7px;
+    border-right: 1px solid var(--accent);
+    border-bottom: 1px solid var(--accent);
+    transform: rotate(45deg);
+    pointer-events: none;
+  }
+
+  .error {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--error);
+    max-width: 48ch;
+  }
+  .errorIcon {
+    flex: none;
+    margin-top: 3px;
+  }
+
+  .privacy {
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--text-subtle);
+    max-width: 62ch;
+  }
+  .privacyLink {
+    color: var(--accent);
+    text-underline-offset: 3px;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-4);
+  }
+
+  /* §7.5 primitive. No width and no `white-space: nowrap`: Croatian runs 20–25% longer
+     than English (§10), so the label decides the size, in both directions. */
+  .submit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+    padding-inline: var(--space-6);
+    border: 1px solid transparent;
+    border-radius: var(--radius-full);
+    background: var(--btn-bg);
+    color: var(--btn-fg);
+    font-family: var(--font-label);
+    font-size: 0.8125rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition:
+      transform var(--dur-fast) var(--ease),
+      filter var(--dur-fast) var(--ease);
+  }
+  @media (min-width: 768px) {
+    .submit {
+      min-height: 56px;
+    }
+  }
+  .submit:hover:not(:disabled) {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+  }
+  .submit:disabled {
+    opacity: 0.4;
+    cursor: progress;
+  }
+
+  /* No drop shadows in this system — a hairline box carries the weight (§5, §6.6). */
+  .status {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-5);
+    border: 1px solid var(--error);
+    border-radius: var(--radius-none);
+  }
+  .statusIcon {
+    flex: none;
+    margin-top: 2px;
+    color: var(--error);
+  }
+  .statusTitle {
+    font-family: var(--font-label);
+    font-size: 0.875rem;
+    letter-spacing: 0.08em;
+    line-height: 1.4;
+    color: var(--error);
+  }
+  .statusText {
+    margin-top: var(--space-2);
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--text);
+  }
+  .statusMail {
+    margin-top: var(--space-1);
+    font-size: 0.875rem;
+  }
+  .statusMail a {
+    color: var(--accent);
+  }
+  .statusDetail {
+    margin-top: var(--space-3);
+    font-family: var(--font-label);
+    font-size: 0.6875rem;
+    letter-spacing: 0.12em;
+    line-height: 1.4;
+    color: var(--text-subtle);
+  }
+
+  .sent {
+    display: grid;
+    justify-items: start;
+    gap: var(--space-3);
+    padding: var(--space-6);
+    border: 1px solid var(--line-accent);
+    border-radius: var(--radius-sm);
+  }
+  .sentIcon {
+    color: var(--success);
+  }
+  .sentTitle {
+    font-family: var(--font-display);
+    /* Cormorant never below 26px — its đ crossbar vanishes. 1.625rem is the floor. */
+    font-size: clamp(1.625rem, 3vw, 2.125rem);
+    line-height: 1.15;
+  }
+  .sentBody {
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+  }
+
+  .noscript {
+    margin-top: var(--space-5);
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+  }
+</style>

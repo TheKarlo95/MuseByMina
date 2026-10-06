@@ -1,0 +1,235 @@
+---
+import { localeUrl, type Locale } from '../lib/i18n';
+import { STUDIO } from '../lib/nav';
+
+/**
+ * `/privacy` — the notice the trial form has to be able to link to.
+ *
+ * Deliberately small, and deliberately not in the nav: it is a footnote the form points
+ * at, not a destination. It exists because the form asks for a name, an email address and
+ * a phone number, which is personal data under the GDPR whether or not this site stores
+ * any of it — an inbox is processing, and the studio is in Zagreb.
+ *
+ * It describes what the site actually does, not what a template says a privacy policy
+ * says: no analytics, no cookies, one processor, one inbox. If any of that changes, this
+ * page changes with it.
+ */
+interface Props {
+  locale: Locale;
+}
+const { locale } = Astro.props;
+
+const t = {
+  hr: {
+    eyebrow: 'Kratko i bez pravnog žargona',
+    h1: 'Izjava o privatnosti',
+    lede:
+      'Ova stranica nema analitiku, nema reklamne skripte i ne postavlja kolačiće. Jedini osobni podaci koje primamo su oni koje sama ili sam upišeš u obrazac za probni sat.',
+    sections: [
+      {
+        h: 'Tko obrađuje podatke',
+        p: [
+          `${STUDIO.name}, ${STUDIO.street}, ${STUDIO.city}, Hrvatska. Za svako pitanje o podacima dovoljan je e-mail na ${STUDIO.email}.`,
+        ],
+      },
+      {
+        h: 'Što prikupljamo i zašto',
+        p: [
+          'Obrazac za probni sat traži ime, e-mail adresu i — ako ih želiš dati — broj telefona, razinu i poruku. Koristimo ih isključivo da ti odgovorimo i dogovorimo termin.',
+          'Pravna osnova je priprema ugovora o usluzi na tvoj zahtjev i naš legitimni interes da odgovorimo na upit (čl. 6. st. 1. toč. b i f GDPR-a). Nema kvačice za privolu: privola koju ne možeš odbiti i ipak dobiti odgovor nije prava privola.',
+          'Podatke ne koristimo za newsletter, ne profiliramo i ne donosimo automatizirane odluke.',
+        ],
+      },
+      {
+        h: 'Kome se podaci prenose',
+        p: [
+          'Obrazac prenosi usluga Formspark, koja za nas djeluje kao izvršitelj obrade. Formspark podatke drži unutar Europskog gospodarskog prostora (Irska i Njemačka), pa nema prijenosa u treće zemlje.',
+          'Formspark nam poruku dostavlja e-mailom. Nakon toga živi samo u našem poštanskom sandučiću. Drugih primatelja nema — ne prodajemo i ne dijelimo podatke.',
+        ],
+      },
+      {
+        h: 'Koliko dugo ih čuvamo',
+        p: [
+          'Upite na koje smo odgovorili, a iz kojih nije nastao upis u grupu, brišemo najkasnije 12 mjeseci nakon zadnje poruke. Ako se upišeš, podaci prelaze u evidenciju polaznika i čuvamo ih dok si član.',
+        ],
+      },
+      {
+        h: 'Tvoja prava',
+        p: [
+          'Imaš pravo na pristup svojim podacima, ispravak, brisanje, ograničenje obrade, prigovor na obradu i prenosivost. Dovoljan je e-mail na ' +
+            `${STUDIO.email} i odgovaramo u roku od mjesec dana.`,
+          'Ako misliš da s podacima postupamo pogrešno, možeš se obratiti Agenciji za zaštitu osobnih podataka (AZOP), Selska cesta 136, 10000 Zagreb.',
+        ],
+      },
+      {
+        h: 'Kolačići i lokalna pohrana',
+        p: [
+          'Kolačića nema. Tvoj odabir teme (svijetlo/tamno) i jezika pamti se u lokalnoj pohrani tvojeg preglednika, ostaje na tvojem uređaju i nikada ne dolazi do nas. Zato ova stranica i nema prozorčić za kolačiće.',
+        ],
+      },
+    ],
+    back: 'Natrag na prijavu',
+  },
+  en: {
+    eyebrow: 'Short, and without the legal padding',
+    h1: 'Privacy notice',
+    lede:
+      'This site has no analytics, no advertising scripts and sets no cookies. The only personal data we receive is what you type into the trial-class form.',
+    sections: [
+      {
+        h: 'Who processes the data',
+        p: [
+          `${STUDIO.name}, ${STUDIO.street}, ${STUDIO.city}, Croatia. For anything at all about your data, an email to ${STUDIO.email} is enough.`,
+        ],
+      },
+      {
+        h: 'What we collect, and why',
+        p: [
+          'The trial-class form asks for a name, an email address and — if you care to give them — a phone number, a level and a message. We use them only to reply and arrange a time.',
+          'The lawful basis is taking steps towards a service agreement at your request, together with our legitimate interest in answering an enquiry (GDPR Art. 6(1)(b) and (f)). There is no consent tick-box: a box you cannot decline and still get an answer is not consent.',
+          'We do not use the data for a newsletter, we do not profile you, and no decision is made about you automatically.',
+        ],
+      },
+      {
+        h: 'Who the data is passed to',
+        p: [
+          'The form is delivered by Formspark, acting as our processor. Formspark keeps the data inside the European Economic Area (Ireland and Germany), so there is no transfer to a third country.',
+          'Formspark emails the message to us. After that it lives only in our inbox. There are no other recipients — we do not sell or share it.',
+        ],
+      },
+      {
+        h: 'How long we keep it',
+        p: [
+          'Enquiries we have answered and that did not lead to someone joining a group are deleted no later than 12 months after the last message. If you do join, the data moves into our student records and is kept while you are a member.',
+        ],
+      },
+      {
+        h: 'Your rights',
+        p: [
+          `You have the right of access, and to rectification, erasure, restriction, objection and portability. An email to ${STUDIO.email} is enough, and we answer within one month.`,
+          'If you think we are handling your data badly, you can complain to the Croatian Personal Data Protection Agency (AZOP), Selska cesta 136, 10000 Zagreb.',
+        ],
+      },
+      {
+        h: 'Cookies and local storage',
+        p: [
+          'There are no cookies. Your theme (light/dark) and language choices are remembered in your browser’s local storage; they stay on your device and never reach us. That is why this site has no cookie banner.',
+        ],
+      },
+    ],
+    back: 'Back to the form',
+  },
+}[locale];
+---
+
+<section class="hero">
+  <p class="eyebrow">{t.eyebrow}</p>
+  <h1 class="display">{t.h1}</h1>
+  <p class="lede">{t.lede}</p>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    {
+      t.sections.map((section) => (
+        <div class="block">
+          <h2 class="h">{section.h}</h2>
+          {section.p.map((paragraph) => (
+            <p class="body">{paragraph}</p>
+          ))}
+        </div>
+      ))
+    }
+
+    <a class="back" href={localeUrl('/contact', locale)}>{t.back}</a>
+  </div>
+</section>
+
+<style>
+  .hero {
+    max-width: 1280px;
+    margin-inline: auto;
+    padding: var(--space-8) var(--space-5) var(--space-6);
+  }
+  @media (min-width: 768px) {
+    .hero {
+      padding: var(--space-10) var(--space-7) var(--space-7);
+    }
+  }
+
+  .section {
+    padding: 0 var(--space-5) var(--space-8);
+  }
+  @media (min-width: 768px) {
+    .section {
+      padding: 0 var(--space-7) var(--space-10);
+    }
+  }
+  .wrap {
+    max-width: 1280px;
+    margin-inline: auto;
+  }
+
+  .eyebrow {
+    font-family: var(--font-label);
+    font-weight: 300;
+    font-size: 0.75rem;
+    letter-spacing: 0.32em;
+    /* Č Ć Ž Š carry marks above the cap line — 1.4 is the floor in Croatian (§4.6) */
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+    max-width: none;
+  }
+
+  .display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.5rem, 7vw, 4.5rem);
+    line-height: 1;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: var(--space-4) 0 0;
+  }
+
+  .lede {
+    font-size: 1.125rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+    margin-top: var(--space-5);
+    max-width: 62ch;
+  }
+
+  .block {
+    padding-top: var(--space-6);
+    margin-top: var(--space-6);
+    border-top: 1px solid var(--line);
+  }
+  .h {
+    font-family: var(--font-label);
+    font-size: 0.75rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .body {
+    margin-top: var(--space-4);
+    line-height: 1.7;
+    color: var(--text-muted);
+  }
+
+  .back {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    margin-top: var(--space-7);
+    font-family: var(--font-label);
+    font-size: 0.8125rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent);
+    text-underline-offset: 4px;
+  }
+</style>

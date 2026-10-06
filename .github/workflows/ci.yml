@@ -21,6 +21,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # `npm test` drives a real browser for the trial form (test/contact.test.ts).
+      - run: npx playwright install --with-deps chromium
       - run: npx astro check
       - run: npm run build
       # Builds the site twice more, under two different SITE/BASE targets.
@@ -56,12 +58,14 @@ jobs:
           npx astro preview --port 4321 &
           # The trailing slash is the served URL; the unslashed spelling redirects (MUSE-9).
           npx wait-on http://localhost:4321/MuseByMina/ --timeout 60000
-          # ROUTES defaults to the two homepages, so every new page has to be
-          # listed here or it is never audited. Adding a page → add it.
-          ROUTES=/,/en,/schedule,/en/schedule npm run a11y
+          npm run a11y
           # /schedule's responsive shift, keyboard operation and filters —
           # the MUSE-6 criteria a DOM-only test cannot reach.
           npm run ux:schedule
+        env:
+          # ROUTES defaults to the two homepages, so every new page has to be
+          # listed here or it is never audited. Adding a page → add it.
+          ROUTES: /,/en,/schedule,/en/schedule,/contact,/en/contact,/privacy,/en/privacy
 
   designsystem:
     name: design-system compliance

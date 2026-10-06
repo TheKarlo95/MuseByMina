@@ -8,8 +8,20 @@ interface Props {
 const { locale } = Astro.props;
 
 const t = {
-  hr: { links: 'Brzi linkovi', find: 'Gdje smo', openMaps: 'Otvori u Google Maps', social: 'Pratite nas' },
-  en: { links: 'Quick links', find: 'Find us', openMaps: 'Open in Google Maps', social: 'Follow us' },
+  hr: {
+    links: 'Brzi linkovi',
+    find: 'Gdje smo',
+    openMaps: 'Otvori u Google Maps',
+    social: 'Pratite nas',
+    privacy: 'Izjava o privatnosti',
+  },
+  en: {
+    links: 'Quick links',
+    find: 'Find us',
+    openMaps: 'Open in Google Maps',
+    social: 'Follow us',
+    privacy: 'Privacy notice',
+  },
 }[locale];
 
 const quick = [...PRIMARY_NAV.filter((i) => !i.mobileOnly), ...MORE_NAV.slice(0, 4)];
@@ -66,7 +78,14 @@ const year = 2026;
     </div>
   </div>
 
-  <p class="bottom">© {year} {STUDIO.name}</p>
+  {/*
+    The privacy notice lives here and nowhere else. The nav omits it on purpose (MUSE-7):
+    it is the footnote the trial form links to, not a destination anyone sets out for.
+  */}
+  <div class="bottom">
+    <span>© {year} {STUDIO.name}</span>
+    <a class="bottomLink" href={localeUrl('/privacy', locale)}>{t.privacy}</a>
+  </div>
 </footer>
 
 <style>
@@ -162,12 +181,23 @@ const year = 2026;
   }
 
   .bottom {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2) var(--space-5);
     border-top: 1px solid var(--band-line);
-    margin: 0;
-    padding: var(--space-5);
+    padding: var(--space-4) var(--space-5);
     text-align: center;
     font-size: 0.75rem;
     color: var(--band-subtle);
-    max-width: none;
+  }
+  /* Underlined at rest, not only on hover: it sits beside the copyright line, and a link
+     that is only distinguishable by colour fails §11.1 whichever colour it is. */
+  .bottomLink {
+    font-size: 0.75rem;
+    color: var(--band-muted);
+    text-decoration: underline;
+    text-underline-offset: 4px;
   }
 </style>
