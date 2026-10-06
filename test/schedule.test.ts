@@ -73,9 +73,9 @@ const DAY_NAME = {
   },
 } as const;
 
-/** The fixed set from the ticket: Početni / Srednji / Napredni. */
+/** Level badges are English in both locales (MUSE-6 decision) — see LEVEL_NAME. */
 const LEVEL_NAME = {
-  hr: { beginner: 'Početni', intermediate: 'Srednji', advanced: 'Napredni' },
+  hr: { beginner: 'Beginner', intermediate: 'Intermediate', advanced: 'Advanced' },
   en: { beginner: 'Beginner', intermediate: 'Intermediate', advanced: 'Advanced' },
 } as const;
 

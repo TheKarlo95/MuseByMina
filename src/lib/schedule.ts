@@ -18,7 +18,7 @@ import type { Locale } from './i18n';
 export const WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 export type Weekday = (typeof WEEKDAYS)[number];
 
-/** The fixed set of levels: Početni / Srednji / Napredni. There is no fourth. */
+/** The fixed set of levels: beginner / intermediate / advanced. There is no fourth. */
 export const LEVELS = ['beginner', 'intermediate', 'advanced'] as const;
 export type Level = (typeof LEVELS)[number];
 
@@ -59,8 +59,20 @@ export const WEEKDAY_NAME: Record<Locale, Record<Weekday, string>> = {
   },
 };
 
+/**
+ * Level names are **English in both locales** — a deliberate exception to the
+ * everything-is-bilingual rule, decided for MUSE-6.
+ *
+ * Design system §7.2 shows these badges as Croatian. They are English here because
+ * the level is closer to a proper noun of the bachata scene than to prose: an
+ * international social dancer reads "Intermediate" wherever they are, and the
+ * studio's own classes are advertised that way. Keeping one spelling per level
+ * also means the HR and EN pages render the same badge from the same enum.
+ *
+ * It is still a Record<Locale, …> so reversing this is a data edit, not a refactor.
+ */
 export const LEVEL_NAME: Record<Locale, Record<Level, string>> = {
-  hr: { beginner: 'Početni', intermediate: 'Srednji', advanced: 'Napredni' },
+  hr: { beginner: 'Beginner', intermediate: 'Intermediate', advanced: 'Advanced' },
   en: { beginner: 'Beginner', intermediate: 'Intermediate', advanced: 'Advanced' },
 };
 

@@ -24,7 +24,7 @@ import type { ClassEntry } from '../lib/schedule';
      start       24-hour "HH:MM" — `formatTime` throws on anything else
      durationMin minutes
      style       traditional | moderna | sensual
-     level       beginner | intermediate | advanced    (Početni/Srednji/Napredni)
+     level       beginner | intermediate | advanced    (rendered Beginner/Intermediate/Advanced)
      instructor  display name, as typed
 
    One deliberate property of this set: there is no advanced traditional class.
