@@ -304,9 +304,12 @@ describe('the page exists at the route the site already links to', () => {
           continue;
         }
         if (resolved.origin !== root.origin) continue;
-        if (!/\/schedule$/.test(resolved.pathname)) continue;
+        // Page URLs end in a slash since MUSE-9; accept only that spelling.
+        if (!/\/schedule\/$/.test(resolved.pathname)) continue;
 
-        const route = resolved.pathname.slice(root.pathname.length);
+        const route = resolved.pathname
+          .slice(root.pathname.length)
+          .replace(/^\/+|\/+$/g, '');
         if (!build.isFile(`${route}/index.html`)) broken.push(`${file}: ${href}`);
       }
     }
@@ -317,7 +320,7 @@ describe('the page exists at the route the site already links to', () => {
   it('is linked from somewhere, so the check above cannot pass vacuously', () => {
     const linking = build
       .htmlFiles()
-      .filter((f) => /href="[^"]*\/schedule"/.test(build.read(f)));
+      .filter((f) => /href="[^"]*\/schedule\/"/.test(build.read(f)));
     expect(linking.length, 'nothing links to /schedule').toBeGreaterThan(0);
   });
 });
