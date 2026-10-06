@@ -60,7 +60,18 @@ async function open(route, { viewport, colorScheme = 'dark' }) {
   // Keep the homepage language redirect from ever entering the picture.
   await ctx.addInitScript(() => localStorage.setItem('muse-lang', 'hr'));
   const page = await ctx.newPage();
-  await page.goto(`${ORIGIN}${BASE}${route}`, { waitUntil: 'networkidle' });
+
+  // Page URLs carry a trailing slash (`trailingSlash: 'always'`, MUSE-9). The
+  // unslashed spelling 404s on the dev server, and a 404 body paints no schedule
+  // at all — which reads as "every layout check failed" rather than "wrong URL".
+  const url = `${ORIGIN}${BASE.replace(/\/+$/, '')}${route}/`;
+  const response = await page.goto(url, { waitUntil: 'networkidle' });
+
+  const status = response?.status() ?? 0;
+  if (status !== 200) {
+    throw new Error(`${url} returned ${status} — the checks below would audit the wrong page`);
+  }
+
   await page.evaluate(() => document.fonts.ready);
   return { ctx, page };
 }
