@@ -27,6 +27,7 @@ Astro inlines them.
 npm run dev        # http://localhost:4321/MuseByMina
 npm run build
 npm run typecheck  # astro check
+npm test           # vitest — asserts on real build output
 npm run ds         # design-system compliance
 npm run a11y       # axe on every page, both themes (needs a server running)
 npm run shots      # screenshots of all theme states → /tmp/muse-shots
@@ -62,11 +63,14 @@ a role rather than reaching for `--gold` directly.
 src/
   components/   UI, one file each, styles co-located
   layouts/      BaseLayout — head, theme script, header/footer
-  lib/          theme.ts (pre-paint script), i18n.ts, lang.ts, nav.ts
+  lib/          theme.ts (pre-paint script), i18n.ts, lang.ts, nav.ts,
+                pages.ts (per-route title + description), site.ts (deploy-root URLs)
   pages/        index.astro + en/index.astro; thin wrappers over components
+                robots.txt.ts + llms.txt.ts; generated, not static
   styles/       globals.css → fonts.css + tokens.css + base.css
 public/fonts/   6 variable woff2, latin + latin-ext for Croatian
 scripts/        a11y, design-system and screenshot gates
+test/           vitest; builds the site and asserts on dist
 ```
 
 ## Theme and language
@@ -79,6 +83,31 @@ dark page and watches it flip.
 Language defaults from the browser's `Accept-Language`, decided client-side since static
 hosting has no edge compute. The redirect is deliberately narrow: homepage only, never if a
 choice is stored, and via `replaceState` so Back isn't trapped.
+
+## Machine-readable surface
+
+Three files are generated at build time, never checked in, because every URL in them is
+absolute and the origin comes from `SITE`/`BASE`:
+
+| File | Source |
+|---|---|
+| `sitemap-index.xml` + `sitemap-0.xml` | `@astrojs/sitemap`, fed the i18n config so every entry carries `hreflang` alternates |
+| `robots.txt` | `src/pages/robots.txt.ts` |
+| `llms.txt` | `src/pages/llms.txt.ts`, listing each page with its own `<meta description>` |
+
+`llms.txt` descriptions come from `src/lib/pages.ts`, which is also what the pages render, so
+the index cannot drift from the site — and `test/seo.test.ts` enforces that rather than
+assuming it, comparing every `llms.txt` description against the `<meta name="description">`
+parsed out of that route's built HTML.
+
+**Add a page → add it there.** Forgetting is not a build error: `astro build` exits 0 and
+silently omits the page from both the index and the sitemap. `npm test` is what fails — it
+derives the expected page list from `src/pages/`, not from the registry.
+
+One caveat worth knowing: on the GitHub Pages project URL these land at
+`/MuseByMina/robots.txt`, not the origin root, so crawlers will not find `robots.txt` until
+the custom domain is live and `BASE=/`. Project Pages cannot serve the origin root at all —
+this is not something the build can fix.
 
 ## Deploying
 
