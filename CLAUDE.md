@@ -46,5 +46,11 @@ npm run shots      # screenshots of all theme states to /tmp/muse-shots
   overridable `SITE`/`BASE` default. `sitemap`, `robots.txt` and `llms.txt` all derive their
   origin from it, and the suite rebuilds under a second target to prove a domain move is a
   config change.
+- Static assets are referenced through `rootPath()` in `src/lib/site.ts`, never by
+  interpolating `import.meta.env.BASE_URL` — `trailingSlash: 'never'` leaves it
+  *without* a trailing slash, so `${BASE_URL}fonts/x` silently yields
+  `/MuseByMinafonts/x`. An apex build hides this; only the Pages sub-path 404s.
+  `test/assets.test.ts` resolves every asset reference in the built HTML to a file in
+  `dist`, under both deploy targets.
 - The theme is stamped pre-paint by an inline script (`src/lib/theme.ts`). Never move that
   into a component — it exists to prevent a flash.
