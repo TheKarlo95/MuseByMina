@@ -10,25 +10,28 @@
     "build": "astro build",
     "preview": "astro preview",
     "typecheck": "astro check",
+    "test": "vitest run",
     "a11y": "node scripts/a11y.mjs",
     "shots": "node scripts/screenshot-themes.mjs",
     "astro": "astro",
     "ds": "node scripts/check-tokens.mjs"
   },
   "dependencies": {
+    "@astrojs/sitemap": "^3.7.4",
     "astro": "^7.3.6"
   },
   "allowScripts": {
     "esbuild": true
   },
   "private": true,
-  "description": "Muse by Mina \u2014 dance studio website, Zagreb",
+  "description": "Muse by Mina — dance studio website, Zagreb",
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
     "@axe-core/playwright": "^4.13.0",
     "@types/node": "^26.6.4",
     "playwright": "^1.63.0",
     "typescript": "^6.0.3",
+    "vitest": "^5.0.3",
     "wait-on": "^9.5.1"
   }
 }

@@ -1,12 +1,15 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import Home from '../components/Home.astro';
+import { pageMeta } from '../lib/pages';
+
+const meta = pageMeta('/');
 ---
 
 <BaseLayout
   locale="hr"
-  title="Muse by Mina — Plesni studio, Zagreb"
-  description="Plesni studio u Zagrebu. Bachata za odrasle — bez partnera, bez iskustva. Dođi na besplatni probni sat."
+  title={meta.title.hr}
+  description={meta.description.hr}
   detectLanguage
 >
   <Home locale="hr" />

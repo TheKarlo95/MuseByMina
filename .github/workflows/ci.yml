@@ -23,6 +23,8 @@ jobs:
       - run: npm ci
       - run: npx astro check
       - run: npm run build
+      # Builds the site twice more, under two different SITE/BASE targets.
+      - run: npm test
       - name: Guard the GitHub Pages 1 GB site limit
         run: |
           size=$(du -sm dist | cut -f1)

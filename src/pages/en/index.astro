@@ -1,12 +1,11 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import Home from '../../components/Home.astro';
+import { pageMeta } from '../../lib/pages';
+
+const meta = pageMeta('/');
 ---
 
-<BaseLayout
-  locale="en"
-  title="Muse by Mina — Dance studio, Zagreb"
-  description="A dance studio in Zagreb. Bachata for adults — no partner, no experience needed. Come to a free trial class."
->
+<BaseLayout locale="en" title={meta.title.en} description={meta.description.en}>
   <Home locale="en" />
 </BaseLayout>
