@@ -59,26 +59,36 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   overridable `SITE`/`BASE` default. `sitemap`, `robots.txt` and `llms.txt` all derive their
   origin from it, and the suite rebuilds under a second target to prove a domain move is a
   config change.
-- Static assets are referenced through `rootPath()` in `src/lib/site.ts`, never by
-  interpolating `import.meta.env.BASE_URL` — whether that carries a trailing slash depends
-  on `trailingSlash`, so `${BASE_URL}fonts/x` can silently yield `/MuseByMinafonts/x`. An
-  apex build hides this; only the Pages sub-path 404s. `test/assets.test.ts` resolves every
-  asset reference in the built HTML to a file in `dist`, under both deploy targets.
-- **CSS never names a root-absolute asset path, and the fonts live in `src/assets/`.**
-  Vite rewrites a root-absolute `url()` to include `base` **only at build time**, so a
-  `url('/fonts/x.woff2')` against a file in `public/` makes the deploy correct and
-  `astro dev` 404 — which is how all six faces fell back to Georgia for the life of the
-  project, and why MUSE-14's `II:OO` was invisible locally (MUSE-35). Use a relative
-  `url()` into `src/assets/`; Vite then resolves it in both environments. The preload in
-  `BaseLayout.astro` imports the *same file* with `?url`, because a preload href that is
-  not also a `@font-face` src is a second download of a face the page already fetches —
-  both URLs 200, nothing looks wrong. `test/assets.test.ts` resolves every `url()` in the
-  emitted CSS against `dist` and asserts the two agree; `test/fonts.test.ts` runs a real
-  `astro dev` and asserts six faces load and none fail.
+- **An asset the site's own code uses goes in `src/assets/` and is imported** — never
+  `public/` plus a hand-written path. Vite rewrites a root-absolute CSS `url()` to
+  include `base` **only at build time**, so `url('/fonts/x.woff2')` against a file in
+  `public/` makes the deploy correct and `astro dev` 404: that is how all six faces fell
+  back to Georgia for the life of the project, and why MUSE-14's `II:OO` was invisible
+  locally (MUSE-35). Importing instead means Vite emits the file with a content hash and
+  resolves every reference to it in both environments, with no base-path join anywhere.
+  `src/styles/fonts.css` uses a relative `url()` into `src/assets/`; `BaseLayout.astro`
+  preloads the *same files* via `?url` imports.
+- **A preload must name the same URL as the thing it preloads, and must be a face the
+  page actually needs.** Two different failures, both silent. Point the preload at a
+  second copy of the font and both URLs are 200, both resolve, and the browser downloads
+  each face twice. Point it at a declared-but-unused subset (`-latin-ext` instead of
+  `-latin`) and you pay for bytes the page never paints with and lose the preload on the
+  ones it does. `test/assets.test.ts` catches the first against `dist`;
+  `test/fonts.test.ts` catches the second by loading each page **with the preload tags
+  stripped** and recording what the CSS engine then asks for — the only way to measure
+  it, since a preload is itself a request and so "was it requested" is true by
+  construction.
+- `rootPath()`/`rootUrl()` in `src/lib/site.ts` are for files the build publishes at the
+  deploy root — `robots.txt`, `llms.txt`, the sitemap — and for a future `favicon.ico` or
+  `CNAME`. They are **not** the way to reference a bundled asset; see the bullet above.
+  Never interpolate `import.meta.env.BASE_URL` by hand: whether it carries a trailing
+  slash depends on `trailingSlash`, so `${BASE_URL}robots.txt` can silently yield
+  `/MuseByMinarobots.txt`. An apex build hides this; only the Pages sub-path 404s.
 - **A test that can only see `dist` cannot see a dev-only bug.** `test/fonts.test.ts` is
   the one suite that drives `astro dev`, through `astroDev()` in `test/helpers/scratch.ts`
   — the same module that owns `astroBuild()`, so `test/isolation.test.ts`'s child-process
-  allow-list stays one entry long. Two things it has to do and you have to keep doing:
+  allow-list stays one entry long. It asserts over three environments: dev, and both
+  deploy targets built and served. Two things it has to do and you have to keep doing:
   pass `--ignore-lock` (Astro 7 auto-backgrounds the dev server when it detects an agent,
   and a daemon cannot be torn down), and strip `VITEST` from the child env — Astro's
   dev-server plugin returns early when it is set, so the server starts, greets you, and

@@ -1,70 +1,157 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { chromium, type Browser } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { cssUrls, fontFaceUrls, linkHrefs, styleBlocks } from './helpers/build';
+import {
+  APEX_DEPLOY,
+  basePath,
+  buildSite,
+  cssUrls,
+  fontFaceUrls,
+  linkHrefs,
+  PAGES_DEPLOY,
+  styleBlocks,
+} from './helpers/build';
 import { astroDev, type DevServer } from './helpers/scratch';
+import { servePages, type Host } from './helpers/serve';
 
 /**
- * MUSE-35 — the dev server must serve the webfonts the CSS asks for.
+ * MUSE-35 — the webfonts must resolve, and the right ones must be preloaded, in every
+ * environment this project is looked at in.
  *
  * `src/styles/fonts.css` declared `src: url('/fonts/…woff2')`. Vite rewrites a
  * root-absolute CSS `url()` to include `base` **only when it builds**, so the deployed
  * site was correct and `astro dev` answered all six with 404 and fell back to Georgia.
  *
- * ## Why this suite starts a server instead of reading `dist`
+ * ## Why this suite runs servers instead of reading `dist`
  *
  * Because every other suite reads `dist`, and that is exactly how this shipped. The
- * build was right. Nine months of local visual checks were done against a page set in
- * the wrong typeface, and the one that mattered was MUSE-14: class times rendered
- * `II:OO` because Cormorant defaults to old-style figures, and **Georgia has lining
- * figures**, so in dev the bug was invisible. A developer reproducing it locally would
- * have concluded it was already fixed.
+ * build was right. Every local visual check was made against a page set in the wrong
+ * typeface, and the one that mattered was MUSE-14: class times rendered `II:OO` because
+ * Cormorant defaults to old-style figures, and **Georgia has lining figures**, so in dev
+ * the bug was invisible. A developer reproducing it locally would have concluded it was
+ * already fixed.
  *
- * So the environment under test here is the dev server, driven the way a developer
- * drives it. The build half of the same rule — every `url()` the output emits resolves
- * to a file that exists, under both deploy targets — is in `test/assets.test.ts`, which
- * already has both builds in hand.
+ * So every claim here is made over HTTP against a running server, in all three
+ * environments the fonts have to work in: `astro dev`, and the built output of both
+ * deploy targets. That makes AC4 literal — "a test fails if any `@font-face` URL 404s in
+ * the environment under test" — and AC3 exercised rather than inferred, since a
+ * root-absolute `url()` is *correct* under `BASE=/` and broken only under a sub-path, so
+ * neither target alone can see the class.
  *
- * ## Why `document.fonts` and not just HTTP
+ * `test/assets.test.ts` keeps the complementary static claim: every `url()` in the
+ * emitted CSS resolves to a file that is actually in the output.
  *
- * The HTTP check is the sharp one: it names the URL and the status. But a 200 is not
- * the claim — the claim is that the face is *in use*, and a `@font-face` can resolve
- * and still not load (wrong format, a corrupt subset, a `unicode-range` that excludes
- * everything on the page). `document.fonts` is where the browser says so, and it is
- * what the ticket's verification step asks for.
+ * ## Why there is no `BASE=/` dev server
+ *
+ * Measured, not assumed: Vite's dev server does not put `base` into asset URLs at all —
+ * it serves this project's fonts at `/src/assets/fonts/…` whatever `BASE` is set to. A
+ * second dev server under `BASE=/` would exercise the same code path and assert the same
+ * strings. The base-path risk lives entirely in the build, where the two built
+ * environments below cover it.
  */
-
-let dev: DevServer;
-let browser: Browser;
-
-beforeAll(async () => {
-  [dev, browser] = await Promise.all([astroDev({}, 'fonts'), chromium.launch()]);
-}, 240_000);
-
-afterAll(async () => {
-  await Promise.all([dev?.stop(), browser?.close()]);
-});
-
-/** A page with body text, display headings and the numerals MUSE-14 is about. */
-const PAGE = 'schedule/';
 
 /** Every face `src/styles/fonts.css` declares: three families, latin and latin-ext. */
 const FACE_COUNT = 6;
 
+/** How many the layout preloads — the subsets first paint needs. */
+const PRELOAD_COUNT = 2;
+
+/** A page with body text, display headings and the numerals MUSE-14 is about. */
+const CONTENT_ROUTE = 'schedule/';
+
 /**
- * Every stylesheet the dev server serves for `route`, fetched the way the browser does.
+ * One place the site is being served from, however it got there.
  *
- * Inline `<style>` blocks and linked stylesheets both, because which one Astro emits
- * differs between dev and a build and this suite should not care which it got.
+ * The dev server and a built-and-served deploy differ in every detail that is not the
+ * point — port, base path, whether the filenames are hashed — so the suite talks to all
+ * three through this and asserts the same things about each.
  */
-async function stylesheetsFor(route: string): Promise<string[]> {
-  const pageUrl = dev.url(route);
+interface Environment {
+  name: string;
+  /** Absolute URL for a route: `url('')` is the homepage, `url('schedule/')` a page. */
+  url(route: string): string;
+}
+
+/**
+ * The environment names, listed here so `describe.each` can label its blocks at
+ * collection time — the handles themselves only exist once `beforeAll` has run.
+ */
+const ENVIRONMENTS = ['astro dev', 'the Pages sub-path build', 'the apex build'];
+
+let browser: Browser;
+let dev: DevServer;
+let pagesHost: Host;
+let apexHost: Host;
+let environments: Environment[];
+let routes: string[];
+
+beforeAll(async () => {
+  // Sequential, not `Promise.all([...])` with destructuring: one rejection there leaves
+  // every other handle unassigned and `afterAll` closes none of them, putting the whole
+  // weight of not leaking a dev server on the `process.once('exit')` backstop in
+  // `scratch.ts`. The browser is the cheapest to start, so it goes first and is always
+  // cleanable by the time anything else can fail.
+  browser = await chromium.launch();
+  dev = await astroDev({}, 'fonts');
+
+  const pages = buildSite(PAGES_DEPLOY);
+  const apex = buildSite(APEX_DEPLOY);
+  pagesHost = await servePages(pages);
+  apexHost = await servePages(apex);
+
+  // Base paths are read off the builds rather than spelled out, so moving the deploy
+  // target stays a config change in the suite as well as in the site (MUSE-8).
+  const served =
+    (host: () => Host, base: string) =>
+    (route: string): string =>
+      `${host().origin}${base}${route}`;
+
+  environments = [
+    { name: ENVIRONMENTS[0]!, url: (route) => dev.url(route) },
+    { name: ENVIRONMENTS[1]!, url: served(() => pagesHost, basePath(pages)) },
+    { name: ENVIRONMENTS[2]!, url: served(() => apexHost, basePath(apex)) },
+  ];
+
+  // Read off the build rather than listed, so a page added tomorrow is covered the day
+  // it lands — the same reasoning as `assetRefs` deriving its references from markup.
+  // `404.html` is dropped: the host serves it in place of an unknown path rather than
+  // at a route of its own (MUSE-9), so it has no URL to visit.
+  routes = pages
+    .htmlFiles()
+    .filter((file) => file !== '404.html')
+    .map((file) => file.replace(/(^|\/)index\.html$/, '$1'))
+    .sort();
+}, 240_000);
+
+afterAll(async () => {
+  // `allSettled`, so one failed teardown does not strand the others. A leaked dev server
+  // holds a Vite watcher on this checkout until the machine is rebooted.
+  await Promise.allSettled([
+    dev?.stop(),
+    pagesHost?.close(),
+    apexHost?.close(),
+    browser?.close(),
+  ]);
+});
+
+/**
+ * Every stylesheet an environment serves for `route`, fetched the way a browser does.
+ *
+ * Inline `<style>` blocks and linked stylesheets both: which of the two Astro emits
+ * depends on the environment and on a size threshold, and nothing here should care.
+ */
+async function stylesheetsFor(env: Environment, route: string): Promise<string[]> {
+  const pageUrl = env.url(route);
   const html = await (await fetch(pageUrl)).text();
 
   const linked = await Promise.all(
     linkHrefs(html, 'stylesheet').map(async (href) => {
       const res = await fetch(new URL(href, pageUrl));
-      expect(res.status, `stylesheet ${href} on ${route}`).toBe(200);
+      expect(res.status, `stylesheet ${href} on ${pageUrl}`).toBe(200);
       return res.text();
     }),
   );
@@ -72,110 +159,232 @@ async function stylesheetsFor(route: string): Promise<string[]> {
   return [...styleBlocks(html), ...linked];
 }
 
-/** Absolute URLs of every `@font-face` source the dev server serves for `route`. */
-async function fontUrlsFor(route: string): Promise<string[]> {
-  const pageUrl = dev.url(route);
-  const sheets = await stylesheetsFor(route);
+/** Absolute URLs of every `@font-face` source an environment serves for `route`. */
+async function declaredFaces(env: Environment, route: string): Promise<string[]> {
+  const pageUrl = env.url(route);
+  const sheets = await stylesheetsFor(env, route);
   const urls = sheets.flatMap((css) => fontFaceUrls(css));
   return [...new Set(urls)].map((url) => new URL(url, pageUrl).href);
 }
 
-describe('AC1: under astro dev, every @font-face file is served', () => {
-  it(`declares all ${FACE_COUNT} faces`, async () => {
-    // Without this the status check below passes by having nothing to check — which is
-    // also what a half-applied fix looks like.
-    expect(await fontUrlsFor(PAGE)).toHaveLength(FACE_COUNT);
-  });
-
-  /**
-   * AC4, in the dev environment: a `@font-face` URL that 404s fails the suite.
-   *
-   * Every URL is fetched and every status reported together, so a failure reads as the
-   * ticket's own reproduction — the list of what 404'd — rather than as the first one.
-   */
-  it('answers every one of them with 200', async () => {
-    const urls = await fontUrlsFor(PAGE);
-    const statuses = await Promise.all(
-      urls.map(async (url) => `${(await fetch(url)).status} ${url}`),
-    );
-    expect(statuses.filter((line) => !line.startsWith('200 '))).toEqual([]);
-  });
-
-  it('reports them loaded, with none failed, in a real browser', async () => {
-    const page = await browser.newPage();
-    try {
-      await page.goto(dev.url(PAGE), { waitUntil: 'load' });
-
-      // `document.fonts` only loads a face the page has text for, so a subset covering
-      // characters this page happens not to use stays `unloaded` however healthy it is.
-      // Asking for each one explicitly is what makes "all six" a claim about the files
-      // rather than about the copy.
-      const report = await page.evaluate(async () => {
-        const faces = [...document.fonts];
-        await Promise.allSettled(faces.map((face) => face.load()));
-        return {
-          total: faces.length,
-          loaded: faces.filter((f) => f.status === 'loaded').length,
-          failed: faces
-            .filter((f) => f.status !== 'loaded')
-            .map((f) => `${f.family} (${f.status})`),
-        };
-      });
-
-      expect(report.failed).toEqual([]);
-      expect(report.loaded).toBe(FACE_COUNT);
-      expect(report.total).toBe(FACE_COUNT);
-    } finally {
-      await page.close();
-    }
-  });
-});
+/** Absolute URLs of every woff2 the page asks the browser to preload. */
+async function preloadedFaces(env: Environment, route: string): Promise<string[]> {
+  const pageUrl = env.url(route);
+  const html = await (await fetch(pageUrl)).text();
+  return linkHrefs(html, 'preload')
+    .filter((href) => href.endsWith('.woff2'))
+    .map((href) => new URL(href, pageUrl).href);
+}
 
 /**
- * AC2, in the dev environment — one URL per font, shared by the preload and the face.
+ * The faces the page fetches **when nothing preloads them for it**.
  *
- * The regression this guards is subtler than the 404 and no existing check could see
- * it: resolve the CSS `url()` through Vite while the `<link rel="preload">` still names
- * the `public/` copy and both are 200, both are correct-looking, and the browser
- * downloads every preloaded face **twice** — the preload matching nothing it later
- * needs. A preload whose URL is not also a `@font-face` src is not a preload.
- */
-describe('AC2: the preload and the @font-face name the same URL', () => {
-  it('matches every preloaded font to a declared face', async () => {
-    const pageUrl = dev.url(PAGE);
-    const html = await (await fetch(pageUrl)).text();
-
-    const preloaded = linkHrefs(html, 'preload')
-      .filter((href) => href.endsWith('.woff2'))
-      .map((href) => new URL(href, pageUrl).href);
-    expect(preloaded.length, 'the page preloads no fonts').toBeGreaterThan(0);
-
-    const faces = await fontUrlsFor(PAGE);
-    expect(preloaded.filter((url) => !faces.includes(url))).toEqual([]);
-  });
-});
-
-/**
- * AC2 again, from the other side: no hand-built, environment-specific font path.
+ * This is the measurement the whole preload claim rests on, and the obvious version of
+ * it asserts nothing: a `<link rel="preload">` *is* a request, so "was this face
+ * requested?" is true by construction for anything preloaded, whether or not the page
+ * had the slightest use for it. Reading the raw request log is circular.
  *
- * The bug was a literal `/fonts/…` in a stylesheet — a path that is only correct when
- * something rewrites it, and only the build does. Reading the *source* rather than the
- * served output is deliberate: it is the one check here that still fails if the dev
- * server happens to answer the wrong path with a 200.
+ * Stripping the preload tags out of the document before the browser parses it breaks
+ * that circle. What is left is the set the CSS engine asks for on its own — each
+ * `@font-face`'s `unicode-range` matched against the text actually on the page. That set
+ * is the ground truth a preload has to be a member of.
+ *
+ * Measured with a real browser rather than by matching `unicode-range` here, for the
+ * same reason `test/numerals.test.ts` screenshots glyphs instead of reading
+ * `getComputedStyle`: a model of the engine passes whenever the model is wrong.
  */
-describe('AC2: no stylesheet hard-codes a deploy-root asset path', () => {
-  it('leaves no root-absolute url() in the source stylesheets', async () => {
-    const styles = new URL('../src/styles/', import.meta.url);
-    const { readdirSync, readFileSync } = await import('node:fs');
+async function facesNeededWithoutPreloads(
+  env: Environment,
+  route: string,
+): Promise<string[]> {
+  const pageUrl = env.url(route);
+  const page = await browser.newPage();
+  const requested = new Set<string>();
 
-    const offenders = readdirSync(styles)
-      .filter((file) => file.endsWith('.css'))
-      .flatMap((file) =>
-        cssUrls(readFileSync(new URL(file, styles), 'utf8'))
-          .filter((url) => url.startsWith('/'))
-          .map((url) => `src/styles/${file}: url(${url})`),
+  try {
+    await page.route(pageUrl, async (interception) => {
+      const response = await interception.fetch();
+      const stripped = (await response.text()).replace(
+        /<link\b[^>]*\brel="preload"[^>]*>/g,
+        '',
       );
+      expect(stripped, 'the preloads were not stripped').not.toContain('rel="preload"');
+      await interception.fulfill({ response, body: stripped });
+    });
 
-    expect(offenders).toEqual([]);
+    page.on('request', (req) => {
+      if (req.url().endsWith('.woff2')) requested.add(req.url());
+    });
+
+    await page.goto(pageUrl, { waitUntil: 'load' });
+    await page.evaluate(() => document.fonts.ready);
+    return [...requested].sort();
+  } finally {
+    await page.close();
+  }
+}
+
+describe.each(ENVIRONMENTS.map((name, index) => ({ name, index })))(
+  'MUSE-35: fonts in $name',
+  ({ index }) => {
+    const env = (): Environment => environments[index]!;
+
+    /**
+     * AC1 and AC4 — every declared face is a file this environment actually serves.
+     *
+     * Every URL is fetched and every status collected, so a failure reads like the
+     * ticket's own reproduction — the list of what 404'd — rather than just the first.
+     */
+    it('serves every @font-face file it declares', async () => {
+      const faces = await declaredFaces(env(), CONTENT_ROUTE);
+      expect(faces, `${env().name}: wrong number of faces`).toHaveLength(FACE_COUNT);
+
+      const statuses = await Promise.all(
+        faces.map(async (url) => `${(await fetch(url)).status} ${url}`),
+      );
+      expect(
+        statuses.filter((line) => !line.startsWith('200 ')),
+        `${env().name}: faces that do not resolve`,
+      ).toEqual([]);
+    });
+
+    it('reports every face loaded, and none failed, in a real browser', async () => {
+      const page = await browser.newPage();
+      try {
+        await page.goto(env().url(CONTENT_ROUTE), { waitUntil: 'load' });
+
+        // `document.fonts` only loads a face the page has text for, so a subset
+        // covering characters this page happens not to use stays `unloaded` however
+        // healthy it is. Asking for each one explicitly makes "all six" a claim about
+        // the files rather than about the copy.
+        const report = await page.evaluate(async () => {
+          const faces = [...document.fonts];
+          await Promise.allSettled(faces.map((face) => face.load()));
+          return {
+            total: faces.length,
+            loaded: faces.filter((f) => f.status === 'loaded').length,
+            failed: faces
+              .filter((f) => f.status !== 'loaded')
+              .map((f) => `${f.family} (${f.status})`),
+          };
+        });
+
+        expect(report.failed, env().name).toEqual([]);
+        expect(report.loaded, env().name).toBe(FACE_COUNT);
+        expect(report.total, env().name).toBe(FACE_COUNT);
+      } finally {
+        await page.close();
+      }
+    });
+
+    /**
+     * AC2 — a preloaded face must be one the page would have fetched anyway.
+     *
+     * Stated behaviourally rather than as "the preload href equals some `@font-face`
+     * src", because that weaker form is a subset test against all six declared faces,
+     * and it passes when the layout preloads Inter's *latin-ext* subset instead of its
+     * latin one. Both are declared faces; only one is a face the page paints with. The
+     * site would download a subset it never uses and get no preload at all on the
+     * subset it does — a regression costing exactly what the preload was worth, with
+     * every URL still resolving and every file still present. That mutation was run
+     * against the subset version of this test and the whole suite stayed green.
+     *
+     * Pinning the two filenames would also catch it, and is what this replaced: the
+     * hashed names are unpredictable from outside the build, so a literal list is a
+     * transcription of the output rather than a statement about it.
+     *
+     * ## Every route, not a chosen one
+     *
+     * The preloads live in `BaseLayout`, so they are on every page, and the invariant
+     * is therefore about every page. Picking one route would also mean picking
+     * correctly, which is harder than it looks and silently decides how much this test
+     * is worth: on `/schedule/` the Croatian class titles pull *both* halves of Inter
+     * and Jost in, so the needed set is wide enough to contain the wrong subset and the
+     * mutation above survives. The Croatian homepage is no better — its body copy has
+     * enough diacritics to need `inter-400-600-latin-ext` too. It is `/en/`, whose copy
+     * is plain ASCII, that pins Inter down to its latin subset.
+     *
+     * Rather than encode that reasoning in a constant that the next content change can
+     * quietly invalidate, every route is checked. The narrowest page is then always in
+     * the set, whichever page that happens to be this month.
+     */
+    it('preloads only faces each page actually needs', async () => {
+      expect(routes.length, 'no routes to check').toBeGreaterThan(4);
+
+      const problems: string[] = [];
+
+      for (const route of routes) {
+        const preloaded = await preloadedFaces(env(), route);
+        if (preloaded.length !== PRELOAD_COUNT) {
+          problems.push(`${route}: ${preloaded.length} preloads, expected ${PRELOAD_COUNT}`);
+          continue;
+        }
+
+        const needed = await facesNeededWithoutPreloads(env(), route);
+        if (needed.length === 0) {
+          problems.push(`${route}: requested no fonts at all with preloads stripped`);
+          continue;
+        }
+
+        for (const url of preloaded.filter((u) => !needed.includes(u))) {
+          problems.push(
+            `${route}: preloads ${url}, which it never requests ` +
+              `(it asks for ${needed.join(', ')})`,
+          );
+        }
+      }
+
+      expect(problems, env().name).toEqual([]);
+    });
+  },
+);
+
+/**
+ * AC2, from the other side: no stylesheet may hand the server a path it typed itself.
+ *
+ * The bug was a literal `/fonts/…` in a stylesheet — a path that is only correct once
+ * something rewrites it, and only the build does. This is the one check here that still
+ * fails if every server happens to answer the wrong path with a 200, so it reads the
+ * **source** rather than anything served.
+ *
+ * Recursive over all of `src/`, and over component `<style>` blocks as well as `.css`
+ * files. The first version read `src/styles/*.css` and nothing else, so moving
+ * `fonts.css` into a subdirectory — or putting an `@font-face` in a component — left it
+ * scanning nothing, finding nothing, and passing. Both guards below exist so that "found
+ * no offenders" cannot quietly mean "found no files".
+ */
+describe('MUSE-35 AC2: no stylesheet hard-codes a deploy-root asset path', () => {
+  const SRC = fileURLToPath(new URL('../src', import.meta.url));
+
+  /** Every `.css` and `.astro` file under `src/`, as absolute paths. */
+  function sourceFiles(): string[] {
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = join(dir, entry.name);
+        return entry.isDirectory() ? walk(full) : [full];
+      });
+    return walk(SRC).filter((f) => /\.(css|astro)$/.test(f));
+  }
+
+  /** Every `url()` written anywhere in the source tree's CSS, as readable lines. */
+  function sourceUrls(): string[] {
+    return sourceFiles().flatMap((file) => {
+      const text = readFileSync(file, 'utf8');
+      // A `.css` file is CSS throughout; an `.astro` file only inside its `<style>`.
+      const blocks = file.endsWith('.css') ? [text] : styleBlocks(text);
+      const where = `src/${relative(SRC, file).replace(/\\/g, '/')}`;
+      return blocks.flatMap((css) => cssUrls(css).map((url) => `${where}: url(${url})`));
+    });
+  }
+
+  it('scans a source tree that is actually there', () => {
+    expect(sourceFiles().length, 'no stylesheets or components scanned').toBeGreaterThan(
+      15,
+    );
+    expect(sourceUrls().length, 'no url() seen anywhere under src/').toBeGreaterThan(0);
+  });
+
+  it('leaves no root-absolute url() in any stylesheet under src/', () => {
+    expect(sourceUrls().filter((line) => /url\(\//.test(line))).toEqual([]);
   });
 });

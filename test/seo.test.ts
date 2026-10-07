@@ -365,18 +365,39 @@ describe('AC4: the deploy target is env-driven, not hardcoded', () => {
     }
   });
 
+  /**
+   * The trees this check walks, and what each is expected to contain.
+   *
+   * `public/` is currently absent: MUSE-35 moved the fonts — the only thing in it —
+   * into `src/assets/`, so that Vite resolves them in dev as well as in the build. It
+   * stays listed for the day something static comes back.
+   *
+   * `minimum` is asserted **per root**, not against the total, and that distinction is
+   * the whole point. A single `expect(total).toBeGreaterThan(20)` is satisfied by `src/`
+   * alone with room to spare — and this very ticket *widened* that slack by moving six
+   * files into `src/`. It could not tell "`public/` is absent" from "`public/` has four
+   * hundred files in it", and would only fire if both trees vanished at once. Per root,
+   * an absent tree is an explicit fact with an expected count beside it rather than an
+   * arithmetic coincidence.
+   */
+  const HOST_SCAN: { dir: string; minimum: number }[] = [
+    { dir: 'src', minimum: 25 },
+    { dir: 'public', minimum: 0 },
+  ];
+
+  it('walks the trees it claims to, or says one is missing', () => {
+    for (const { dir, minimum } of HOST_SCAN) {
+      const full = join(ROOT, dir);
+      const found = existsSync(full) ? walk(full).length : 0;
+      expect(found, `${dir}/ has ${found} files, expected at least ${minimum}`)
+        .toBeGreaterThanOrEqual(minimum);
+    }
+  });
+
   it('has no deploy host written into the source tree', () => {
-    // `public/` is optional and currently absent — MUSE-35 moved the fonts, the only
-    // thing in it, into `src/assets/` so that Vite resolves them in dev as well as in
-    // the build. It stays on the list for the day something static comes back.
-    const sources = [join(ROOT, 'src'), join(ROOT, 'public')]
+    const sources = HOST_SCAN.map(({ dir }) => join(ROOT, dir))
       .filter((dir) => existsSync(dir))
       .flatMap(walk);
-
-    // …and the count is asserted, because "the tree I walked does not mention the host"
-    // is also true of a tree that is not there. A path that quietly stops existing is
-    // how a whole-tree check turns into a no-op.
-    expect(sources.length, 'nothing was scanned').toBeGreaterThan(20);
 
     const offenders = sources.filter((f) =>
       readFileSync(f).includes('thekarlo95.github.io'),

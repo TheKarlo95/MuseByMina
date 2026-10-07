@@ -26,6 +26,37 @@ export type Served =
   | { status: 301; location: string }
   | { status: 404 };
 
+/**
+ * Content types for everything the build emits.
+ *
+ * Shared with `./preview.ts` rather than owned by it, because both helpers now serve
+ * pages to a real browser. A stylesheet sent without `text/css` is ignored outright in
+ * standards mode, and HTML without a charset turns every `č` into a replacement
+ * character — so a server that omits these does not render a slightly different page,
+ * it renders a different one.
+ */
+export const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
+  '.xml': 'application/xml; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.woff2': 'font/woff2',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+};
+
+/** The lowercased extension of `file`, dot included, or `''`. */
+export function extensionOf(file: string): string {
+  const dot = file.lastIndexOf('.');
+  return dot === -1 ? '' : file.slice(dot).toLowerCase();
+}
+
 function isFile(outDir: string, relPath: string): boolean {
   try {
     return statSync(join(outDir, relPath)).isFile();
@@ -110,7 +141,13 @@ export async function servePages(build: Build): Promise<Host> {
       res.end('Not Found');
       return;
     }
-    res.writeHead(200);
+    // Typed, not bare. `test/fonts.test.ts` drives a real browser against this host to
+    // measure which faces the CSS engine asks for, and a stylesheet served without
+    // `text/css` is one the browser declines to apply — which would read as "this page
+    // needs no fonts" rather than as a broken harness.
+    res.writeHead(200, {
+      'Content-Type': MIME[extensionOf(served.file)] ?? 'application/octet-stream',
+    });
     res.end(readFileSync(join(build.outDir, served.file)));
   });
 

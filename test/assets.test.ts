@@ -122,23 +122,23 @@ function expectFontPreloads(build: Build): void {
   }
 }
 
-describe('AC1: the Pages sub-path build preloads fonts from under the base path', () => {
+describe('MUSE-8 AC1: the Pages sub-path build preloads fonts from under the base path', () => {
   it('emits every href under /MuseByMina/, to a real file, on every page', () => {
     expectFontPreloads(pages);
   });
 });
 
-describe('AC2: the apex build preloads fonts from the site root', () => {
+describe('MUSE-8 AC2: the apex build preloads fonts from the site root', () => {
   it('emits every href under /, to a real file, on every page', () => {
     expectFontPreloads(apex);
   });
 });
 
 /**
- * AC3 — under either deploy target, every `rel="preload"` href in the built HTML
- * resolves to a file that exists in the output.
+ * MUSE-8 AC3 — under either deploy target, every `rel="preload"` href in the built
+ * HTML resolves to a file that exists in the output.
  */
-describe('AC3: every referenced asset exists in the build output', () => {
+describe('MUSE-8 AC3: every referenced asset exists in the build output', () => {
   /**
    * The references that do not resolve to a file the deploy serves, as readable lines.
    *
@@ -208,7 +208,7 @@ describe('AC3: every referenced asset exists in the build output', () => {
  * `url()` is *correct* under `BASE=/` and broken only under a sub-path, so an apex-only
  * check cannot see this class of bug and a Pages-only check cannot see its mirror image.
  */
-describe('AC4: every url() in the emitted CSS resolves to a file in the output', () => {
+describe('MUSE-35 AC4: every url() in the emitted CSS resolves to a file in the output', () => {
   /** The CSS references that nothing in the output serves, as readable lines. */
   function unresolved(build: Build): string[] {
     const broken: string[] = [];
@@ -242,21 +242,32 @@ describe('AC4: every url() in the emitted CSS resolves to a file in the output',
 });
 
 /**
- * MUSE-35 — a preloaded font must be a font the CSS actually asks for.
+ * MUSE-35 — a preloaded font must at least be a font the stylesheet declares.
  *
- * The trap in fixing this ticket, and the reason it gets a test of its own rather than
- * a careful look at the diff. Route the CSS `url()` through Vite and the font is
- * emitted to a content-hashed path under `_astro/`; leave the `<link rel="preload">`
- * pointing at the `public/` copy and **both URLs are 200 and both resolve to a real
- * file**, so every check above stays green. What the browser does is fetch each
- * preloaded face twice — once for a preload that matches nothing it will ever request,
- * and once for the face itself. A performance regression wearing the fix's clothes.
+ * This catches the trap in fixing the ticket: route the CSS `url()` through Vite and
+ * the font is emitted to a content-hashed path under `_astro/`; leave the
+ * `<link rel="preload">` pointing at the `public/` copy and **both URLs are 200 and
+ * both resolve to a real file**, so every check above stays green. The browser then
+ * fetches each preloaded face twice — once for a preload matching nothing it will ever
+ * request, once for the face itself. A performance regression wearing the fix's
+ * clothes, and only an assertion that the two are the *same URL* sees it.
  *
- * The only thing that catches it is asserting the two URLs are the *same* URL.
+ * ## What this does NOT prove, and where that lives
+ *
+ * It is a subset test against all six declared faces, so it passes when the layout
+ * preloads Inter's `latin-ext` subset instead of its `latin` one — a declared face, but
+ * not one the English pages ever request. Measured: that mutation leaves this check
+ * green.
+ *
+ * The stronger claim — a preloaded face is one the page *would have fetched anyway* —
+ * cannot be made from `dist` alone, because it depends on the CSS engine matching
+ * `unicode-range` against the text on the page. `test/fonts.test.ts` measures it with a
+ * real browser, on every route, in all three environments. This stays because it is
+ * nearly free and it is what pins the `public/`-copy trap specifically.
  */
-describe('a preloaded font is one of the faces the stylesheet declares', () => {
+describe('MUSE-35: a preloaded font is one of the faces the stylesheet declares', () => {
   for (const [name, build] of TARGETS) {
-    it(`preloads nothing the CSS does not request (${name})`, () => {
+    it(`preloads nothing the CSS does not declare (${name})`, () => {
       const target = build();
       const root = `${target.origin}/`;
 
