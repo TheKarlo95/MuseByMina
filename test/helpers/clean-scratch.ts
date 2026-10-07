@@ -1,13 +1,17 @@
 import { rmSync } from 'node:fs';
 
-import { SCRATCH } from './build';
+import { SCRATCH } from './scratch';
 
 /**
- * Empty the build scratch directory once per run, before any test file loads.
+ * Empty the build scratch root once per run, before any test file loads.
  *
- * A `globalSetup` rather than a lazy wipe inside `buildSite`: vitest runs test files in
- * parallel, so "wipe if I am the first to build" ran once per file and deleted a sibling
- * suite's output from under a running `astro build`.
+ * The only `rm` in the test tree, and `test/isolation.test.ts` fails if a second one
+ * appears. A `globalSetup` runs in the main process before any worker exists, so there
+ * is no build for it to delete — unlike a wipe inside a build helper, which is what
+ * deleted a sibling suite's output in MUSE-9 and again in MUSE-10.
+ *
+ * It is housekeeping, not isolation: `claimOutDir` hands out a directory that is already
+ * empty. This just stops yesterday's builds accumulating in `node_modules`.
  */
 export default function setup(): void {
   rmSync(SCRATCH, { recursive: true, force: true });

@@ -61,3 +61,10 @@ npm run shots      # screenshots of all theme states to /tmp/muse-shots
   200, so it cannot see this class of bug.
 - The theme is stamped pre-paint by an inline script (`src/lib/theme.ts`). Never move that
   into a component — it exists to prevent a flash.
+- **A test never chooses where it builds.** `npm test` runs ten real `astro build`s in
+  parallel workers; `test/helpers/scratch.ts` mints a directory per build with `mkdtemp`
+  and passes each one its own cache root, so two suites cannot share an output tree and
+  nothing has to be wiped. There is nothing to remember here — that is the point. This
+  bug was fixed three times as a naming convention (MUSE-9, MUSE-10, MUSE-17) and came
+  back twice; `test/isolation.test.ts` now fails if a suite names a build directory,
+  deletes anything, or spawns its own build.

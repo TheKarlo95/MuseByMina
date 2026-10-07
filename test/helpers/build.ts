@@ -1,28 +1,14 @@
-import { execFileSync } from 'node:child_process';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  statSync,
-} from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const ROOT = fileURLToPath(new URL('../..', import.meta.url));
+import { astroBuild } from './scratch';
 
 /**
- * Build scratch space. Inside the repo rather than `os.tmpdir()` on purpose: Astro
- * moves assets out of `.astro/` with `fs.rename`, which fails with EXDEV when the
- * output directory is on another filesystem.
- *
- * `test/helpers/clean-scratch.ts` empties it once per run, as a `globalSetup`. It used to
- * be emptied lazily by whichever test file built first, which was a race: vitest runs the
- * files in parallel, so the second file's wipe deleted the first file's output from under
- * a running `astro build`. Harmless with two suites, intermittent with three.
+ * Where a build lands is not this module's business any more — `./scratch.ts` mints the
+ * directory and runs `astro build` into it, and nothing in `test/` can name one itself.
+ * Re-exported because `SCRATCH` was part of this module's surface (MUSE-9).
  */
-export const SCRATCH = join(ROOT, 'node_modules/.muse-test-builds');
+export { SCRATCH } from './scratch';
 
 /** A deploy target, exactly as CI passes it to `npm run build`. */
 export interface Deploy {
@@ -41,20 +27,6 @@ export const APEX_DEPLOY: Deploy = {
   SITE: 'https://muse.example',
   BASE: '/',
 };
-
-/**
- * Vitest stamps Vite's own reserved env names onto `process.env` for the test run.
- * Inherited by a child `astro build` they override the real config — `BASE_URL=/`
- * silently flattens `base`, and `NODE_ENV=test` is not what CI builds with. Drop them
- * so the child sees exactly the environment the deploy workflow gives it.
- */
-const VITEST_LEAKS = ['BASE_URL', 'MODE', 'DEV', 'PROD', 'SSR', 'NODE_ENV'];
-
-function deployEnv(deploy: Deploy): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const key of VITEST_LEAKS) delete env[key];
-  return { ...env, SITE: deploy.SITE, BASE: deploy.BASE };
-}
 
 export interface Build {
   deploy: Deploy;
@@ -79,20 +51,13 @@ function walkOutput(dir: string): string[] {
 }
 
 /**
- * Build the real site into a throwaway directory with the given SITE/BASE.
+ * Build the real site into a directory of its own with the given SITE/BASE.
  *
- * Deliberately shells out to `astro build` rather than poking at internals: the
- * acceptance criteria are all about what lands in the deployed output.
+ * The output directory is minted by `astroBuild`, not chosen here: see `./scratch.ts`
+ * for why that is the fix for MUSE-17 rather than another per-suite naming scheme.
  */
 export function buildSite(deploy: Deploy): Build {
-  mkdirSync(SCRATCH, { recursive: true });
-  const outDir = mkdtempSync(join(SCRATCH, 'build-'));
-
-  execFileSync('npx', ['astro', 'build', '--outDir', outDir], {
-    cwd: ROOT,
-    env: deployEnv(deploy),
-    stdio: 'pipe',
-  });
+  const outDir = astroBuild({ SITE: deploy.SITE, BASE: deploy.BASE });
 
   const basePath = deploy.BASE === '/' ? '' : deploy.BASE.replace(/\/$/, '');
 

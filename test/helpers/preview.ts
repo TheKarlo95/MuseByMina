@@ -1,20 +1,18 @@
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
+import { astroBuild } from './scratch';
 import { resolveRequest } from './serve';
 
 /**
  * A served build, for the browser suites.
  *
- * `test/helpers/build.ts` builds into a shared scratch tree it wipes per run; this one
- * owns its own output directory and never touches that tree, so adding a third suite
- * cannot race the two that already build there. It also needs two things that helper
- * deliberately does not do: a running HTTP server, and a stub endpoint standing in for
- * the form provider.
+ * Output lands wherever `astroBuild` puts it, same as `test/helpers/build.ts`: a
+ * directory nothing else can name and nobody has to clear. What this helper adds over
+ * that one is a running HTTP server and a stub endpoint standing in for the form
+ * provider.
  *
  * The stub is served **same-origin**. The real endpoint is cross-origin, but a mocked
  * cross-origin JSON POST has to survive a CORS preflight that browser automation does
@@ -29,21 +27,6 @@ import { resolveRequest } from './serve';
  * every URL would be the easiest possible way to stop noticing a trailing-slash
  * regression.
  */
-const ROOT = fileURLToPath(new URL('../..', import.meta.url));
-
-/**
- * Output directory for one browser suite.
- *
- * Inside the repo: Astro renames files out of `.astro/`, which is EXDEV across devices.
- *
- * Per suite, not shared: `buildPreview` wipes the directory before building into it, and
- * vitest runs test files in parallel workers. A single fixed path meant the second
- * browser suite to start deleted the first one's output from under a running build — the
- * same race `test/helpers/clean-scratch.ts` exists to prevent for `build.ts`. Each caller
- * names its own tree instead.
- */
-const outDirFor = (suite: string): string =>
-  join(ROOT, `node_modules/.muse-preview-${suite}`);
 
 /** What `.github/workflows/deploy.yml` deploys to today — the sub-path case. */
 export const PREVIEW_SITE = 'https://thekarlo95.github.io';
@@ -55,9 +38,6 @@ export const PREVIEW_BASE = '/MuseByMina';
  * Deliberately outside `PREVIEW_BASE` so it cannot be mistaken for a page of the site.
  */
 export const STUB_ENDPOINT = '/__form';
-
-/** See `build.ts` — Vitest stamps Vite's reserved names onto `process.env`. */
-const VITEST_LEAKS = ['BASE_URL', 'MODE', 'DEV', 'PROD', 'SSR', 'NODE_ENV'];
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -114,27 +94,25 @@ export interface Preview {
   close(): Promise<void>;
 }
 
-/** The built output directory for `suite`, rebuilt once per worker. */
-export function buildPreview(suite: string): string {
-  const out = outDirFor(suite);
-  rmSync(out, { recursive: true, force: true });
-  mkdirSync(out, { recursive: true });
-
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const key of VITEST_LEAKS) delete env[key];
-
-  execFileSync('npx', ['astro', 'build', '--outDir', out], {
-    cwd: ROOT,
-    env: {
-      ...env,
+/**
+ * Build the site with the stub endpoint configured, into a directory of its own.
+ *
+ * `label` is a readability hint only — it shapes the directory name so a failed build
+ * says which suite owned the tree. It used to *be* the isolation (MUSE-10 gave each
+ * suite its own name), which is why this bug came back: a name has to be remembered, and
+ * a suite copied from another one inherits the name along with everything else. Two
+ * callers passing the same label now still get different directories, and a caller that
+ * passes none is just as isolated.
+ */
+export function buildPreview(label?: string): string {
+  return astroBuild(
+    {
       SITE: PREVIEW_SITE,
       BASE: PREVIEW_BASE,
       PUBLIC_FORM_ENDPOINT: STUB_ENDPOINT,
     },
-    stdio: 'pipe',
-  });
-
-  return out;
+    label,
+  );
 }
 
 function extensionOf(file: string): string {
@@ -145,13 +123,13 @@ function extensionOf(file: string): string {
 /**
  * Build the site with the stub endpoint configured, then serve it.
  *
- * `suite` names the output tree, so two browser suites running in parallel workers do
- * not build into — and wipe — the same directory.
+ * `label` only shapes the output directory's name; see `buildPreview`. Two browser
+ * suites running in parallel workers cannot share an output tree whatever they pass.
  */
-export async function startPreview(suite: string): Promise<Preview> {
+export async function startPreview(label?: string): Promise<Preview> {
   // Always a fresh build: stale output that happens to pass is the one failure mode a
   // build-and-assert suite must never have.
-  const outDir = buildPreview(suite);
+  const outDir = buildPreview(label);
 
   const requests: StubRequest[] = [];
   let nextReply: StubReply = { kind: 'ok' };
