@@ -80,13 +80,28 @@ describe('the form copy table', () => {
     }
   });
 
-  it('offers the same level values in both languages, with different labels', () => {
-    expect(EN.levels.map((l) => l.value)).toEqual(HR.levels.map((l) => l.value));
+  it('offers the same level values in both languages', () => {
     // The submitted value is language-independent, so the studio inbox reads the same
     // whichever site a person used.
-    for (const [index, level] of HR.levels.entries()) {
-      expect(EN.levels[index]!.label, `level ${level.value} label`).not.toBe(level.label);
-    }
+    expect(EN.levels.map((l) => l.value)).toEqual(HR.levels.map((l) => l.value));
+  });
+
+  it('labels the levels the same way in both, and translates the one that is prose', () => {
+    // These labels used to be required to *differ*, which was the pre-MUSE-6 rule.
+    // A level renders English in both locales, and since MUSE-11 both locales read it
+    // from `LEVEL_NAME` — so the three level labels are the same words on purpose,
+    // and the Croatian form no longer says `Početni` while `/schedule` says `Beginner`.
+    const [hrNotSure, ...hrLevels] = HR.levels;
+    const [enNotSure, ...enLevels] = EN.levels;
+
+    expect(hrLevels.length, 'the three levels are missing from the select').toBe(3);
+    expect(enLevels.map((l) => l.label)).toEqual(hrLevels.map((l) => l.label));
+
+    // "Još ne znam" / "Not sure yet" is not a level. It is prose, so it is translated.
+    expect(hrNotSure!.value, 'the default option is the blank one').toBe('');
+    expect(enNotSure!.label, 'the "not sure yet" option is not translated').not.toBe(
+      hrNotSure!.label,
+    );
   });
 
   it('ends the two strings a link is appended to with a colon', () => {

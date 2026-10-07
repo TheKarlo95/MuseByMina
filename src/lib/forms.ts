@@ -1,4 +1,5 @@
 import type { Locale } from './i18n';
+import { LEVELS, LEVEL_NAME, type Level } from './schedule';
 
 /**
  * The trial-class form: field model, endpoint and every user-facing string.
@@ -65,8 +66,37 @@ export const FORM_FIELDS: readonly FieldDef[] = [
 export const HONEYPOT_FIELD = '_gotcha';
 
 export interface LevelOption {
+  /** Submitted value. Language-independent, so the studio inbox reads the same. */
   value: string;
   label: string;
+}
+
+/**
+ * The submitted value for each level — a wire format, not a display name.
+ *
+ * These are the strings the studio inbox and `test/contact.test.ts` already read,
+ * so they stay as they are. The *labels* were a second copy of the level names
+ * (`Početni` on the Croatian form while `/schedule` said `Beginner`), which is
+ * what MUSE-11 removed: only `LEVEL_NAME` spells a level now.
+ */
+const LEVEL_VALUE: Record<Level, string> = {
+  beginner: 'pocetni',
+  intermediate: 'srednji',
+  advanced: 'napredni',
+};
+
+/**
+ * The level `<select>`: "not sure yet" first, then the three levels in order.
+ *
+ * The blank default is deliberate (MUSE-7) — asking a beginner to self-assess is
+ * the fastest way to lose them — and it is the only option with wording of its
+ * own, because it is not a level.
+ */
+function levelOptions(locale: Locale, notSure: string): readonly LevelOption[] {
+  return [
+    { value: '', label: notSure },
+    ...LEVELS.map((level) => ({ value: LEVEL_VALUE[level], label: LEVEL_NAME[locale][level] })),
+  ];
 }
 
 export interface FormCopy {
@@ -115,12 +145,7 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
       level: 'Ne znaš? Ostavi kako je i predložit ćemo ti.',
       message: 'Dolaziš s nekim? Imaš pitanje? Napiši nam.',
     },
-    levels: [
-      { value: '', label: 'Još ne znam' },
-      { value: 'pocetni', label: 'Početni' },
-      { value: 'srednji', label: 'Srednji' },
-      { value: 'napredni', label: 'Napredni' },
-    ],
+    levels: levelOptions('hr', 'Još ne znam'),
     submit: 'Pošalji prijavu',
     sending: 'Šaljem…',
     invalid: 'Provjeri označena polja i pošalji ponovno.',
@@ -162,12 +187,7 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
       level: 'Not sure? Leave it as it is and we will suggest one.',
       message: 'Coming with someone? Got a question? Tell us.',
     },
-    levels: [
-      { value: '', label: 'Not sure yet' },
-      { value: 'pocetni', label: 'Beginner' },
-      { value: 'srednji', label: 'Intermediate' },
-      { value: 'napredni', label: 'Advanced' },
-    ],
+    levels: levelOptions('en', 'Not sure yet'),
     submit: 'Send my request',
     sending: 'Sending…',
     invalid: 'Check the marked fields and send again.',

@@ -173,8 +173,11 @@ const filterGroups = [
                   <span class="slotBody">
                     <span class="slotName">{STYLE_NAME[locale][entry.style]}</span>
                     <span class="slotMeta">
-                      {LEVEL_NAME[locale][entry.level]} · {entry.instructor} ·{' '}
-                      {entry.durationMin} min
+                      {/* `data-level-name`: see the contract in Home.astro (MUSE-11). */}
+                      <span data-level-name={entry.level}>
+                        {LEVEL_NAME[locale][entry.level]}
+                      </span>{' '}
+                      · {entry.instructor} · {entry.durationMin} min
                     </span>
                     <span class="slotPrereq">{LEVEL_PREREQUISITE[locale][entry.level]}</span>
                   </span>
@@ -220,7 +223,10 @@ const filterGroups = [
                       >
                         <span class="blockName">{STYLE_NAME[locale][entry.style]}</span>
                         <span class="blockMeta">
-                          {LEVEL_NAME[locale][entry.level]} · {entry.instructor}
+                          <span data-level-name={entry.level}>
+                            {LEVEL_NAME[locale][entry.level]}
+                          </span>{' '}
+                          · {entry.instructor}
                         </span>
                         <span class="blockPrereq">
                           {LEVEL_PREREQUISITE[locale][entry.level]}
