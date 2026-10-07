@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { resolveRequest } from './serve';
 
 /**
- * A served build, for the browser suite.
+ * A served build, for the browser suites.
  *
  * `test/helpers/build.ts` builds into a shared scratch tree it wipes per run; this one
  * owns its own output directory and never touches that tree, so adding a third suite
@@ -31,8 +31,19 @@ import { resolveRequest } from './serve';
  */
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
-/** Inside the repo: Astro renames files out of `.astro/`, which is EXDEV across devices. */
-const OUT_DIR = join(ROOT, 'node_modules/.muse-form-preview');
+/**
+ * Output directory for one browser suite.
+ *
+ * Inside the repo: Astro renames files out of `.astro/`, which is EXDEV across devices.
+ *
+ * Per suite, not shared: `buildPreview` wipes the directory before building into it, and
+ * vitest runs test files in parallel workers. A single fixed path meant the second
+ * browser suite to start deleted the first one's output from under a running build — the
+ * same race `test/helpers/clean-scratch.ts` exists to prevent for `build.ts`. Each caller
+ * names its own tree instead.
+ */
+const outDirFor = (suite: string): string =>
+  join(ROOT, `node_modules/.muse-preview-${suite}`);
 
 /** What `.github/workflows/deploy.yml` deploys to today — the sub-path case. */
 export const PREVIEW_SITE = 'https://thekarlo95.github.io';
@@ -103,15 +114,16 @@ export interface Preview {
   close(): Promise<void>;
 }
 
-/** The built output directory, rebuilt once per worker. */
-export function buildPreview(): string {
-  rmSync(OUT_DIR, { recursive: true, force: true });
-  mkdirSync(OUT_DIR, { recursive: true });
+/** The built output directory for `suite`, rebuilt once per worker. */
+export function buildPreview(suite: string): string {
+  const out = outDirFor(suite);
+  rmSync(out, { recursive: true, force: true });
+  mkdirSync(out, { recursive: true });
 
   const env: NodeJS.ProcessEnv = { ...process.env };
   for (const key of VITEST_LEAKS) delete env[key];
 
-  execFileSync('npx', ['astro', 'build', '--outDir', OUT_DIR], {
+  execFileSync('npx', ['astro', 'build', '--outDir', out], {
     cwd: ROOT,
     env: {
       ...env,
@@ -122,7 +134,7 @@ export function buildPreview(): string {
     stdio: 'pipe',
   });
 
-  return OUT_DIR;
+  return out;
 }
 
 function extensionOf(file: string): string {
@@ -130,11 +142,16 @@ function extensionOf(file: string): string {
   return dot === -1 ? '' : file.slice(dot).toLowerCase();
 }
 
-/** Build the site with the stub endpoint configured, then serve it. */
-export async function startPreview(): Promise<Preview> {
+/**
+ * Build the site with the stub endpoint configured, then serve it.
+ *
+ * `suite` names the output tree, so two browser suites running in parallel workers do
+ * not build into — and wipe — the same directory.
+ */
+export async function startPreview(suite: string): Promise<Preview> {
   // Always a fresh build: stale output that happens to pass is the one failure mode a
   // build-and-assert suite must never have.
-  const outDir = buildPreview();
+  const outDir = buildPreview(suite);
 
   const requests: StubRequest[] = [];
   let nextReply: StubReply = { kind: 'ok' };
