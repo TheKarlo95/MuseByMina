@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -366,7 +366,18 @@ describe('AC4: the deploy target is env-driven, not hardcoded', () => {
   });
 
   it('has no deploy host written into the source tree', () => {
-    const sources = [join(ROOT, 'src'), join(ROOT, 'public')].flatMap(walk);
+    // `public/` is optional and currently absent — MUSE-35 moved the fonts, the only
+    // thing in it, into `src/assets/` so that Vite resolves them in dev as well as in
+    // the build. It stays on the list for the day something static comes back.
+    const sources = [join(ROOT, 'src'), join(ROOT, 'public')]
+      .filter((dir) => existsSync(dir))
+      .flatMap(walk);
+
+    // …and the count is asserted, because "the tree I walked does not mention the host"
+    // is also true of a tree that is not there. A path that quietly stops existing is
+    // how a whole-tree check turns into a no-op.
+    expect(sources.length, 'nothing was scanned').toBeGreaterThan(20);
+
     const offenders = sources.filter((f) =>
       readFileSync(f).includes('thekarlo95.github.io'),
     );

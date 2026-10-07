@@ -5,14 +5,37 @@
 
    Cormorant's default figures are OLD-STYLE, so `19:00` renders `I9:OO`. The
    fix is one inherited declaration on the document, not a rule per face —
-   see the numerals block in `base.css` (MUSE-14). */
+   see the numerals block in `base.css` (MUSE-14).
+
+   ## The files live in `src/assets/`, and `url()` is RELATIVE. Keep it that way.
+
+   These said `url('/fonts/…woff2')` and the fonts sat in `public/`, which is
+   wrong in a way that only one of the two environments shows (MUSE-35). Vite
+   rewrites a root-absolute CSS `url()` to include `base` **when it builds** and
+   not when it serves, so the deploy was correct and `astro dev` answered all six
+   with 404 and fell back to Georgia — for the life of the project. Every local
+   visual check was reading the wrong typeface. The expensive one was MUSE-14:
+   Georgia has lining figures, so the `II:OO` bug was invisible in dev and a
+   developer reproducing it would have found it already fixed.
+
+   A relative `url()` is resolved by Vite in *both* environments, because the
+   font becomes a node in the module graph rather than a path handed to the
+   server as a string. Nothing here joins a base path, so nothing here can join
+   one wrongly — and the emitted filename is content-hashed, so the deploy can
+   serve these immutable.
+
+   `src/layouts/BaseLayout.astro` preloads two of them, through a `?url` import
+   of the same file. That is the other half of the rule: the preload and the
+   `src` must be the SAME URL, or the browser fetches each preloaded face twice
+   and the preload matches nothing. `test/assets.test.ts` asserts it against the
+   built output and `test/fonts.test.ts` against the dev server. */
 
 @font-face {
   font-family: 'Cormorant Garamond';
   font-style: normal;
   font-weight: 400 600;
   font-display: swap;
-  src: url('/fonts/cormorant-garamond-latin-ext.woff2') format('woff2');
+  src: url('../assets/fonts/cormorant-garamond-latin-ext.woff2') format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 @font-face {
@@ -20,7 +43,7 @@
   font-style: normal;
   font-weight: 400 600;
   font-display: swap;
-  src: url('/fonts/cormorant-garamond-latin.woff2') format('woff2');
+  src: url('../assets/fonts/cormorant-garamond-latin.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -29,7 +52,7 @@
   font-style: normal;
   font-weight: 300 500;
   font-display: swap;
-  src: url('/fonts/jost-300-500-latin-ext.woff2') format('woff2');
+  src: url('../assets/fonts/jost-300-500-latin-ext.woff2') format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 @font-face {
@@ -37,7 +60,7 @@
   font-style: normal;
   font-weight: 300 500;
   font-display: swap;
-  src: url('/fonts/jost-300-500-latin.woff2') format('woff2');
+  src: url('../assets/fonts/jost-300-500-latin.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
@@ -46,7 +69,7 @@
   font-style: normal;
   font-weight: 400 600;
   font-display: swap;
-  src: url('/fonts/inter-400-600-latin-ext.woff2') format('woff2');
+  src: url('../assets/fonts/inter-400-600-latin-ext.woff2') format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 @font-face {
@@ -54,6 +77,6 @@
   font-style: normal;
   font-weight: 400 600;
   font-display: swap;
-  src: url('/fonts/inter-400-600-latin.woff2') format('woff2');
+  src: url('../assets/fonts/inter-400-600-latin.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }

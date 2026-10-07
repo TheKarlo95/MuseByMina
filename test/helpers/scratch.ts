@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,12 +62,32 @@ function callingSuite(): string {
 }
 
 /**
- * Vitest stamps Vite's own reserved env names onto `process.env` for the test run.
- * Inherited by a child `astro build` they override the real config — `BASE_URL=/`
- * silently flattens `base`, and `NODE_ENV=test` is not what CI builds with. Drop them so
- * the child sees exactly the environment the deploy workflow gives it.
+ * Vitest stamps Vite's own reserved env names, and its own, onto `process.env` for the
+ * test run. Inherited by a child `astro build` or `astro dev` they override the real
+ * config — `BASE_URL=/` silently flattens `base`, and `NODE_ENV=test` is not what CI
+ * builds with. Drop them so the child sees exactly the environment the deploy workflow
+ * gives it.
+ *
+ * `VITEST` is the one with teeth, and it is why this list grew (MUSE-35): Astro's dev
+ * server plugin **returns early when `process.env.VITEST` is set**
+ * (`astro/dist/vite-plugin-astro-server/plugin.js`), because Astro's own suite mounts
+ * the server itself. A child `astro dev` that inherits it starts, prints its greeting,
+ * reports healthy, and answers every route with `Cannot GET` — a dev server with no
+ * site in it. Nothing about that reads as an environment leak from the test's side.
  */
-const VITEST_LEAKS = ['BASE_URL', 'MODE', 'DEV', 'PROD', 'SSR', 'NODE_ENV'];
+const VITEST_LEAKS = [
+  'BASE_URL',
+  'MODE',
+  'DEV',
+  'PROD',
+  'SSR',
+  'NODE_ENV',
+  'VITEST',
+  'VITEST_MODE',
+  'VITEST_POOL_ID',
+  'VITEST_WORKER_ID',
+  'TEST',
+];
 
 /**
  * Build the real site into a directory nothing else can name, and return that directory.
@@ -114,4 +134,160 @@ export function astroBuild(env: NodeJS.ProcessEnv, hint?: string): string {
   }
 
   return outDir;
+}
+
+/**
+ * A running `astro dev`, and the origin it actually bound to.
+ *
+ * `origin` and `base` are read off what the server printed rather than off what it was
+ * asked for: the port is negotiated (see `astroDev`) and the base comes from the config,
+ * so assuming either is how a suite ends up asserting against a server that is not there.
+ */
+export interface DevServer {
+  /** Scheme, host and the port it really bound to — no path. */
+  origin: string;
+  /** The path the site is mounted under, slash included: `/MuseByMina/`, or `/`. */
+  base: string;
+  /** Absolute URL for a site route: `url('schedule/')` → `…/MuseByMina/schedule/`. */
+  url(route: string): string;
+  /** Everything the server has written to stdout/stderr so far, for failure messages. */
+  output(): string;
+  stop(): Promise<void>;
+}
+
+/**
+ * The dev server's own greeting: `┃ Local    http://localhost:4321/MuseByMina/`.
+ *
+ * The path stops at a quote or a backslash as well as at whitespace, because Astro 7
+ * switches to JSON log lines when it detects an agentic environment
+ * (`astro/dist/cli/agent.js`) and the greeting then arrives as one JSON string with the
+ * line break *escaped* — `…/MuseByMina/\n┃ Network…`. A plain `\S*` reads that literal
+ * `\n┃` as part of the URL and yields a base of `/MuseByMina//n%E2%94%83/`, which 404s
+ * every page and makes this suite look like it found no fonts rather than no server.
+ */
+const DEV_URL = /(https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\d+\/[^\s"'\\]*)/;
+
+/** Give up waiting for the greeting. Generous: a cold Vite optimise is not instant. */
+const DEV_READY_TIMEOUT_MS = 120_000;
+
+/** How long a stopped server gets to exit on SIGTERM before it is killed outright. */
+const DEV_STOP_GRACE_MS = 5_000;
+
+/**
+ * Every dev server this worker has started and not yet stopped.
+ *
+ * A leaked `astro dev` does not merely waste a port: it keeps the vitest worker's event
+ * loop alive and the run hangs with no failing test to point at. `afterAll` covers the
+ * ordinary path; this covers the one where the worker dies first.
+ */
+const running = new Set<ChildProcess>();
+process.once('exit', () => {
+  for (const child of running) child.kill('SIGKILL');
+});
+
+/**
+ * Start a real `astro dev` and resolve once it is answering, MUSE-35.
+ *
+ * The second thing in `test/` that starts a child process, and it lives here for the
+ * same reason the first one does: this module is the single entry on
+ * `test/isolation.test.ts`'s allow-list, and widening that list by one file per need is
+ * the defect this repo keeps re-filing. A dev server also needs a cache root of its own
+ * for exactly the reason a build does — Vite's dependency optimiser commits by renaming
+ * `node_modules/.vite/deps` aside and deleting it, and `npm test` has ten builds in
+ * flight — so it is minted the same way, by `claimOutDir`.
+ *
+ * Three flags of note:
+ *
+ *   - `--ignore-lock` keeps the server in the **foreground**. Astro 7 auto-backgrounds
+ *     `astro dev` when it detects an agentic environment (`cli/agent.js`), and a
+ *     daemonised server is one this helper cannot hold a handle to or reliably kill. It
+ *     also means a developer's own dev server on 4321 neither blocks the suite nor is
+ *     stopped by it.
+ *   - `--port` gets an ephemeral port rather than the default, so parallel workers do
+ *     not queue behind each other probing 4321, 4322, 4323…
+ *   - …and the port is still **parsed back out of the greeting**, because Astro moves to
+ *     the next free port when the one it was given is taken. The number we asked for is
+ *     a hint; the number it printed is the truth.
+ */
+export async function astroDev(
+  env: NodeJS.ProcessEnv,
+  hint?: string,
+): Promise<DevServer> {
+  const cacheDir = claimOutDir(hint);
+
+  const childEnv: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of VITEST_LEAKS) delete childEnv[key];
+
+  // 49152–65535 is the IANA ephemeral range; nothing well-known lives there.
+  const port = 49152 + Math.floor(Math.random() * 16_000);
+
+  const child = spawn(
+    'npx',
+    ['astro', 'dev', '--ignore-lock', '--port', String(port)],
+    {
+      cwd: ROOT,
+      env: { ...childEnv, ...env, BUILD_CACHE_DIR: `${cacheDir}.cache` },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
+  running.add(child);
+
+  let log = '';
+  const collect = (chunk: Buffer): void => {
+    log += String(chunk);
+  };
+  child.stdout?.on('data', collect);
+  child.stderr?.on('data', collect);
+
+  const stop = async (): Promise<void> => {
+    running.delete(child);
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    await new Promise<void>((resolve) => {
+      const kill = setTimeout(() => child.kill('SIGKILL'), DEV_STOP_GRACE_MS);
+      child.once('exit', () => {
+        clearTimeout(kill);
+        resolve();
+      });
+      child.kill('SIGTERM');
+    });
+  };
+
+  const greeting = await new Promise<string>((resolve, reject) => {
+    const fail = (why: string): void => {
+      void stop();
+      reject(new Error(`${why}\n--- astro dev output ---\n${log}`));
+    };
+
+    const timer = setTimeout(
+      () => fail(`astro dev did not come up within ${DEV_READY_TIMEOUT_MS}ms`),
+      DEV_READY_TIMEOUT_MS,
+    );
+    const settle = (fn: () => void): void => {
+      clearTimeout(timer);
+      child.stdout?.off('data', watch);
+      child.stderr?.off('data', watch);
+      fn();
+    };
+
+    const watch = (): void => {
+      const match = DEV_URL.exec(log);
+      if (match) settle(() => resolve(match[1]!));
+    };
+    child.stdout?.on('data', watch);
+    child.stderr?.on('data', watch);
+    child.once('error', (cause) => settle(() => fail(`astro dev failed to spawn: ${cause.message}`)));
+    child.once('exit', (code) => settle(() => fail(`astro dev exited (code ${code}) before it was ready`)));
+    watch();
+  });
+
+  const address = new URL(greeting);
+  const base = address.pathname.endsWith('/') ? address.pathname : `${address.pathname}/`;
+
+  return {
+    origin: address.origin,
+    base,
+    url: (route) => `${address.origin}${base}${route.replace(/^\/+/, '')}`,
+    output: () => log,
+    stop,
+  };
 }
