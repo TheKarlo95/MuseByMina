@@ -14,6 +14,23 @@ import sitemap from '@astrojs/sitemap';
 const SITE = process.env.SITE ?? 'https://thekarlo95.github.io';
 const BASE = process.env.BASE ?? '/MuseByMina';
 
+/**
+ * Where this build keeps its caches.
+ *
+ * Astro's own cache and Vite's dependency cache both default to a path under the
+ * *project root* — `node_modules/.astro` and `node_modules/.vite` — so every
+ * simultaneous `astro build` in one checkout shares them, whatever `--outDir` each was
+ * given. Vite's dependency optimiser commits by renaming `node_modules/.vite/deps`
+ * aside and deleting it, which is a destructive write to a directory the other builds
+ * are reading. `npm test` runs ten builds at once (MUSE-17), and no per-suite output
+ * name can isolate a directory the suite never names.
+ *
+ * So the cache root is overridable, the same way SITE/BASE are, and the test helper
+ * gives each build its own. Unset in CI and in `npm run build`, where the defaults are
+ * what you want: one checkout, one build, a warm cache between runs.
+ */
+const BUILD_CACHE_DIR = process.env.BUILD_CACHE_DIR;
+
 const DEFAULT_LOCALE = 'hr';
 
 /**
@@ -28,6 +45,10 @@ const HREFLANG = { hr: 'hr-HR', en: 'en' };
 export default defineConfig({
   site: SITE,
   base: BASE,
+
+  // See BUILD_CACHE_DIR above. `undefined` leaves Astro's and Vite's own defaults alone.
+  cacheDir: BUILD_CACHE_DIR,
+  vite: { cacheDir: BUILD_CACHE_DIR ? `${BUILD_CACHE_DIR}/vite` : undefined },
 
   /**
    * Directory-style output is served at the slashed URL, so the slashed URL is the only
