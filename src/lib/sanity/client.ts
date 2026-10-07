@@ -72,20 +72,25 @@ const CLIENT_CONFIG = {
   projectId: PROJECT_ID,
   dataset: DATASET,
   apiVersion: API_VERSION,
-    // The CDN is cheaper and the build only ever wants published content, so it is the
-    // right default for a *scheduled* or hand-run build.
+    // The CDN is cheaper, and the build only ever wants published content, so it is the
+    // right default for a build that is *scheduled* or run by hand.
     //
-    // It is the wrong default for MUSE-21, and the comment here used to claim the
-    // opposite — "the rebuild webhook is what makes an edit appear, so a few seconds of
-    // CDN lag costs nothing". Backwards: a publish webhook fires a build at the instant
-    // of publish, which is precisely when the CDN is stalest, so the expected outcome is
-    // a green deploy that republishes the pre-edit content and Mina pressing publish
-    // again. Measured here while verifying MUSE-20: an edit took about a minute to
-    // appear. `scripts/sanity-seed-check.mjs` already reads the uncached host for exactly
-    // this reason.
+    // **Harmless, and this comment used to say otherwise.** Up to MUSE-21 it read as a
+    // known defect, on the reasoning that MUSE-21 would land a publish webhook: a build
+    // fired at the instant of publish starts when the CDN is at its stalest, so the
+    // expected outcome was a green deploy that republished the pre-edit content and Mina
+    // pressing publish a second time. Measured while verifying MUSE-20, an edit took
+    // about a minute to show up on the cached host, which is why
+    // `scripts/sanity-seed-check.mjs` reads the uncached one.
     //
-    // Left as `true` deliberately — flipping it is MUSE-21's call to make with its
-    // webhook in hand, not a drive-by here — but it is a known defect, not a trade-off.
+    // MUSE-21 shipped a **scheduled** rebuild instead and no webhook (`src/lib/rebuild.ts`
+    // has the decision). Nothing now starts a build near a publish: the gap between an
+    // edit and the build that picks it up is hours, not seconds, so the CDN is always warm
+    // by the time it is read. A minute of staleness cannot be observed by a run that is
+    // never less than an hour behind the edit, in the same way `--no-cdn` could not make
+    // the content any fresher than the last publish. So this is a plain cost saving with
+    // no trade-off attached, and the only thing that would make it wrong again is
+    // reviving the publish trigger.
     useCdn: true,
     // Drafts exist in the dataset and are readable because the dataset is public. A
     // build must never render one — that is how an unfinished price reaches the web.

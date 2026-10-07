@@ -192,3 +192,81 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node scripts/check-tokens.mjs
+
+  # The one MUSE-21 failure mode that no alert inside the deploy workflow can reach.
+  #
+  # **GitHub disables a scheduled workflow after 60 days of repository inactivity**, and its
+  # documentation promises nothing about telling anyone when it does — the `schedule` event
+  # reference states the rule and is silent on notification. A disabled workflow does not
+  # fail; it does not run. So `deploy.yml`'s `alert` job, which is the answer to every other
+  # way the rebuild loop can break, is structurally blind to this one: there is no run in
+  # which to execute it. For a studio site that can go quiet over a summer, that is the
+  # rebuilds stopping with nothing red anywhere, and Mina's publishes silently going nowhere
+  # — the exact outcome the ticket was written to prevent.
+  #
+  # Synthetic activity was the obvious fix and was rejected. A bot commit or a weekly
+  # Dependabot schedule to keep the clock from expiring rests on an undocumented reading of
+  # what GitHub counts as "repository activity"; it would look like a guard, be impossible
+  # to test, and this repository has already been bitten twice by guards that only appeared
+  # to work. What *is* documented is the workflow's `state` field, which reads
+  # `disabled_inactivity` in precisely this case — so this detects the condition instead of
+  # betting on preventing it.
+  #
+  # `ci.yml` is the right host because it is the only workflow here that is **not**
+  # scheduled and therefore cannot be auto-disabled itself. It runs on every pull request
+  # and every push to `main`, which means the first thing anyone does after a quiet stretch
+  # reports this — before a merge, rather than after a deploy that never happened. Note that
+  # the disable takes the whole workflow with it, push-triggered deploys included, so this
+  # also catches "my merge did not deploy" before it is confusing.
+  #
+  # It fails rather than warns: re-enabling is one click, and a warning annotation in a
+  # green run is not something anybody reads. An unreadable API is a warning, not a
+  # failure — "we could not tell" must not block a pull request.
+  #
+  # Its own job, with its own token: a one-call probe has no business holding `contents:
+  # read`, and a `permissions:` block on the build job would have to be widened for every
+  # action in it.
+  rebuildloop:
+    name: the rebuild loop is still enabled
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - name: Is the scheduled rebuild still enabled?
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # On a failed request `gh api` writes the error *body* to stdout and only the
+          # one-line summary to stderr, so `$( … )` captures a blob of JSON rather than
+          # nothing. Taken from the exit code instead — and then shape-checked, because a
+          # state is a bare identifier and anything else means the API did not answer with
+          # one. The first version of this step read the body as the state and reported a
+          # 404 as "unexpected state", which is the API being unreachable turned into a
+          # failed pull request: exactly the thing the comment above says must not happen.
+          if ! state="$(gh api "/repos/${REPO}/actions/workflows/deploy.yml" --jq '.state' 2>/dev/null)"; then
+            state=''
+          fi
+          case "$state" in
+            '' | *[^a-z_]*) state='' ;;
+          esac
+          echo "deploy.yml state: ${state:-<unreadable>}"
+          case "$state" in
+            active)
+              ;;
+            disabled_inactivity)
+              echo "::error::The deploy workflow has been disabled after 60 days of repository inactivity, so the site has stopped rebuilding from Sanity and pushes to main are not deploying either. Re-enable it: Actions → Deploy to GitHub Pages → ··· → Enable workflow, then run it once by hand. Notifications for a scheduled workflow move to whoever re-enables it, so expect that to be you from now on."
+              exit 1
+              ;;
+            disabled_manually)
+              echo "::error::The deploy workflow is disabled. If that was deliberate, say so in the pull request; if not, re-enable it at Actions → Deploy to GitHub Pages → ··· → Enable workflow. While it is off, nothing Mina publishes reaches the site."
+              exit 1
+              ;;
+            '')
+              echo "::warning::Could not read the deploy workflow's state from the API, so whether the rebuild loop is still enabled is unknown. Not failing on it — check Actions → Deploy to GitHub Pages by hand if this persists."
+              ;;
+            *)
+              echo "::error::The deploy workflow is in an unexpected state (${state}). Anything other than 'active' means the site is not rebuilding."
+              exit 1
+              ;;
+          esac

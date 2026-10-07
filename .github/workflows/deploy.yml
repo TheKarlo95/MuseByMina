@@ -3,6 +3,34 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+
+  # **The rebuild loop (MUSE-21).** The site is static, so a publish in the Studio changes
+  # nothing until a build runs — and with the webhook route declined (it needs a GitHub
+  # token living inside Sanity), a schedule is what makes an edit appear without anyone
+  # touching GitHub.
+  #
+  # It is a trigger on *this* workflow rather than a workflow of its own, deliberately: a
+  # second file would be a second copy of the env block below, which is the kind of drift
+  # that publishes a site built against the wrong dataset. Nothing the relationship this
+  # file has with CI depends on is changed — it still runs `npm run build` and nothing
+  # else, and it still does not `needs:` anything in `ci.yml`.
+  #
+  # The cron is **derived**, not chosen here: it has to equal `REBUILD_CRON` in
+  # `src/lib/rebuild.ts`, because the Studio quotes the same schedule to Mina as a promise
+  # about when her change appears. `test/rebuild.test.ts` parses this line and fails if
+  # they disagree, so the promise cannot outlive the schedule that keeps it. That file also
+  # has the reasoning for four runs a day, for the uniform spacing, and for :20 past rather
+  # than on the hour.
+  schedule:
+    - cron: '20 1,7,13,19 * * *'
+
+  # For *us*, and it costs nothing: a rebuild on demand with no credential anywhere, which
+  # is how a content fix is published without waiting for the next slot and how this
+  # workflow gets verified end to end.
+  #
+  # It is **not** a button for Mina. Putting one in the Studio means a GitHub token in
+  # Sanity, which is the thing MUSE-21 declined; the two are not the same feature and
+  # should not be described as if they were.
   workflow_dispatch:
 
 permissions:
@@ -56,7 +84,43 @@ jobs:
           # file never mentions it.
           SANITY_PROJECT_ID: ${{ vars.SANITY_PROJECT_ID }}
           SANITY_DATASET: ${{ vars.SANITY_DATASET }}
-        run: npm run build
+        # Still `npm run build` and nothing else — the loop around it retries one named
+        # class of failure and nothing more.
+        #
+        # Since MUSE-20 the build fetches live and hard-fails if Sanity does not answer.
+        # That is the right trade (the alternative is publishing pages with empty titles,
+        # which `src/lib/sanity/decode.ts` exists to refuse) but it makes Sanity's
+        # availability a dependency of a job that now runs four times a day unattended. A
+        # minute of API trouble at 01:20 would otherwise open an issue about a site that is
+        # perfectly fine, and an alert that cries wolf is an alert nobody reads — which
+        # would quietly undo the `alert` job below.
+        #
+        # So it retries, and **only** for an unreachable API. A missing document, a GROQ
+        # typo or a type error will not pass on the third attempt; retrying those buys
+        # nothing and delays the red by four minutes. `src/lib/rebuild.ts` owns the pattern
+        # that tells them apart, and `test/content.test.ts` asserts it against the output
+        # of a real build against an unreachable project — so a reworded error message
+        # fails a test rather than silently turning the retry off.
+        shell: bash
+        run: |
+          set -o pipefail
+          attempts=3
+          for attempt in $(seq 1 "$attempts"); do
+            log="$(mktemp)"
+            if npm run build 2>&1 | tee "$log"; then
+              exit 0
+            fi
+            if ! grep -q 'Sanity did not answer a query' "$log"; then
+              echo "::error::The build failed, and not because Sanity was unreachable. Not retrying — read the log above."
+              exit 1
+            fi
+            if [ "$attempt" -lt "$attempts" ]; then
+              echo "::warning::Sanity did not answer (attempt ${attempt}/${attempts}). Retrying in 120s."
+              sleep 120
+            fi
+          done
+          echo "::error::Sanity did not answer after ${attempts} attempts over four minutes. The build reads the dataset at build time by design, so this is an outage, not a content problem — check https://status.sanity.io and re-run this workflow."
+          exit 1
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
@@ -71,3 +135,101 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # ------------------------------------------------------------------ MUSE-21, AC4
+  #
+  # **A failing deploy has to reach a person, and GitHub's own notification cannot be
+  # relied on to do it.**
+  #
+  # The assumption worth killing first: "GitHub emails the repository owner when a
+  # scheduled run fails." It is close enough to true to be dangerous. What GitHub's
+  # documentation actually says is that a scheduled workflow's failure notification goes to
+  # *the user who created the workflow*, that it moves to whoever next edits the cron
+  # syntax, and that it moves again to whoever re-enables the workflow after it has been
+  # disabled. All three are the same person today and need not be tomorrow. On top of that
+  # it is conditional on a per-account preference (Settings → Notifications → Actions) that
+  # has no REST API, so it cannot be verified from here or asserted anywhere — and checked
+  # while building this, `GET /repos/{owner}/{repo}` reports `subscribers_count: 0` and
+  # `GET /repos/{owner}/{repo}/subscription` answers 404, so the owner is not even watching
+  # this repository. Treating that path as the alert would be trusting a setting nobody has
+  # looked at in years.
+  #
+  # So the workflow tells someone itself. An issue is the right shape: it is **assigned**,
+  # and an assignment notification is "Participating" — on by default and independent of
+  # both the Actions preference and the watch state above; it persists, so a failure at
+  # 01:20 is still there in the morning; it is readable by someone who does not know what a
+  # workflow run is; and it needs no credential — `GITHUB_TOKEN` with `issues: write`,
+  # scoped to this one job.
+  #
+  # One issue, reused by commenting, rather than one per failed run: a Sanity outage
+  # spanning three slots is one problem and should be one thread. That also makes the thread
+  # the record of how long the site was stale.
+  #
+  # It fires for a failed push deploy as well as a failed scheduled one, on purpose. The
+  # scheduled case is the one that needed it — nobody is watching an unattended run — but
+  # "the deploy failed and the site is now stale" is the same sentence either way.
+  alert:
+    name: tell a human
+    needs: [build, deploy]
+    # This is load-bearing, not decoration: a job with `needs:` is skipped when a
+    # dependency fails, *unless* its `if` names `failure()`, `always()` or `cancelled()`.
+    # Without it this job would be skipped in exactly the case it exists for.
+    if: failure()
+    runs-on: ubuntu-latest
+    # Replaces the workflow-level block rather than adding to it, so this job cannot
+    # publish to Pages or mint an id token. It does not build; it should not be able to.
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the deploy-failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          TRIGGER: ${{ github.event_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export TITLE='The site deploy is failing'
+          body="$(cat <<EOF
+          The deploy workflow failed, so **the live site has stopped being rebuilt from the
+          Studio**. Anything Mina publishes stays invisible to visitors until this is fixed,
+          and the Studio has promised her a deadline it can no longer meet — so this is on a
+          clock, not a backlog item.
+
+          - Trigger: \`$TRIGGER\`
+          - Failed run: $RUN_URL
+
+          What to look at, in order:
+
+          1. Open the run and read the failing step.
+          2. **\`Sanity did not answer a query\` after three attempts** — an API outage, not a
+             content problem. The build retries for four minutes before giving up; check
+             <https://status.sanity.io> and re-run the workflow.
+          3. **A message naming a document id, a type and a field** — the dataset is missing
+             something the build requires (\`src/lib/sanity/decode.ts\`). Fix it in the Studio
+             at <https://musebymina.sanity.studio>, then re-run the workflow.
+          4. **Anything else** — a code problem; it needs a commit on \`main\`.
+
+          Re-running is "Deploy to GitHub Pages" → Run workflow. No credential is involved.
+
+          Close this issue once a deploy is green. Further failures comment here rather than
+          opening a second issue, so one outage stays one thread.
+          EOF
+          )"
+          # `gh`'s own `--jq` rather than a pipe into `jq`, so this depends on nothing but
+          # `gh` — and `env.TITLE` rather than string interpolation, because the embedded
+          # engine has no `--arg` and the title contains spaces. Exact-match on the title,
+          # not a label: a label has to exist before it can be applied, and a failed alert
+          # is an alert nobody gets. `// empty` makes "no such issue" an empty string
+          # rather than the four characters `null`.
+          existing="$(gh issue list --repo "$REPO" --state open --limit 100 \
+            --json number,title --jq '[.[] | select(.title == env.TITLE)][0].number // empty')"
+          if [ -n "$existing" ]; then
+            echo "Commenting on existing issue #${existing}."
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            echo "Opening a new issue, assigned to ${OWNER}."
+            gh issue create --repo "$REPO" --title "$TITLE" --body "$body" --assignee "$OWNER"
+          fi

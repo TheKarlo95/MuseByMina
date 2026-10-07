@@ -18,6 +18,8 @@ import { claimOutDir } from './helpers/scratch';
 // which is the only module anything outside `src/lib/sanity/` may import.
 import { source } from '../src/lib/sanity';
 import { ROUTES } from '../src/lib/pages';
+// What `.github/workflows/deploy.yml` greps a failed scheduled build for before retrying.
+import { TRANSIENT_BUILD_FAILURE } from '../src/lib/rebuild';
 
 /**
  * MUSE-20 — the site's words come out of Sanity, and the suite never asks the network.
@@ -787,6 +789,32 @@ describe('AC4: empty, unreadable and unreachable stay three different answers', 
     expect(unreachableApi).toContain('muse20nosuchproject');
     expect(unreachableApi).toContain('nosuchdataset');
     expect(unreachableApi).toContain('read path failing');
+  });
+
+  it('says it in the words the scheduled rebuild retries on (MUSE-21)', () => {
+    /**
+     * Since MUSE-21 the deploy also runs four times a day unattended, and a failed run
+     * opens an issue assigned to a person. A minute of Sanity trouble at 01:20 would
+     * otherwise do that about a site that is perfectly fine, so the build retries — and
+     * **only** for an unreachable API, because a missing document or a GROQ typo will not
+     * pass on the third attempt.
+     *
+     * The workflow tells the two apart by grepping the failed build's output for
+     * `TRANSIENT_BUILD_FAILURE`, which makes a shell script in YAML depend on the wording
+     * of an error thrown in `src/lib/sanity/client.ts`. Reword that message and the retry
+     * silently stops happening: green until the first outage, then a false alarm, and an
+     * alert that cries wolf is an alert nobody reads.
+     *
+     * This is the half of that contract that cannot be faked — the output of a real build
+     * against a project that does not exist, which is the closest thing to a Sanity
+     * outage this suite can produce. `test/rebuild.test.ts` asserts the workflow greps for
+     * the same constant.
+     */
+    expect(
+      unreachableApi,
+      'A Sanity outage no longer says what `deploy.yml` retries on, so the scheduled ' +
+        'rebuild will treat the next one as a real failure and page someone.',
+    ).toContain(TRANSIENT_BUILD_FAILURE);
   });
 
   it('tells content faults and infrastructure faults apart by their type', () => {

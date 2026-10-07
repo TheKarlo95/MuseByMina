@@ -590,14 +590,23 @@ describe('every query goes through one module', () => {
   it('carries no read token, anywhere', () => {
     // The dataset is publicly readable and writes are rejected unauthenticated, so a
     // read token would be a secret to rotate and leak without protecting anything.
+    //
+    // The workflows are read off the directory rather than named. They used to be a list
+    // of the three that existed, which meant "anywhere" was a claim this test could not
+    // make: a fourth workflow was free to introduce the token nobody is supposed to add,
+    // and MUSE-21 is the change that would have added one. `test/content.test.ts` had
+    // already learned this for `MUSE_CONTENT_FIXTURE` and this copy had not.
+    const workflows = readdirSync(join(ROOT, '.github/workflows')).map((file) =>
+      join('.github/workflows', file),
+    );
+    expect(workflows.length).toBeGreaterThan(2);
+
     const everywhere = [
       ...sources(),
       'sanity.config.ts',
       'sanity.cli.ts',
       'package.json',
-      '.github/workflows/ci.yml',
-      '.github/workflows/deploy.yml',
-      '.github/workflows/studio.yml',
+      ...workflows,
     ];
     for (const file of everywhere) {
       const text = readFileSync(join(ROOT, file), 'utf8');
@@ -843,7 +852,17 @@ describe('the generated types cannot go stale unnoticed', () => {
      * `styled-components` get bundled, and the workflow file itself — but nothing else,
      * and it may not omit anything.
      */
-    const STUDIO_ONLY = ['package.json', 'package-lock.json', '.github/workflows/studio.yml'];
+    const STUDIO_ONLY = [
+      'package.json',
+      'package-lock.json',
+      '.github/workflows/studio.yml',
+      // MUSE-21: the rebuild cadence. `sanity/badges.ts` turns it into the sentence Mina
+      // reads beside the Publish button, so the Studio has to be redeployed when it moves
+      // — but it defines no field and changes no generated type, so it is deliberately
+      // *not* in the fingerprint. This list is exactly the difference between "the Studio
+      // bundle depends on it" and "the schema is derived from it".
+      'src/lib/rebuild.ts',
+    ];
 
     const workflow = readFileSync(join(ROOT, '.github/workflows/studio.yml'), 'utf8');
     const filter = workflow.slice(

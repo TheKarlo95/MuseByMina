@@ -242,3 +242,51 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   `main`. `SANITY_PROJECT_ID` and `SANITY_DATASET` are repository *variables*; there is
   **no read token anywhere** and none should be added — the dataset is publicly readable
   and writes are rejected unauthenticated.
+
+## Rebuilding when Mina publishes (MUSE-21)
+
+- **A schedule, not a webhook, and no GitHub token anywhere.** `deploy.yml` carries a
+  `schedule:` trigger alongside `push`. The webhook route (Sanity → `repository_dispatch`)
+  works and is what most projects do, but it needs a GitHub PAT living inside a third
+  party, which is the one property this project's architecture was arranged to keep. Do
+  not add one. The cost is latency, and latency is the thing the Studio can be honest
+  about.
+- **`src/lib/rebuild.ts` is the only place the cadence is written.** The cron in
+  `deploy.yml` and the sentence Mina reads in the Studio are both derived from
+  `REBUILD_HOURS_UTC`; `test/rebuild.test.ts` parses the workflow and fails if they
+  disagree, and re-derives "when does this cron next fire" independently over a year of
+  instants rather than comparing strings. Because the Studio quotes it, that file is in
+  `studio.yml`'s `paths:` — as a *studio-only* path, since it defines no field and is
+  deliberately not in the schema fingerprint.
+- **What Mina is promised is a duration, never a clock time.** Cron is UTC and does not
+  shift with daylight saving, so a sentence naming 15:20 is wrong for half the year in a
+  way nobody notices until she does. The badge in `sanity/badges.ts` *offers* a local time
+  — computed in her browser, which is the only way it can be right in both halves of the
+  year — but the commitment is `MAX_WAIT_HOURS`, which is computed from the gaps between
+  runs so that bunching them into the working day widens the promise instead of breaking
+  it. Keep the spacing uniform or the ceiling grows to the overnight gap.
+- **Five edits do not cause five builds, because edits do not cause builds.** The
+  debouncing problem the ticket describes does not exist under a schedule; there is nothing
+  to add a concurrency group for beyond the `pages` group that was already there.
+- **A failed deploy opens an issue assigned to the owner. Do not replace that with
+  GitHub's own notification.** For a scheduled workflow GitHub notifies whoever created it,
+  moving to whoever last edited the cron and again to whoever re-enabled it, and only if a
+  per-account Actions preference is on — a preference with no REST API, so nothing here can
+  assert it. Measured while building this: `subscribers_count` on this repository is 0 and
+  `GET /subscription` 404s. An assignment notification is "Participating", on by default,
+  and independent of both.
+- **`npm run build` fetches live and hard-fails on an outage, so the scheduled build
+  retries — for that one failure and nothing else.** It greps the failed build for
+  `TRANSIENT_BUILD_FAILURE`, which couples a shell script to the wording of an error in
+  `src/lib/sanity/client.ts`; `test/content.test.ts` asserts that constant against the
+  output of a **real build against an unreachable project**, so rewording the error fails
+  a test rather than silently turning the retry off. A content or code failure is not
+  retried: it will not pass on the third attempt.
+- **GitHub disables a scheduled workflow after 60 days of repository inactivity and
+  promises no notification when it does.** A disabled workflow does not fail, so the alert
+  above is structurally blind to it, and the disable takes push-triggered deploys with it.
+  Synthetic activity to keep the clock alive was rejected — a bot commit or a Dependabot
+  schedule rests on an undocumented reading of "repository activity" and would be a guard
+  that cannot be tested. Instead `ci.yml`'s `rebuildloop` job reads the documented `state`
+  field and fails if it is not `active`. `ci.yml` is the host because it is the only
+  workflow here that is not scheduled and so cannot be disabled itself.
