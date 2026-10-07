@@ -1,0 +1,84 @@
+name: Deploy Sanity Studio
+
+# A schema change in this repo and the Studio Mina edits in are two separate
+# deployments, by design (MUSE-19): the Studio is hosted by Sanity so that a Studio
+# problem cannot take the public site down, and so that React and a whole editor never
+# enter the build of a site that ships zero JavaScript files.
+#
+# The cost of that separation is that the two can drift, and drift is worse than either
+# failure: a Studio one schema behind the dataset shows Mina fields that no longer exist
+# and hides the ones that do, and she has no way of telling. So the schema is not allowed
+# to reach `main` without the Studio following it — that is this workflow's only job.
+#
+# It is deliberately *not* part of the Pages deploy. The site must go out whether or not
+# Sanity's hosting is having a bad day, and vice versa.
+on:
+  push:
+    branches: [main]
+    paths:
+      # Everything the Studio's schema is built from, including the two app modules the
+      # schema imports its closed sets out of — levels, styles, weekdays, the route list.
+      # `scripts/check-sanity.mjs` hashes the same list; keep them together.
+      - 'sanity/schemaTypes/**'
+      - 'sanity/structure.ts'
+      - 'sanity.config.ts'
+      - 'sanity.cli.ts'
+      - 'src/lib/schedule.ts'
+      - 'src/lib/pages.ts'
+      - 'package-lock.json'
+      - '.github/workflows/studio.yml'
+  # Also runnable by hand, for the first deploy and for recovering from a failed one.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One Studio deploy at a time, and let an in-flight one finish: a cancelled deploy can
+# leave the hosted bundle half-replaced.
+concurrency:
+  group: sanity-studio
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: sanity deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # Fails if `sanity/schema.json`, the generated types or the stamp are out of date,
+      # so a stale-artefact commit never gets as far as replacing Mina's Studio.
+      - run: npm run sanity:check
+
+      # `sanity schema validate` is the Studio's own opinion of the schema — stricter
+      # than extraction, and the cheapest place to find a malformed type definition.
+      - name: Validate the schema
+        run: npx sanity schema validate
+        env:
+          SANITY_STUDIO_PROJECT_ID: ${{ vars.SANITY_PROJECT_ID }}
+          SANITY_STUDIO_DATASET: ${{ vars.SANITY_DATASET }}
+
+      - name: Build and deploy the Studio
+        run: npm run sanity:deploy
+        env:
+          SANITY_STUDIO_PROJECT_ID: ${{ vars.SANITY_PROJECT_ID }}
+          SANITY_STUDIO_DATASET: ${{ vars.SANITY_DATASET }}
+          # The one secret this project needs, and it is a *write* credential for
+          # Sanity's hosting — not a read token. The dataset is publicly readable, so
+          # nothing in this repo authenticates a read; deploying a Studio bundle to
+          # Sanity's own hosting is the only operation here that is not public.
+          #
+          # Create it with `npx sanity debug --secrets` → or at
+          # https://sanity.io/manage → API → Tokens, with Deploy Studio permission, and
+          # add it at Settings → Secrets and variables → Actions → Secrets as
+          # SANITY_DEPLOY_TOKEN. Until it is set this job fails and the site deploy is
+          # unaffected, which is the right way round.
+          SANITY_AUTH_TOKEN: ${{ secrets.SANITY_DEPLOY_TOKEN }}
+
+      - name: Where Mina edits
+        run: echo "Studio deployed to https://musebymina.sanity.studio"

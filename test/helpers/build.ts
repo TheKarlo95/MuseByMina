@@ -40,6 +40,15 @@ export interface Build {
   isFile(file: string): boolean;
   /** Every `.html` page in the output, as output-relative paths. */
   htmlFiles(): string[];
+  /**
+   * Every file in the output, recursively, as output-relative paths.
+   *
+   * `files()` lists the output root only, which is enough to check that a root-level
+   * artefact exists. `test/nojs.test.ts` needs the whole tree instead: its claim is that
+   * there is no `.js` file *anywhere* in the deployed output, and a deny-list that only
+   * sees the root is a deny-list that misses `_astro/`.
+   */
+  allFiles(): string[];
 }
 
 /** Every file under `dir`, recursively, as absolute paths. */
@@ -78,6 +87,10 @@ export function buildSite(deploy: Deploy): Build {
     htmlFiles: () =>
       walkOutput(outDir)
         .filter((f) => f.endsWith('.html'))
+        .map((f) => relative(outDir, f).replace(/\\/g, '/'))
+        .sort(),
+    allFiles: () =>
+      walkOutput(outDir)
         .map((f) => relative(outDir, f).replace(/\\/g, '/'))
         .sort(),
   };

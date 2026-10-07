@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "node scripts/check-sanity.mjs && astro build",
     "preview": "astro preview",
     "typecheck": "astro check",
     "test": "vitest run",
@@ -15,11 +15,18 @@
     "shots": "node scripts/screenshot-themes.mjs",
     "astro": "astro",
     "ds": "node scripts/check-tokens.mjs",
-    "ux:schedule": "node scripts/schedule-ux.mjs"
+    "ux:schedule": "node scripts/schedule-ux.mjs",
+    "sanity:types": "sanity schema extract --path sanity/schema.json --enforce-required-fields --force && sanity typegen generate && node scripts/stamp-sanity.mjs",
+    "sanity:check": "node scripts/check-sanity.mjs",
+    "sanity:read": "node scripts/sanity-read-check.mjs",
+    "sanity:dev": "sanity dev",
+    "sanity:deploy": "sanity deploy .sanity/studio --yes"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.4",
-    "astro": "^7.3.6"
+    "@sanity/client": "8.9.0",
+    "astro": "^7.3.6",
+    "groq": "^6.18.0"
   },
   "allowScripts": {
     "esbuild": true
@@ -31,6 +38,7 @@
     "@axe-core/playwright": "^4.13.0",
     "@types/node": "^26.6.4",
     "playwright": "^1.63.0",
+    "sanity": "^6.18.0",
     "typescript": "^6.0.3",
     "vitest": "^5.0.3",
     "wait-on": "^9.5.1"
