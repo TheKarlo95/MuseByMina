@@ -29,19 +29,57 @@ const label = locale === 'hr' ? 'Jezik' : 'Language';
 </div>
 
 <script>
-  import { LANG_STORAGE_KEY } from '../lib/lang';
+  import { isLocale } from '../lib/i18n';
+  import { carryLocation, LANG_STORAGE_KEY } from '../lib/lang';
 
-  // An explicit choice must stick, or the homepage auto-redirect would keep
-  // overriding it on the next visit.
-  document.querySelectorAll<HTMLAnchorElement>('[data-locale-switch] a').forEach((a) => {
+  const links = [
+    ...document.querySelectorAll<HTMLAnchorElement>('[data-locale-switch] a'),
+  ];
+
+  // The href rendered above: the equivalent page in that locale, with neither query nor
+  // fragment, because `Astro.url.pathname` has neither to give. Kept aside so repeated
+  // syncs rewrite from the clean URL rather than appending to their own output.
+  const rendered = new Map(links.map((a) => [a, a.getAttribute('href') ?? '']));
+
+  /**
+   * Point each link at the *current* URL's query and fragment.
+   *
+   * A fragment is never sent to the server, so this is the only place it can be attached
+   * (MUSE-16). Done as an href rewrite rather than inside the click handler so that every
+   * way of following the link benefits — middle-click, "open in new tab", and "copy link
+   * address" never fire a `click` event, and a switcher that only worked for a plain left
+   * click would still be dropping the fragment for everyone else.
+   */
+  const sync = () => {
+    for (const a of links) {
+      const locale = a.dataset.locale;
+      if (!isLocale(locale)) continue;
+      const href = rendered.get(a);
+      if (href === undefined) continue;
+      a.setAttribute('href', carryLocation(href, locale, location.search, location.hash));
+    }
+  };
+
+  sync();
+  // The fragment is live: a visitor who lands on `/en/` and then clicks the header CTA to
+  // `#trial` has changed where the switcher should take them, without any navigation.
+  addEventListener('hashchange', sync);
+  addEventListener('popstate', sync);
+
+  for (const a of links) {
     a.addEventListener('click', () => {
+      // Belt and braces: the href is read after this handler returns, so a URL changed by
+      // something that fired neither event is still caught at the moment it matters.
+      sync();
+      // An explicit choice must stick, or the homepage auto-redirect would keep
+      // overriding it on the next visit.
       try {
         localStorage.setItem(LANG_STORAGE_KEY, a.dataset.locale ?? '');
       } catch {
         /* private mode — the navigation still happens */
       }
     });
-  });
+  }
 </script>
 
 <style>
