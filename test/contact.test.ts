@@ -225,7 +225,15 @@ function fieldOf(fields: FieldState[], name: FieldName): FieldState {
  * behind the fixed header, and the form's first field is wholly inside the viewport.
  * The block as a whole is taller than a laptop viewport — asserting it fits would be
  * asserting a different, smaller form than the one the ticket asks for.
+ *
+ * "Any CTA" was read off `a[href*="#trial"]`, which stopped meaning that in MUSE-16: the
+ * locale switcher now carries the current fragment on its hrefs, so on a page whose hash
+ * is `#trial` the two language links match too. They are not CTAs — following one is a
+ * request to change language, and it lands on the *other* locale's page — so they are
+ * excluded by the `data-locale` attribute only they carry.
  */
+const TRIAL_CTA = 'a[href*="#trial"]:not([data-locale])';
+
 describe('AC1: every CTA lands on #trial, clear of the fixed header', () => {
   for (const target of TARGETS) {
     it(`${target.locale}: every CTA on the homepage scrolls #trial clear of the header`, async () => {
@@ -236,7 +244,7 @@ describe('AC1: every CTA lands on #trial, clear of the fixed header', () => {
           LOCALE_HTML_LANG[target.locale],
         );
 
-        const ctas = await page.$$eval('a[href*="#trial"]', (els) =>
+        const ctas = await page.$$eval(TRIAL_CTA, (els) =>
           els.map((el) => el.getAttribute('href') ?? ''),
         );
         // The header CTA and the hero CTA at minimum. A vacuous pass would be zero links.
@@ -250,7 +258,7 @@ describe('AC1: every CTA lands on #trial, clear of the fixed header', () => {
             history.replaceState(null, '', location.pathname);
             window.scrollTo(0, 0);
           });
-          const link = page.locator('a[href*="#trial"]').nth(index);
+          const link = page.locator(TRIAL_CTA).nth(index);
           await link.click();
           await settleScroll(page);
 

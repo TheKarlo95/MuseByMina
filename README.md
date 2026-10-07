@@ -98,6 +98,21 @@ Language defaults from the browser's `Accept-Language`, decided client-side sinc
 hosting has no edge compute. The redirect is deliberately narrow: homepage only, never if a
 choice is stored, and via `replaceState` so Back isn't trapped.
 
+Three signals can pick a language, in this order: **`?lang=` beats a stored `muse-lang`
+beats the browser.** The parameter is explicit, it is attached to this request, and it is
+how a link gets shared in a particular language, so it overrides — and replaces — a choice
+made on an earlier visit. The browser's preference is a default, not a decision, so it goes
+last.
+
+Both halves of a language change carry the viewer's `?query` and `#fragment` across: the
+automatic redirect (MUSE-10) and the manual switcher (MUSE-16). A fragment is never sent to
+the server, so neither can be fixed anywhere but in the browser — the switcher attaches it
+to its hrefs client-side, rewriting any `?lang=` to the locale it is switching to so the
+destination does not immediately bounce back. `src/lib/lang.ts` is the single place the rule
+lives; `test/lang.test.ts` and `test/localeswitch.test.ts` drive both in a real browser and
+assert the destination is scrolled clear of the fixed header, not merely that the URL is
+right.
+
 ## Machine-readable surface
 
 Three files are generated at build time, never checked in, because every URL in them is
