@@ -174,6 +174,26 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
 - **One read module.** All GROQ lives in `src/lib/sanity/queries.ts` and every page
   imports `src/lib/sanity/` and nothing else. `test/sanity.test.ts` fails if a query
   string or `@sanity/client` appears anywhere else under `src/`.
+- **Every query is executed against a row, and `test/projections.test.ts` is the only
+  thing that does it** (MUSE-44). Nine of the eleven queries were run by nothing, so no
+  projection in them had ever been checked — `class->nam` type-checked, built, exited 0
+  and would have shipped a schedule of blanks. Three layers look like they cover this and
+  none does: `npm run sanity:read` runs all eleven live, but against a dataset with no
+  classes or images, so all nine report `EMPTY` — correct for an empty dataset and
+  indistinguishable from a wrong projection; `test/sanity.test.ts` decodes rows that are
+  already **post**-projection, so the test and the query cannot disagree; and `sanity
+  typegen` derives result types from the query *text*, so a typo yields a *consistent*
+  wrong type. So that suite calls the real readers against structural fixtures in
+  `test/helpers/structural-content.ts` — **not** `sanity/seed/content.ndjson`, which
+  `npm run sanity:seed` imports into the live dataset. A new query needs a case there, and
+  the bar is the ticket's: rename one projected field and the suite must go red. Watch out
+  for the fields with a silent fallback — `featured` decodes to `false`, `lineup` to `[]`,
+  `author`/`endsAt`/`hotspot` to `undefined` — which is why the fixture fills every
+  optional field the seed leaves empty. The fixture also carries `drafts.`-prefixed
+  documents, so all forty-odd assertions run against a dataset holding drafts: MUSE-20
+  proves the filter works for `page`, which is one of the two queries that *were* already
+  executed, and a leaked draft `scheduleSlot` or `pricingTier` is a class or a price on the
+  public site that nobody published.
 - **Bilingual values are two named fields**, `hr` and `en`, inside a `localeString` /
   `localeText` / `localeRichText` object — not a field-level i18n plugin and not one
   document per locale. HR and EN share slugs and one document renders both, so the shape
