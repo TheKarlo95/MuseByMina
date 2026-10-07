@@ -64,6 +64,11 @@ interface Visit {
  * `storedLang` is seeded with an init script so it is in `localStorage` *before* the
  * blocking inline script in `<head>` reads it — the same trick `scripts/a11y.mjs` uses
  * to stop the redirect auditing the wrong page.
+ *
+ * The seed only writes when the key is absent. An init script runs again on every
+ * navigation, including the one the redirect performs, so an unconditional write would
+ * reinstate the old value on the destination page and hide the fact that the page we came
+ * from had just replaced it.
  */
 async function visit(
   url: string,
@@ -76,7 +81,9 @@ async function visit(
   });
   if (opts.storedLang !== undefined) {
     await ctx.addInitScript(
-      ([key, value]) => localStorage.setItem(key, value),
+      ([key, value]) => {
+        if (localStorage.getItem(key!) === null) localStorage.setItem(key!, value!);
+      },
       [LANG_STORAGE_KEY, opts.storedLang] as const,
     );
   }
@@ -102,6 +109,41 @@ async function settleScroll(page: Page): Promise<void> {
     last = y;
     await page.waitForTimeout(25);
   }
+}
+
+/** The language this browser has stored, or `null`. */
+function storedLang(page: Page): Promise<string | null> {
+  return page.evaluate((key) => localStorage.getItem(key), LANG_STORAGE_KEY);
+}
+
+interface Session {
+  page: Page;
+  /** Navigate, then wait for whatever the inline script did to settle. */
+  open(url: string): Promise<void>;
+  close(): Promise<void>;
+}
+
+/**
+ * One browser, kept open across several navigations.
+ *
+ * MUSE-33's regression is invisible to a single visit: the *first* visit stores a
+ * language and the *second* has to obey it. Seeding `localStorage` cannot show it either,
+ * because then the seed is doing the storing and the write under test never happens. So
+ * this hands back a context the test navigates twice, which is what a visitor does when
+ * they follow a shared link today and open the site again tomorrow.
+ */
+async function session(locale: string): Promise<Session> {
+  const ctx = await browser.newContext({
+    locale,
+    viewport: { width: 1280, height: 900 },
+  });
+  const page = await ctx.newPage();
+  const open = async (url: string): Promise<void> => {
+    await page.goto(url, { waitUntil: 'networkidle' });
+    await page.evaluate(() => document.fonts.ready);
+    await settleScroll(page);
+  };
+  return { page, open, close: () => ctx.close() };
 }
 
 interface Geometry {
@@ -231,21 +273,20 @@ describe('language redirect — the guards that must not fire (MUSE-10)', () => 
     }
   });
 
-  it('leaves a non-Croatian browser alone once a language is stored', async () => {
-    for (const storedLang of ['hr', 'en']) {
-      const { page, close } = await visit(urlFor('/', TRIAL), {
-        locale: FOREIGN_LOCALE,
-        storedLang,
-      });
-      try {
-        // A stored choice wins over the browser's preference, whichever way it points —
-        // including `en`, where the destination would have been right anyway.
-        expect(page.url()).toBe(urlFor('/', TRIAL));
-        expect(await page.getAttribute('html', 'lang')).toBe('hr-HR');
-        expect((await geometryOf(page, FORM)).visible).toBe(true);
-      } finally {
-        await close();
-      }
+  it('leaves a non-Croatian browser alone once Croatian is stored', async () => {
+    const { page, close } = await visit(urlFor('/', TRIAL), {
+      locale: FOREIGN_LOCALE,
+      storedLang: 'hr',
+    });
+    try {
+      // A stored choice wins over the browser's preference. `hr` is the direction where
+      // "stay put" is the right outcome; `en` is the other direction and is covered by
+      // the MUSE-33 block below, where staying put is the bug.
+      expect(page.url()).toBe(urlFor('/', TRIAL));
+      expect(await page.getAttribute('html', 'lang')).toBe('hr-HR');
+      expect((await geometryOf(page, FORM)).visible).toBe(true);
+    } finally {
+      await close();
     }
   });
 
@@ -273,6 +314,114 @@ describe('language redirect — the guards that must not fire (MUSE-10)', () => 
       } finally {
         await close();
       }
+    }
+  });
+});
+
+/**
+ * MUSE-33 — a stored language is an instruction, not a mute button.
+ *
+ * `lang.ts` opened with `if (localStorage.getItem(KEY)) return;`: the *presence* of a
+ * stored value suppressed the redirect and the value itself was never read. So
+ * `muse-lang=en` meant "do not redirect to English" — the exact inverse of what it
+ * records. It stayed invisible while only a switcher click wrote the key, because staying
+ * put happened to be right; MUSE-16 made `?lang=` persist and routed a shared link
+ * straight into the backwards branch.
+ *
+ * Both directions are asserted against a browser preferring the *other* language, which
+ * is the only way to tell "obeyed the stored value" apart from "did nothing".
+ */
+describe('a stored choice is obeyed rather than merely noticed (MUSE-33)', () => {
+  it('routes by the stored language and not by the browser, in both directions', async () => {
+    for (const [stored, locale, landing, htmlLang] of [
+      // The two that matter: a stored choice against a browser preferring the other.
+      ['en', CROATIAN_LOCALE, '/en', 'en'],
+      ['hr', FOREIGN_LOCALE, '/', 'hr-HR'],
+      // And the agreeing pairs, so a fix that simply ignored storage could not pass.
+      ['en', FOREIGN_LOCALE, '/en', 'en'],
+      ['hr', CROATIAN_LOCALE, '/', 'hr-HR'],
+    ] as const) {
+      const { page, close } = await visit(urlFor('/', TRIAL), {
+        locale,
+        storedLang: stored,
+      });
+      try {
+        const where = `stored=${stored} browser=${locale}`;
+        expect(new URL(page.url()).pathname, where).toBe(pagePath(landing));
+        expect(await page.getAttribute('html', 'lang'), where).toBe(htmlLang);
+        // The fragment still survives the hop, and the form is still where it was asked for.
+        expect(new URL(page.url()).hash, where).toBe(TRIAL);
+        expect((await geometryOf(page, FORM)).visible, where).toBe(true);
+      } finally {
+        await close();
+      }
+    }
+  });
+
+  it('honours a shared ?lang= link on the next plain visit, both ways', async () => {
+    // The reported journey, end to end, in one browser: follow a link someone shared,
+    // then come back later to the bare homepage. Before the fix the second visit threw
+    // the choice away and language-detected from scratch.
+    for (const [requested, landing, htmlLang] of [
+      ['en', '/en', 'en'],
+      ['hr', '/', 'hr-HR'],
+    ] as const) {
+      // The browser prefers the *other* language, so detection and the stored choice
+      // disagree and only one of them can explain where the visitor ends up.
+      const locale = requested === 'en' ? CROATIAN_LOCALE : FOREIGN_LOCALE;
+      const visitor = await session(locale);
+      try {
+        await visitor.open(urlFor('/', `?lang=${requested}`));
+        expect(new URL(visitor.page.url()).pathname).toBe(pagePath(landing));
+        expect(await storedLang(visitor.page)).toBe(requested);
+
+        // Later, a plain visit — no parameter, nothing but what the browser remembers.
+        await visitor.open(urlFor('/'));
+        expect(new URL(visitor.page.url()).pathname).toBe(pagePath(landing));
+        expect(await visitor.page.getAttribute('html', 'lang')).toBe(htmlLang);
+        expect(await storedLang(visitor.page)).toBe(requested);
+      } finally {
+        await visitor.close();
+      }
+    }
+  });
+
+  it('falls back to browser detection for a stored value naming no locale', async () => {
+    // A key left by an older build, a typo, or another tab's bug must not strand the
+    // visitor: an unusable instruction is no instruction.
+    for (const [locale, landing] of [
+      [FOREIGN_LOCALE, '/en'],
+      [CROATIAN_LOCALE, '/'],
+    ] as const) {
+      const { page, close } = await visit(urlFor('/'), { locale, storedLang: 'klingon' });
+      try {
+        expect(new URL(page.url()).pathname, locale).toBe(pagePath(landing));
+      } finally {
+        await close();
+      }
+    }
+  });
+
+  it('settles after one hop — a stored choice is not a loop', async () => {
+    // The destination must not bounce back. `/en/` does not language-detect, and the
+    // only redirect this script performs is toward the locale already decided on, so
+    // there is nothing left to disagree with once it lands.
+    const baseline = await visit(urlFor('/', TRIAL), {
+      locale: CROATIAN_LOCALE,
+      storedLang: 'hr',
+    });
+    const redirected = await visit(urlFor('/', TRIAL), {
+      locale: CROATIAN_LOCALE,
+      storedLang: 'en',
+    });
+    try {
+      expect(await redirected.page.evaluate(() => history.length)).toBe(
+        await baseline.page.evaluate(() => history.length),
+      );
+      await redirected.page.goBack({ waitUntil: 'load' }).catch(() => null);
+      expect(new URL(redirected.page.url()).pathname).not.toBe(pagePath('/'));
+    } finally {
+      await Promise.all([baseline.close(), redirected.close()]);
     }
   });
 });

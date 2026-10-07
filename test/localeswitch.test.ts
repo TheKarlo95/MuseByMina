@@ -1,4 +1,4 @@
-import { chromium, type Browser, type Page } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { Locale } from '../src/lib/i18n';
@@ -61,6 +61,8 @@ function urlFor(route: string, suffix = ''): string {
 
 interface Visit {
   page: Page;
+  /** The context the page lives in — a middle-click opens its new tab here. */
+  context: BrowserContext;
   close(): Promise<void>;
 }
 
@@ -97,7 +99,7 @@ async function visit(
   await page.goto(url, { waitUntil: 'networkidle' });
   await page.evaluate(() => document.fonts.ready);
   await settleScroll(page);
-  return { page, close: () => ctx.close() };
+  return { page, context: ctx, close: () => ctx.close() };
 }
 
 /**
@@ -231,7 +233,8 @@ describe('locale switch — the fragment survives (MUSE-16)', () => {
 
       await clickAndSettle(page, switchTo('hr'));
 
-      expect(page.url()).toBe(urlFor('/', TRIAL));
+      // `?lang=hr` rides along because the href is the record of the choice (MUSE-33).
+      expect(page.url()).toBe(urlFor('/', `?${LANG_PARAM}=hr${TRIAL}`));
       expect(await page.getAttribute('html', 'lang')).toBe('hr-HR');
       // The equivalent anchor resolved on the destination, and the destination is at it.
       await expectAnchoredAt(page, TRIAL);
@@ -246,7 +249,7 @@ describe('locale switch — the fragment survives (MUSE-16)', () => {
     try {
       await clickAndSettle(page, switchTo('en'));
 
-      expect(page.url()).toBe(urlFor('/en', TRIAL));
+      expect(page.url()).toBe(urlFor('/en', `?${LANG_PARAM}=en${TRIAL}`));
       expect(await page.getAttribute('html', 'lang')).toBe('en');
       await expectAnchoredAt(page, TRIAL);
       await expectInView(page, FORM);
@@ -267,7 +270,7 @@ describe('locale switch — the fragment survives (MUSE-16)', () => {
       expect(new URL(page.url()).hash).toBe(TRIAL);
 
       await clickAndSettle(page, switchTo('hr'));
-      expect(page.url()).toBe(urlFor('/', TRIAL));
+      expect(page.url()).toBe(urlFor('/', `?${LANG_PARAM}=hr${TRIAL}`));
       await expectInView(page, FORM);
     } finally {
       await close();
@@ -280,7 +283,10 @@ describe('locale switch — the fragment survives (MUSE-16)', () => {
     try {
       await clickAndSettle(page, switchTo('hr'));
 
-      expect(page.url()).toBe(urlFor('/', suffix));
+      // Byte-identical, with `lang` appended rather than the whole query re-serialised.
+      expect(page.url()).toBe(
+        urlFor('/', `?utm_source=instagram&utm_campaign=trial&${LANG_PARAM}=hr${TRIAL}`),
+      );
       const landed = new URL(page.url());
       expect(landed.searchParams.get('utm_source')).toBe('instagram');
       expect(landed.searchParams.get('utm_campaign')).toBe('trial');
@@ -298,7 +304,7 @@ describe('locale switch — the fragment survives (MUSE-16)', () => {
     try {
       await clickAndSettle(page, switchTo('hr'));
 
-      expect(page.url()).toBe(urlFor('/schedule', '?utm_source=qr'));
+      expect(page.url()).toBe(urlFor('/schedule', `?utm_source=qr&${LANG_PARAM}=hr`));
       expect(await page.getAttribute('html', 'lang')).toBe('hr-HR');
       // No fragment asked for, so none invented and nothing scrolled.
       expect(new URL(page.url()).hash).toBe('');
@@ -308,18 +314,18 @@ describe('locale switch — the fragment survives (MUSE-16)', () => {
     }
   });
 
-  it('invents no fragment and no query when the URL has neither', async () => {
+  it('invents no fragment, and no query beyond the one parameter it means', async () => {
     const { page, close } = await visit(urlFor('/en'), { locale: FOREIGN_LOCALE });
     try {
-      // The advertised href is clean too — not `…/?#`, which is a different URL to a
-      // crawler and an ugly one to copy out of a context menu.
-      expect(await switchHref(page, 'hr')).toBe(pagePath('/'));
-      expect(await switchHref(page, 'en')).toBe(pagePath('/en'));
+      // `?lang=` is deliberate (MUSE-33): it is what makes the href a durable link to a
+      // language rather than a bare path the auto-redirect is free to reinterpret. What
+      // is still not invented is anything else — no `#`, no trailing `?`, no reordering.
+      expect(await switchHref(page, 'hr')).toBe(`${pagePath('/')}?${LANG_PARAM}=hr`);
+      expect(await switchHref(page, 'en')).toBe(`${pagePath('/en')}?${LANG_PARAM}=en`);
 
       await clickAndSettle(page, switchTo('hr'));
 
-      expect(page.url()).toBe(urlFor('/'));
-      expect(new URL(page.url()).search).toBe('');
+      expect(page.url()).toBe(urlFor('/', `?${LANG_PARAM}=hr`));
       expect(new URL(page.url()).hash).toBe('');
       expect(await page.evaluate(() => Math.round(window.scrollY))).toBe(0);
     } finally {
@@ -480,11 +486,12 @@ describe('?lang= selects a language rather than only suppressing (MUSE-16)', () 
     }
   });
 
-  it('ignores a ?lang= value that names no locale, and stores nothing', async () => {
-    // Unknown values still suppress detection — `?lang=` has always meant "I am choosing",
-    // and a typo is not a reason to override it with the browser's preference.
+  it('selects nothing and stores nothing for a value that names no locale', async () => {
+    // A Croatian browser, so detection agrees with staying put and the only thing the
+    // assertion can be reading is that `?lang=klingon` selected nothing. Whether an
+    // unknown value also *suppresses* detection is the MUSE-33 block below: it must not.
     const { page, close } = await visit(urlFor('/', `?${LANG_PARAM}=klingon`), {
-      locale: FOREIGN_LOCALE,
+      locale: CROATIAN_LOCALE,
     });
     try {
       expect(page.url()).toBe(urlFor('/', `?${LANG_PARAM}=klingon`));
@@ -523,4 +530,401 @@ describe('the ?lang= guard matches the param, not a suffix of it (MUSE-16)', () 
       await close();
     }
   });
+});
+
+/**
+ * Where a visit ends up, cheaply, for the enumeration below.
+ *
+ * `visit()` waits for fonts and for scrolling to settle because its assertions are about
+ * geometry. The matrix only asks "which page, and did it stop there", across a hundred-odd
+ * combinations, so this waits for `load` and counts main-frame navigations instead.
+ *
+ * The count is the loop proof. A redirect that lands somewhere which redirects back shows
+ * up as a third navigation — or as a `goto` that never resolves, which fails just as
+ * loudly. `about:blank` is excluded: it is how the tab starts, not somewhere it went.
+ */
+interface Landing {
+  url: string;
+  htmlLang: string | null;
+  stored: string | null;
+  /** Main-frame document navigations, the first real one included. */
+  navigations: number;
+}
+
+async function landing(opts: {
+  from: string;
+  locale: string;
+  storedLang?: string;
+}): Promise<Landing> {
+  const ctx = await browser.newContext({ locale: opts.locale });
+  try {
+    if (opts.storedLang !== undefined) {
+      await ctx.addInitScript(
+        ([key, value]) => {
+          if (localStorage.getItem(key!) === null) localStorage.setItem(key!, value!);
+        },
+        [LANG_STORAGE_KEY, opts.storedLang] as const,
+      );
+    }
+    const page = await ctx.newPage();
+    let navigations = 0;
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame() && !frame.url().startsWith('about:')) navigations += 1;
+    });
+    await page.goto(opts.from, { waitUntil: 'load', timeout: 20_000 });
+    // Long enough that a second hop would have started if there were going to be one.
+    await page.waitForTimeout(200);
+    return {
+      url: page.url(),
+      htmlLang: await page.getAttribute('html', 'lang'),
+      stored: await storedLang(page),
+      navigations,
+    };
+  } finally {
+    await ctx.close();
+  }
+}
+
+/**
+ * Run `work` over `items`, a few at a time.
+ *
+ * The enumeration is 128 browser contexts. Serially that is a couple of minutes of the
+ * suite's wall clock for assertions that share nothing with each other; a handful at a
+ * time keeps it in the tens of seconds. Each case already owns its own context, so there
+ * is nothing to interleave.
+ */
+async function inParallel<T, R>(
+  items: readonly T[],
+  limit: number,
+  work: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length) as R[];
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = next;
+      next += 1;
+      if (index >= items.length) return;
+      out[index] = await work(items[index]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => {
+  it('advertises the language on the href, so the link carries the choice', async () => {
+    // The irony MUSE-33 names: MUSE-16 made the carry an *href rewrite* precisely because
+    // middle-click, "open in new tab" and "copy link address" fire no `click` event — and
+    // then left persistence in the click handler, where those paths still miss it. A bare
+    // `/MuseByMina/#trial` is not a durable link to Croatian: the homepage redirect is
+    // free to reinterpret it, and for a non-Croatian browser it does.
+    const { page, close } = await visit(urlFor('/en', TRIAL), { locale: FOREIGN_LOCALE });
+    try {
+      expect(await switchHref(page, 'hr')).toBe(`${pagePath('/')}?${LANG_PARAM}=hr${TRIAL}`);
+      expect(await switchHref(page, 'en')).toBe(
+        `${pagePath('/en')}?${LANG_PARAM}=en${TRIAL}`,
+      );
+    } finally {
+      await close();
+    }
+  });
+
+  it('opens the HR link in a new tab on Croatian, on a browser preferring English', async () => {
+    // A genuine middle-click: Chromium opens a background tab, no `click` handler runs,
+    // and nothing has been stored. Everything the destination needs has to be in the URL.
+    const { page, context, close } = await visit(urlFor('/en', TRIAL), {
+      locale: FOREIGN_LOCALE,
+    });
+    try {
+      expect(await storedLang(page)).toBe(null);
+
+      const opened = context.waitForEvent('page');
+      await page.locator(switchTo('hr')).click({ button: 'middle' });
+      const tab = await opened;
+      await tab.waitForLoadState('load');
+      await tab.waitForTimeout(200);
+
+      // Croatian, not bounced to `/en/` by the homepage redirect.
+      expect(tab.url()).toBe(urlFor('/', `?${LANG_PARAM}=hr${TRIAL}`));
+      expect(await tab.getAttribute('html', 'lang')).toBe('hr-HR');
+      // And the choice is now recorded, by the link rather than by a handler.
+      expect(await storedLang(tab)).toBe('hr');
+    } finally {
+      await close();
+    }
+  });
+
+  it('opens the EN link in a new tab on English, and records that too', async () => {
+    const { page, context, close } = await visit(urlFor('/', TRIAL), {
+      locale: CROATIAN_LOCALE,
+    });
+    try {
+      const opened = context.waitForEvent('page');
+      await page.locator(switchTo('en')).click({ button: 'middle' });
+      const tab = await opened;
+      await tab.waitForLoadState('load');
+      await tab.waitForTimeout(200);
+
+      expect(tab.url()).toBe(urlFor('/en', `?${LANG_PARAM}=en${TRIAL}`));
+      expect(await tab.getAttribute('html', 'lang')).toBe('en');
+      // `/en/` ran no language script before MUSE-33, so a tab opened here displayed
+      // English and remembered nothing — and the next plain `/` went Croatian.
+      expect(await storedLang(tab)).toBe('en');
+    } finally {
+      await close();
+    }
+  });
+
+  it('rewrites the lang parameter and leaves the rest of the query byte-identical', async () => {
+    // MUSE-16 rebuilt the whole query through `URLSearchParams.toString()` whenever there
+    // was a `lang` to rewrite, which re-encodes what it did not have to touch: `%20` comes
+    // back out as `+`. Both decode to a space, so nothing visibly broke — but the function
+    // claims to *carry* a visitor's campaign tags and it was rewriting them (MUSE-33).
+    const encoded = 'utm_campaign=trial%20class';
+    const { page, close } = await visit(
+      urlFor('/en', `?${encoded}&${LANG_PARAM}=en${TRIAL}`),
+      { locale: FOREIGN_LOCALE },
+    );
+    try {
+      expect(await switchHref(page, 'hr')).toBe(
+        `${pagePath('/')}?${encoded}&${LANG_PARAM}=hr${TRIAL}`,
+      );
+
+      await clickAndSettle(page, switchTo('hr'));
+
+      expect(page.url()).toBe(urlFor('/', `?${encoded}&${LANG_PARAM}=hr${TRIAL}`));
+      // And it still means what it meant, byte-identical or not.
+      expect(new URL(page.url()).searchParams.get('utm_campaign')).toBe('trial class');
+    } finally {
+      await close();
+    }
+  });
+
+  it('serves a crawler the bare path, with no parameter in the markup', async () => {
+    // The `?lang=` is attached client-side. The rendered href stays the clean canonical
+    // spelling, so a crawler is not offered a second URL for every page on the site.
+    const ctx = await browser.newContext({
+      locale: FOREIGN_LOCALE,
+      javaScriptEnabled: false,
+    });
+    try {
+      const page = await ctx.newPage();
+      await page.goto(urlFor('/en/schedule'), { waitUntil: 'load' });
+      expect(await switchHref(page, 'hr')).toBe(pagePath('/schedule'));
+      expect(await switchHref(page, 'en')).toBe(pagePath('/en/schedule'));
+    } finally {
+      await ctx.close();
+    }
+  });
+});
+
+describe('?lang= works off the root, not only on it (MUSE-33)', () => {
+  it('sends a deep page to the requested locale and records the choice', async () => {
+    for (const [from, to, htmlLang, requested] of [
+      ['/schedule', '/en/schedule', 'en', 'en'],
+      ['/en/contact', '/contact', 'hr-HR', 'hr'],
+    ] as const) {
+      // The browser prefers the language the link is *not* asking for, so detection
+      // cannot be what explains the outcome.
+      const locale = requested === 'en' ? CROATIAN_LOCALE : FOREIGN_LOCALE;
+      const result = await landing({
+        from: urlFor(from, `?${LANG_PARAM}=${requested}`),
+        locale,
+      });
+      const where = `${from} ?${LANG_PARAM}=${requested}`;
+      expect(new URL(result.url).pathname, where).toBe(pagePath(to));
+      expect(result.htmlLang, where).toBe(htmlLang);
+      expect(result.stored, where).toBe(requested);
+      // One hop. The destination is already the locale asked for, so it stops there.
+      expect(result.navigations, where).toBe(2);
+    }
+  });
+
+  it('carries the query and fragment onto the deep destination', async () => {
+    const result = await landing({
+      from: urlFor('/schedule', `?utm_source=qr&${LANG_PARAM}=en${TRIAL}`),
+      locale: CROATIAN_LOCALE,
+    });
+    expect(result.url).toBe(urlFor('/en/schedule', `?utm_source=qr&${LANG_PARAM}=en${TRIAL}`));
+  });
+
+  it('stays put, and stores, when a deep page is already the requested locale', async () => {
+    for (const [from, requested, htmlLang] of [
+      ['/schedule', 'hr', 'hr-HR'],
+      ['/en/schedule', 'en', 'en'],
+    ] as const) {
+      const result = await landing({
+        from: urlFor(from, `?${LANG_PARAM}=${requested}`),
+        locale: requested === 'hr' ? FOREIGN_LOCALE : CROATIAN_LOCALE,
+      });
+      const where = `${from} ?${LANG_PARAM}=${requested}`;
+      expect(new URL(result.url).pathname, where).toBe(pagePath(from));
+      expect(result.htmlLang, where).toBe(htmlLang);
+      expect(result.stored, where).toBe(requested);
+      expect(result.navigations, where).toBe(1);
+    }
+  });
+
+  it('never routes a deep page by the browser or by storage', async () => {
+    // `?lang=` is explicit and attached to this request, so it may move a deep page.
+    // Nothing else may: MUSE-10's rule that no deep link can bounce is what keeps a
+    // shared `/schedule/` landing on `/schedule/`, and widening it would mean a visitor
+    // who once chose English could not be sent a Croatian page at all.
+    for (const [from, stored] of [
+      ['/schedule', 'en'],
+      ['/en/schedule', 'hr'],
+      ['/contact', undefined],
+    ] as const) {
+      const result = await landing({
+        from: urlFor(from),
+        locale: FOREIGN_LOCALE,
+        storedLang: stored,
+      });
+      const where = `${from} stored=${stored}`;
+      expect(new URL(result.url).pathname, where).toBe(pagePath(from));
+      expect(result.navigations, where).toBe(1);
+    }
+  });
+});
+
+describe('an unusable instruction hands the decision back (MUSE-33)', () => {
+  it('detects for a ?lang= value that names no locale, instead of stranding', async () => {
+    // `/?lang=de` used to leave an English browser on Croatian: the parameter suppressed
+    // detection without selecting anything. Same shape as the `?slang=` bug — a value
+    // that is not a supported locale must not silently disable the redirect.
+    const result = await landing({
+      from: urlFor('/', `?${LANG_PARAM}=de`),
+      locale: FOREIGN_LOCALE,
+    });
+    expect(new URL(result.url).pathname).toBe(pagePath('/en'));
+    expect(result.htmlLang).toBe('en');
+    // Nothing selected, so nothing recorded — the next visit decides again.
+    expect(result.stored).toBe(null);
+    expect(result.navigations).toBe(2);
+  });
+
+  it('does not let an unknown ?lang= loop through the destination', async () => {
+    // The unknown value rides along in the carried query, so `/en/?lang=de` is the page
+    // the redirect lands on. It has to read as "nothing asked for" there too.
+    const result = await landing({
+      from: urlFor('/en', `?${LANG_PARAM}=de`),
+      locale: CROATIAN_LOCALE,
+    });
+    expect(result.url).toBe(urlFor('/en', `?${LANG_PARAM}=de`));
+    expect(result.navigations).toBe(1);
+  });
+
+  it('detects for a stored value that names no locale', async () => {
+    const result = await landing({
+      from: urlFor('/'),
+      locale: FOREIGN_LOCALE,
+      storedLang: 'de',
+    });
+    expect(new URL(result.url).pathname).toBe(pagePath('/en'));
+    expect(result.navigations).toBe(2);
+  });
+});
+
+/**
+ * Every combination, enumerated, because this is the seam where the three rules meet.
+ *
+ * `?lang=`, a stored choice and the browser's preference now compose, and MUSE-16 already
+ * shipped one loop from exactly here — clicking HR on `/en/?lang=en` handed the Croatian
+ * page a URL asking for English. Reasoning case by case is what produced that, so the
+ * table is the test: every starting URL, every parameter value, every stored value, both
+ * browsers, and the claim that each one lands where the precedence rules say *and stops*.
+ *
+ * `navigations` is 1 for "stayed" and 2 for "one hop". It is never allowed to be 3.
+ */
+describe('the precedence rules compose without a loop (MUSE-33)', () => {
+  /** `?lang=` values worth distinguishing: absent, each locale, and a non-locale. */
+  const REQUESTED = [undefined, 'hr', 'en', 'de'] as const;
+  /** Stored values, on the same axis. */
+  const STORED = [undefined, 'hr', 'en', 'de'] as const;
+  /** One page that language-detects and one that must not, in both locales. */
+  const ROUTES = [
+    ['/', 'hr'],
+    ['/', 'en'],
+    ['/schedule', 'hr'],
+    ['/schedule', 'en'],
+  ] as const;
+
+  interface Case {
+    from: string;
+    locale: string;
+    storedLang?: string;
+    label: string;
+    want: { path: string; htmlLang: string };
+  }
+
+  /**
+   * Where the rules say a visit ends up, written as the rule rather than as a lookup
+   * table so each row says *why* it is what it is.
+   */
+  function expected(
+    route: string,
+    here: 'hr' | 'en',
+    requested: string | undefined,
+    stored: string | undefined,
+    browserIsCroatian: boolean,
+  ): 'hr' | 'en' {
+    if (requested === 'hr' || requested === 'en') return requested;
+    // Detection — the stored choice included — is the default locale's homepage only.
+    if (!(here === 'hr' && route === '/')) return here;
+    if (stored === 'hr' || stored === 'en') return stored;
+    return browserIsCroatian ? 'hr' : 'en';
+  }
+
+  /** The route a locale serves, in the shape `pagePath` wants. */
+  const routeIn = (route: string, locale: 'hr' | 'en'): string =>
+    locale === 'en' ? `/en${route === '/' ? '' : route}` : route;
+
+  it(
+    'lands where the rules say and settles there, for every combination',
+    async () => {
+      const cases: Case[] = [];
+      for (const [route, here] of ROUTES) {
+        for (const browserIsCroatian of [true, false]) {
+          for (const requested of REQUESTED) {
+            for (const stored of STORED) {
+              const suffix = requested === undefined ? '' : `?${LANG_PARAM}=${requested}`;
+              const from = routeIn(route, here);
+              const want = expected(route, here, requested, stored, browserIsCroatian);
+              cases.push({
+                from: urlFor(from, suffix),
+                locale: browserIsCroatian ? CROATIAN_LOCALE : FOREIGN_LOCALE,
+                storedLang: stored,
+                label: `${from}${suffix} browser=${
+                  browserIsCroatian ? 'hr' : 'en'
+                } stored=${stored}`,
+                want: {
+                  path: pagePath(routeIn(route, want)),
+                  htmlLang: want === 'hr' ? 'hr-HR' : 'en',
+                },
+              });
+            }
+          }
+        }
+      }
+      // The enumeration is the whole point; a silently empty loop would assert nothing.
+      expect(cases.length).toBe(ROUTES.length * 2 * REQUESTED.length * STORED.length);
+
+      const results = await inParallel(cases, 6, (c) =>
+        landing({ from: c.from, locale: c.locale, storedLang: c.storedLang }),
+      );
+
+      for (const [index, result] of results.entries()) {
+        const c = cases[index]!;
+        expect(new URL(result.url).pathname, c.label).toBe(c.want.path);
+        expect(result.htmlLang, c.label).toBe(c.want.htmlLang);
+        // One hop at most, ever. A loop is a third navigation, or a `goto` that never
+        // resolves — and both fail here rather than being reasoned about.
+        expect(result.navigations, c.label).toBe(
+          c.want.path === new URL(c.from).pathname ? 1 : 2,
+        );
+      }
+    },
+    600_000,
+  );
 });
