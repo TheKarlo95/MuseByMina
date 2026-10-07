@@ -56,6 +56,19 @@ export type StubReply =
   /** Destroy the socket — what an offline visitor or a DNS failure looks like. */
   | { kind: 'drop' };
 
+/** How the build under test is configured, beyond the deploy target. */
+export interface PreviewOptions {
+  /**
+   * What `PUBLIC_FORM_ENDPOINT` is built with. The stub by default.
+   *
+   * `''` builds the site exactly as `main` deploys it today: MUSE-12 is parked, so no
+   * endpoint is configured and a submit cannot reach a provider at all. That is a real
+   * failure mode, not a hypothetical one, and MUSE-15's first defect was only visible
+   * in it — so a suite has to be able to ask for it.
+   */
+  endpoint?: string;
+}
+
 /**
  * The path the host serves a locale-prefixed route at, base and trailing slash included.
  *
@@ -89,12 +102,12 @@ export interface Preview {
  * callers passing the same label now still get different directories, and a caller that
  * passes none is just as isolated.
  */
-export function buildPreview(label?: string): string {
+export function buildPreview(label?: string, options: PreviewOptions = {}): string {
   return astroBuild(
     {
       SITE: PREVIEW_SITE,
       BASE: PREVIEW_BASE,
-      PUBLIC_FORM_ENDPOINT: STUB_ENDPOINT,
+      PUBLIC_FORM_ENDPOINT: options.endpoint ?? STUB_ENDPOINT,
     },
     label,
   );
@@ -106,10 +119,13 @@ export function buildPreview(label?: string): string {
  * `label` only shapes the output directory's name; see `buildPreview`. Two browser
  * suites running in parallel workers cannot share an output tree whatever they pass.
  */
-export async function startPreview(label?: string): Promise<Preview> {
+export async function startPreview(
+  label?: string,
+  options: PreviewOptions = {},
+): Promise<Preview> {
   // Always a fresh build: stale output that happens to pass is the one failure mode a
   // build-and-assert suite must never have.
-  const outDir = buildPreview(label);
+  const outDir = buildPreview(label, options);
 
   const requests: StubRequest[] = [];
   let nextReply: StubReply = { kind: 'ok' };
@@ -141,6 +157,21 @@ export async function startPreview(label?: string): Promise<Preview> {
         res.writeHead(status, { 'content-type': MIME['.json']! });
         res.end(nextReply.body ?? (nextReply.kind === 'ok' ? '{"success":true}' : '{}'));
       });
+      return;
+    }
+
+    /**
+     * Everything that is not the stub endpoint is a static host, and a static host does
+     * not accept a POST (MUSE-15). GitHub Pages answers `405 Not Allowed` as an
+     * unstyled server page for any method but GET/HEAD, whatever the path — which is
+     * what a `method="post"` form with no `action` gets a visitor without JavaScript.
+     *
+     * Modelled here rather than asserted from a comment, so a form that can still
+     * submit natively to a page of the site fails a test instead of shipping.
+     */
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      res.writeHead(405, { 'content-type': MIME['.txt']! });
+      res.end('405 Not Allowed');
       return;
     }
 

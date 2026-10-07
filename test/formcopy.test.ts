@@ -56,7 +56,19 @@ describe('the form copy table', () => {
   it('actually translates the prose rather than reusing the English', () => {
     // Labels like "Level"/"Razina" are short enough to coincide in principle; the
     // sentences are not, and those are where an untranslated string hides.
-    const prose = ['invalid', 'requiredAny', 'tooLong', 'sentTitle', 'sentBody', 'failTitle', 'failBody', 'privacy', 'noscript'] as const;
+    const prose = [
+      'invalid',
+      'requiredAny',
+      'tooLong',
+      'sentTitle',
+      'sentBody',
+      'failTitle',
+      'failBody',
+      'failOffline',
+      'privacy',
+      'noscript',
+      'noscriptAsk',
+    ] as const;
     for (const key of prose) {
       expect(EN[key], `${key} is the same in both languages`).not.toBe(HR[key]);
     }
@@ -104,12 +116,30 @@ describe('the form copy table', () => {
     );
   });
 
-  it('ends the two strings a link is appended to with a colon', () => {
-    // `failBody` and `noscript` are both followed by the studio email address in the
-    // markup. Without the colon the sentence reads as if it were finished.
+  it('ends every string a link is appended to with a colon', () => {
+    // `failBody`, `failOffline` and `noscript` are each followed by the studio email
+    // address in the markup. Without the colon the sentence reads as if it were finished.
     for (const copy of Object.values(FORM_COPY)) {
-      expect(copy.failBody.trimEnd().endsWith(':')).toBe(true);
-      expect(copy.noscript.trimEnd().endsWith(':')).toBe(true);
+      for (const key of ['failBody', 'failOffline', 'noscript'] as const) {
+        expect(copy[key].trimEnd().endsWith(':'), key).toBe(true);
+      }
+    }
+  });
+
+  it('says nothing in the failure lines about what technically failed', () => {
+    /**
+     * MUSE-15 — the failure block used to end with `Error.message`, so the Croatian page
+     * read `PUBLIC_FORM_ENDPOINT is not configured` / `HTTP 500 Internal Server Error`.
+     * The fix is not to translate those: a status code is not information a visitor can
+     * act on, and copy that enumerates them dates the moment a provider changes one.
+     * `test/trialform.test.ts` proves no diagnostic is *rendered*; this keeps one out of
+     * the copy table, which is the other way it could come back.
+     */
+    for (const copy of Object.values(FORM_COPY)) {
+      for (const key of ['failTitle', 'failBody', 'failOffline'] as const) {
+        expect(copy[key], `${key} names an HTTP status`).not.toMatch(/\b[1-5]\d\d\b/);
+        expect(copy[key], `${key} names a build-time variable`).not.toMatch(/[A-Z][A-Z0-9]*_[A-Z0-9_]+/);
+      }
     }
   });
 });

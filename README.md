@@ -175,6 +175,32 @@ Unset, the form still renders, still validates and is still completable by keybo
 submitting reports that it could not be delivered and offers the studio inbox instead. CI and
 `npm test` build without it on purpose.
 
+**Submitting is `fetch` only, and the endpoint is never the `<form>`'s `action`**
+(MUSE-15). It used to be, which meant that with the endpoint unset — how the site ships
+— the form posted to the page itself and GitHub Pages answered `405 Not Allowed`: an
+unstyled server page, every answer gone, the visitor off the site. Two things make that
+unreachable now. `method="dialog"` on a form with no ancestor `<dialog>` aborts its own
+submission per the HTML form-submission algorithm, *after* firing `submit`, so the
+enhanced path is untouched and there is no native POST left to reject. And
+`@media (scripting: none)` hides the form so the `<noscript>` block can offer the studio
+inbox instead, because a form that cannot be sent should not be filled in.
+
+Pointing `action` at the provider would also stop the 405, and the id is public so it
+would not be a disclosure. It was not done because nothing here can check what Formspark
+returns for a non-AJAX POST while no form is configured (MUSE-12 is parked), and the
+`<noscript>` text would then be describing a confirmation page nobody has seen — which is
+the shape of the bug being fixed. If that gets verified, swapping back is an `action`
+attribute and a copy change, and `test/trialform.test.ts` already allows a cross-origin
+one.
+
+**A failure never shows the visitor a diagnostic.** The block renders a localised line
+plus the inbox, and `console.error` gets the real error. Being offline is the one cause
+separated out, because it is the only one a visitor can act on; HTTP statuses are
+deliberately not in the copy. `test/trialform.test.ts` drives every failure mode —
+including a build with no endpoint and a genuinely offline browser — and subtracts the
+copy table from what was rendered: anything left over is a leak, which is how that suite
+catches a diagnostic nobody has written yet.
+
 `/privacy/` is the notice the form links to. It is footer-only and deliberately absent from
 the nav: it exists because the form collects a name, an email address and a phone number,
 which is personal data under the GDPR whether or not this site stores any of it.

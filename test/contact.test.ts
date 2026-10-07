@@ -546,11 +546,22 @@ describe('AC4: a successful submit confirms in-language, in place', () => {
 
 /**
  * AC5 — Given a failed submit, then I see what went wrong and my input is preserved.
+ *
+ * "What went wrong" was read too literally here: this suite required a *technical*
+ * detail in the failure block and asserted that a 500 rendered the string `500`. What it
+ * was pinning was `Error.message`, verbatim, in English, under three localised sentences
+ * on the Croatian page — MUSE-15's first defect, and the only English-only user-facing
+ * string on the site. The cause now goes to the console and the visitor gets a localised
+ * line, so the assertion is inverted: nothing in the block may be a diagnostic.
+ *
+ * `test/trialform.test.ts` is where that is a property over every real failure mode
+ * rather than two cases; what stays here is the half AC5 is actually about — the answers
+ * survive and the form can be sent again.
  */
 describe('AC5: a failed submit explains itself and keeps the answers', () => {
   const FAILURES = [
-    { label: 'the endpoint rejects it', reply: { kind: 'error', status: 500 } as const, detail: '500' },
-    { label: 'the connection drops', reply: { kind: 'drop' } as const, detail: '' },
+    { label: 'the endpoint rejects it', reply: { kind: 'error', status: 500 } as const },
+    { label: 'the connection drops', reply: { kind: 'drop' } as const },
   ];
 
   for (const target of TARGETS) {
@@ -570,10 +581,10 @@ describe('AC5: a failed submit explains itself and keeps the answers', () => {
           expect(text).toContain(target.copy.failBody);
           expect(text, 'failed in the wrong language').not.toContain(target.other.failTitle);
 
-          // Something concrete about *what* went wrong, not just "an error occurred".
-          const detail = (await page.locator('[data-fail-detail]').textContent()) ?? '';
-          expect(detail.trim().length, 'no technical detail offered').toBeGreaterThan(0);
-          if (failure.detail) expect(detail).toContain(failure.detail);
+          // The explanation is the localised line and the inbox, and nothing else: no
+          // status, no variable name, no exception message (MUSE-15).
+          expect(text, 'a raw HTTP status reached the page').not.toMatch(/\b\d{3}\b/);
+          expect(await page.locator('[data-fail-detail]').count()).toBe(0);
 
           // A way out that does not depend on the thing that just broke.
           expect(await status.locator('a[href^="mailto:"]').count()).toBeGreaterThanOrEqual(1);
