@@ -26,6 +26,13 @@ npm test           # vitest — builds the site and asserts on dist
 npm run a11y       # axe, every page, both themes — needs a server running
 npm run ds         # design-system compliance
 npm run shots      # screenshots of all theme states to /tmp/muse-shots
+
+npm run sanity:types   # re-extract the schema and regenerate types — commit the result
+npm run sanity:check   # the fast gate `npm run build` runs first
+npm run sanity:read    # every query against the live dataset: OK / EMPTY / BROKEN
+npm run sanity:dev     # the Studio locally, on localhost:3333
+npm run sanity:build   # bundle the Studio into .sanity/studio — what CI runs
+npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
 ```
 
 ## Conventions
@@ -68,3 +75,63 @@ npm run shots      # screenshots of all theme states to /tmp/muse-shots
   bug was fixed three times as a naming convention (MUSE-9, MUSE-10, MUSE-17) and came
   back twice; `test/isolation.test.ts` now fails if a suite names a build directory,
   deletes anything, or spawns its own build.
+
+## Sanity (MUSE-19)
+
+- **Content is fetched at build time and no Sanity code ships to the visitor.** The built
+  output contains **zero `.js` files**; `test/nojs.test.ts` asserts that against `dist`
+  along with an allow-list of output extensions. Inline `<script>` blocks are fine and
+  expected — a *file* is not. The client reads its config off `process.env`, never
+  `import.meta.env`, because Vite inlines the latter into client bundles and leaves the
+  former alone.
+- **One read module.** All GROQ lives in `src/lib/sanity/queries.ts` and every page
+  imports `src/lib/sanity/` and nothing else. `test/sanity.test.ts` fails if a query
+  string or `@sanity/client` appears anywhere else under `src/`.
+- **Bilingual values are two named fields**, `hr` and `en`, inside a `localeString` /
+  `localeText` / `localeRichText` object — not a field-level i18n plugin and not one
+  document per locale. HR and EN share slugs and one document renders both, so the shape
+  is `Record<Locale, string>`, both locales are separately `required()`, and a half
+  translated string is a missing field an error can name. See the long note in
+  `sanity/schemaTypes/objects/locale.ts` before changing this: it is hard to reverse once
+  content exists.
+- **Enums are structure and stay in code.** `LEVELS`, `STYLES`, `WEEKDAYS` and the route
+  list are imported *into* the schema from `src/lib/schedule.ts` and `src/lib/pages.ts`
+  (`sanity/schemaTypes/enums.ts`), so the Studio offers a fixed list and Mina cannot type
+  a level. Prerequisites, form copy, and time/currency formatting are deliberately **not**
+  in Sanity — see that file for why each one would be a mistake.
+- **Every image field is built by `imageField()`**, which is the only way to get
+  `hotspot: true` and a required bilingual `alt`. The design system crops one upload to
+  16:9, 4:5, 3:4 and 1:1 (§9), so a hotspot is not a nicety. The shoot direction lives in
+  the field *description*, because that is the only instruction Mina actually sees.
+- **A schema change must be regenerated and committed.** `npm run build` runs
+  `scripts/check-sanity.mjs` first, which hashes **every file under `sanity/`** — no
+  extension filter, because an extension allow-list is what made `fields.tsx` invisible —
+  plus `sanity.config.ts`, `sanity.cli.ts`, `src/lib/schedule.ts`, `src/lib/pages.ts` and
+  `src/lib/sanity/queries.ts`. It fails if `sanity/schema.json`,
+  `src/lib/sanity/sanity.types.ts` or `sanity/schema.stamp.json` is stale. This exists
+  because **GROQ returns `null` for a field that does not exist rather than erroring** —
+  so a renamed field with stale artefacts type-checks, builds, exits 0 and publishes pages
+  with the content silently gone. Four layers catch it: the build gate, the gate's
+  read-contract check, the compile-time assertions in `src/lib/sanity/shape.ts`, and
+  `test/sanity.test.ts`. `.github/workflows/studio.yml`'s `paths:` filter has to be the
+  same list, and `test/sanity.test.ts` asserts that rather than a comment asking nicely.
+- **"Fails the build" means `npm run build`, which is three commands.**
+  `sanity:check` → `astro check` → `astro build`. `astro check` is *inside* the script,
+  not a step beside it in CI, because `deploy.yml` runs `npm run build` and nothing else
+  and does not depend on CI — and a field's *type* changing, or a typo in a GROQ
+  projection, is caught by `astro check` alone. README, "What 'a schema mismatch fails the
+  build' means", has the full table.
+- **CI bundles the Studio** (`npm run sanity:build`) on every pull request. `sanity schema
+  extract` and `sanity schema validate` evaluate the schema without bundling it, so both
+  stayed green while the Studio could not be built at all. `styled-components` is in
+  `devDependencies` for that reason — it is a peer dependency of `sanity` and so is
+  installed regardless, but `sanity build` preflights *declarations*, not resolution.
+- **A missing or malformed document fails the build naming itself** — `_id`, type and
+  field path — through `src/lib/sanity/decode.ts`. "Unreachable", "empty" and "malformed"
+  are three different error types on purpose: the dataset is empty until MUSE-20, so
+  "nothing on the page" has to be readable as which of the three it was.
+- **The Studio is hosted by Sanity**, at `musebymina.sanity.studio`, never mounted at
+  `/studio` here. `.github/workflows/studio.yml` redeploys it when a schema file lands on
+  `main`. `SANITY_PROJECT_ID` and `SANITY_DATASET` are repository *variables*; there is
+  **no read token anywhere** and none should be added — the dataset is publicly readable
+  and writes are rejected unauthenticated.

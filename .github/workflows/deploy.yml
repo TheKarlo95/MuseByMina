@@ -38,6 +38,18 @@ jobs:
           # Until it is set the form renders and validates, but reports that it could not
           # deliver and offers the studio inbox instead.
           PUBLIC_FORM_ENDPOINT: ${{ vars.PUBLIC_FORM_ENDPOINT }}
+          # Which Sanity project and dataset this build reads content from (MUSE-19).
+          # Repository *variables*, not secrets: the dataset is publicly readable by
+          # design and both ids travel in the URL of every request. There is deliberately
+          # **no read token** — one more secret to rotate and leak, protecting content
+          # that is published on the public web anyway.
+          #   SANITY_PROJECT_ID = q6fk9usq
+          #   SANITY_DATASET    = production
+          # Both have defaults in `src/lib/sanity/client.ts`, so an unset variable builds
+          # against the live dataset rather than failing. No page reads Sanity yet —
+          # MUSE-20 is the migration — so today this changes nothing about the output.
+          SANITY_PROJECT_ID: ${{ vars.SANITY_PROJECT_ID }}
+          SANITY_DATASET: ${{ vars.SANITY_DATASET }}
         run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

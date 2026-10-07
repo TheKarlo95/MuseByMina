@@ -23,7 +23,13 @@ jobs:
       - run: npm ci
       # `npm test` drives a real browser for the trial form (test/contact.test.ts).
       - run: npx playwright install --with-deps chromium
-      - run: npx astro check
+      # `astro check` is inside `npm run build` now, not a step beside it. That is
+      # deliberate and it is about `deploy.yml`, not about this job: `deploy.yml` runs
+      # `npm run build` and nothing else, and does not depend on CI, so anything that is
+      # only a CI step is not on the path to production. A field *type* change and a
+      # projection typo are caught by `astro check` alone — see README, "What 'fails the
+      # build' means". Running it here as well would buy a prettier step name for the
+      # same nine seconds.
       - run: npm run build
       # Builds the site twice more, under two different SITE/BASE targets.
       - run: npm test
@@ -66,6 +72,88 @@ jobs:
           # ROUTES defaults to the two homepages, so every new page has to be
           # listed here or it is never audited. Adding a page → add it.
           ROUTES: /,/en,/schedule,/en/schedule,/contact,/en/contact,/privacy,/en/privacy
+
+  sanity:
+    name: sanity schema & types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # The Studio's own opinion of the schema. Stricter than extraction, and the
+      # cheapest place to catch a malformed type definition.
+      - name: Validate the schema
+        run: npx sanity schema validate
+        env:
+          SANITY_STUDIO_PROJECT_ID: ${{ vars.SANITY_PROJECT_ID }}
+          SANITY_STUDIO_DATASET: ${{ vars.SANITY_DATASET }}
+
+      # Regenerate `sanity/schema.json` and `src/lib/sanity/sanity.types.ts` from the
+      # schema source and fail if either differs from what is committed.
+      #
+      # `npm run build` already refuses to run with stale artefacts, by comparing a
+      # fingerprint of the schema sources (`scripts/check-sanity.mjs`) — that is the fast
+      # gate, and it is the one that catches the ordinary case of editing a schema and
+      # forgetting to regenerate. This is the slow gate behind it, and it catches the
+      # case the fingerprint cannot: artefacts that were hand-edited, or a stamp that was
+      # refreshed without regenerating. Between them, the types in the repo cannot
+      # describe a schema that does not exist.
+      - name: Regenerate and diff
+        run: |
+          npm run sanity:types
+          if ! git diff --exit-code -- sanity/schema.json sanity/schema.stamp.json src/lib/sanity/sanity.types.ts; then
+            echo "::error::The Sanity schema changed but the generated artefacts were not regenerated. Run 'npm run sanity:types' and commit sanity/schema.json, sanity/schema.stamp.json and src/lib/sanity/sanity.types.ts."
+            exit 1
+          fi
+        env:
+          SANITY_STUDIO_PROJECT_ID: ${{ vars.SANITY_PROJECT_ID }}
+          SANITY_STUDIO_DATASET: ${{ vars.SANITY_DATASET }}
+
+      # Actually bundle the Studio.
+      #
+      # This step exists because every other check in this file passed while the Studio
+      # was unbuildable. `sanity schema extract` and `sanity schema validate` evaluate the
+      # schema but never bundle it, so neither of them noticed that `styled-components` —
+      # a peer dependency of `sanity`, present in `node_modules`, absent from
+      # `package.json` — failed Sanity's declaration preflight. `studio.yml` would have
+      # found it, on `main`, after merge, as a red deploy and no Studio for Mina.
+      #
+      # So the bundle is built on every pull request, with no token and no deploy. It is
+      # the only check here that answers "can Mina be given a Studio at all".
+      - name: Build the Studio
+        run: npm run sanity:build
+        env:
+          SANITY_STUDIO_PROJECT_ID: ${{ vars.SANITY_PROJECT_ID }}
+          SANITY_STUDIO_DATASET: ${{ vars.SANITY_DATASET }}
+
+      # `sanity build` defaults its output to `dist/`, which is Astro's and which
+      # `deploy.yml` uploads to GitHub Pages wholesale. The npm script names
+      # `.sanity/studio` instead; this asserts the script, not the default, is what ran —
+      # nothing in this job builds the site, so a `dist/` here came from the Studio.
+      - name: The Studio must not write where the site is published from
+        run: |
+          test ! -e dist || { echo "::error::sanity build wrote dist/ — the Studio bundle would be published to GitHub Pages."; exit 1; }
+          test -f .sanity/studio/index.html
+
+      # Every query in `src/lib/sanity/queries.ts`, run against the live dataset, each
+      # reported as OK / EMPTY / BROKEN. Reads only — the dataset is publicly readable and
+      # no token is involved, so there is nothing here that could change content.
+      #
+      # The dataset is empty until MUSE-20, so every query legitimately answers with
+      # nothing; the point of running it is that "answered with nothing" and "did not
+      # parse" are different lines of output. `continue-on-error` because this one step
+      # depends on a third-party API being reachable, and a Sanity outage must not block a
+      # pull request that does not touch Sanity.
+      - name: Probe the live read path
+        continue-on-error: true
+        run: npm run sanity:read
+        env:
+          SANITY_PROJECT_ID: ${{ vars.SANITY_PROJECT_ID }}
+          SANITY_DATASET: ${{ vars.SANITY_DATASET }}
 
   designsystem:
     name: design-system compliance

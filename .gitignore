@@ -2,6 +2,10 @@
 dist/
 # generated types
 .astro/
+# Sanity Studio bundle — built by `npm run sanity:deploy` and uploaded to Sanity's
+# hosting, never to GitHub Pages. Named explicitly so it cannot land in `dist/`, which is
+# what `sanity build` would default to and what the Pages workflow uploads.
+.sanity/
 
 # dependencies
 node_modules/

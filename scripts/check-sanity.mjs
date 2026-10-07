@@ -1,0 +1,264 @@
+/**
+ * The build's Sanity gate. Runs before `astro build` (see `package.json`).
+ *
+ * It answers one question — *are the generated artefacts still telling the truth about
+ * the schema?* — and it answers it in milliseconds, which is why it can be in the build
+ * at all. `sanity schema extract` takes the better part of half a minute because it
+ * bundles the whole Studio config to evaluate it; putting that in every build would be
+ * paid on every deploy and every local `npm run build`.
+ *
+ * So instead of re-deriving the schema, this compares a fingerprint. Every source file
+ * the schema is built from is hashed; `npm run sanity:types` records those hashes in
+ * `sanity/schema.stamp.json` alongside the artefacts it generates. If a hash has moved,
+ * the artefacts are stale and the build stops, naming the files.
+ *
+ * Why that is the right gate, rather than trusting review:
+ *
+ *   GROQ returns `null` for an attribute that does not exist — it does not error. So
+ *   renaming a schema field and *not* regenerating leaves a build that compiles, type
+ *   checks, exits 0, and publishes pages with empty slots where the content used to be.
+ *   Every other layer in the read path (`src/lib/sanity/shape.ts`'s compile-time
+ *   assertions, `test/sanity.test.ts`'s schema assertions, `decode.ts`'s runtime
+ *   checks) is derived from `sanity/schema.json`, so all three are blind while that file
+ *   is stale. This is the only check that can see it.
+ *
+ * It then does the cheap structural pass over the extracted schema itself: that the
+ * document types the read path reads still exist, and still have the fields it projects.
+ */
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+const SCHEMA_JSON = 'sanity/schema.json';
+const STAMP_JSON = 'sanity/schema.stamp.json';
+const GENERATED_TYPES = 'src/lib/sanity/sanity.types.ts';
+
+/**
+ * Everything the generated artefacts are derived from.
+ *
+ * `src/lib/schedule.ts` and `src/lib/pages.ts` are in here because the schema imports
+ * its option lists from them — levels, styles, weekdays, the route list. That is the
+ * content-versus-structure decision made mechanical: a fourth level added in
+ * `schedule.ts` changes the Studio's dropdown and the generated string union, so it has
+ * to invalidate the artefacts too.
+ *
+ * The first entry is the whole `sanity/` tree, deliberately coarse. It used to be
+ * `sanity/schemaTypes` walked with an `.endsWith('.ts')` filter, and both halves of that
+ * were holes:
+ *
+ *   - a schema helper at `sanity/schemaTypes/fields.tsx` was invisible to the gate, even
+ *     though it sat in the directory the gate claimed to cover. `.tsx` is an ordinary
+ *     extension for a Sanity schema with a custom input component. This is MUSE-17
+ *     recurring — a guard whose extension allow-list misses a file in its own
+ *     directory — so the allow-list is gone rather than extended;
+ *   - a helper at `sanity/fields.ts` was outside the walked directory entirely. That one
+ *     had teeth: `FAQS_QUERY` orders by `coalesce(order, 999)`, so renaming `order` in an
+ *     unfingerprinted helper silently reorders the whole FAQ page with every check green.
+ *
+ * So: every file under `sanity/`, whatever it is called. A file that is not schema source
+ * costs one spurious regeneration; a file the gate cannot see costs silent data loss.
+ *
+ * That sweep now also picks up `sanity/schema.json`, which is an artefact rather than a
+ * source. Kept deliberately: it means a hand-edited or truncated `schema.json` fails this
+ * gate — the one that `npm run build`, and therefore `deploy.yml`, actually runs — rather
+ * than waiting for CI's slower regenerate-and-diff, which `deploy.yml` does not depend on.
+ * `sanity/schema.stamp.json` is the single exclusion, because it is where the answer is
+ * written (see `STAMP_EXCLUDED`).
+ */
+const SOURCES = [
+  { dir: 'sanity' },
+  { file: 'sanity.config.ts' },
+  { file: 'sanity.cli.ts' },
+  { file: 'src/lib/schedule.ts' },
+  { file: 'src/lib/pages.ts' },
+  { file: 'src/lib/sanity/queries.ts' },
+];
+
+/**
+ * The paths `SOURCES` covers, as the globs a GitHub Actions `paths:` filter speaks.
+ *
+ * `.github/workflows/studio.yml` has to list the same set — it redeploys Mina's Studio
+ * when a schema file lands on `main`, and a schema change that does not trigger it leaves
+ * her Studio a schema behind the dataset. The two lists had already drifted while a
+ * comment in each claimed they were the same list, so `test/sanity.test.ts` now asserts
+ * the workflow's filter equals this, plus the studio-only paths named there.
+ */
+export const SOURCE_GLOBS = SOURCES.map(({ dir, file }) => (dir ? `${dir}/**` : file));
+
+/**
+ * The one file under `sanity/` that cannot be fingerprinted: it is where the fingerprint
+ * is written, so hashing it would be hashing the previous run's answer.
+ */
+const STAMP_EXCLUDED = new Set([STAMP_JSON]);
+
+/** The document types and fields the read path cannot work without. */
+const READ_CONTRACT = {
+  siteSettings: [
+    'studioName',
+    'tagline',
+    'summary',
+    'address',
+    'email',
+    'phone',
+    'openingHours',
+    'social',
+    'shareImage',
+  ],
+  page: ['route', 'name', 'title', 'description'],
+  class: [
+    'name',
+    'slug',
+    'style',
+    'level',
+    'description',
+    'durationMin',
+    'instructor',
+    'image',
+  ],
+  scheduleSlot: ['class', 'day', 'start', 'instructor', 'active'],
+  instructor: ['name', 'slug', 'role', 'bio', 'portrait'],
+  pricingTier: ['name', 'priceEur', 'period', 'features', 'featured'],
+  event: [
+    'title',
+    'slug',
+    'eventType',
+    'startsAt',
+    'endsAt',
+    'venue',
+    'description',
+    'image',
+    'lineup',
+    'ticketUrl',
+  ],
+  galleryImage: ['image', 'caption', 'takenAt'],
+  post: ['title', 'slug', 'publishedAt', 'excerpt', 'coverImage', 'body', 'author'],
+  faq: ['question', 'answer'],
+};
+
+/**
+ * Every file under `dir`, recursively, with no extension filter — see `SOURCES`.
+ *
+ * Dot-entries are skipped, and that is the only exclusion. It is a deny-list of OS and
+ * editor droppings (`.DS_Store`, `.vscode/`), not an allow-list of source extensions: the
+ * failure mode of a deny-list is a build that stops on a file it should have ignored,
+ * which is loud and takes a second to fix. The failure mode of an allow-list is a schema
+ * file nobody is watching, which is what put this comment here.
+ */
+function walk(dir) {
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => !entry.name.startsWith('.'))
+    .flatMap((entry) => {
+      const full = join(dir, entry.name);
+      return entry.isDirectory() ? walk(full) : [full];
+    })
+    .sort();
+}
+
+/** `{ 'sanity/schemaTypes/index.ts': '<sha256>', … }` — sorted, so it is comparable. */
+export function fingerprint() {
+  const files = SOURCES.flatMap(({ dir, file }) => {
+    const target = join(ROOT, dir ?? file);
+    if (!existsSync(target)) return [];
+    return statSync(target).isDirectory() ? walk(target) : [target];
+  }).sort();
+
+  const hashes = {};
+  for (const file of files) {
+    const key = relative(ROOT, file).replace(/\\/g, '/');
+    if (STAMP_EXCLUDED.has(key)) continue;
+    hashes[key] = createHash('sha256').update(readFileSync(file)).digest('hex').slice(0, 16);
+  }
+  return hashes;
+}
+
+function problems() {
+  const found = [];
+
+  for (const artefact of [SCHEMA_JSON, GENERATED_TYPES, STAMP_JSON]) {
+    if (!existsSync(join(ROOT, artefact))) {
+      found.push(`\`${artefact}\` is missing. Run \`npm run sanity:types\`.`);
+    }
+  }
+  if (found.length > 0) return found;
+
+  const stamp = JSON.parse(readFileSync(join(ROOT, STAMP_JSON), 'utf8'));
+  const current = fingerprint();
+
+  const drifted = [];
+  for (const [file, hash] of Object.entries(current)) {
+    if (stamp.sources[file] !== hash) drifted.push(file);
+  }
+  for (const file of Object.keys(stamp.sources)) {
+    if (!(file in current)) drifted.push(`${file} (deleted)`);
+  }
+
+  if (drifted.length > 0) {
+    found.push(
+      [
+        'The Sanity schema sources have changed since the generated artefacts were built:',
+        ...drifted.map((file) => `    ${file}`),
+        '',
+        `  So \`${SCHEMA_JSON}\` and \`${GENERATED_TYPES}\` no longer describe the schema,`,
+        '  and every check that reads them — the compile-time assertions in',
+        '  `src/lib/sanity/shape.ts`, the schema assertions in `test/sanity.test.ts` —',
+        '  is checking a schema that no longer exists.',
+        '',
+        '  This matters because GROQ does not fail on a field that is not there: it',
+        '  returns null. A renamed field with stale artefacts builds clean and publishes',
+        '  pages with the content silently missing.',
+        '',
+        '    npm run sanity:types     # regenerate, then commit both files',
+      ].join('\n'),
+    );
+    // Stop here: the structural pass below would be judging the stale schema.
+    return found;
+  }
+
+  const schema = JSON.parse(readFileSync(join(ROOT, SCHEMA_JSON), 'utf8'));
+  const byName = new Map(schema.map((type) => [type.name, type]));
+
+  for (const [type, fields] of Object.entries(READ_CONTRACT)) {
+    const definition = byName.get(type);
+    if (!definition) {
+      found.push(
+        `The read path reads \`${type}\` documents, and the schema has no such type. ` +
+          `Either restore it in \`sanity/schemaTypes/\` or remove its reader from ` +
+          `\`src/lib/sanity/index.ts\`.`,
+      );
+      continue;
+    }
+    // `sanity schema extract` writes a type-level view: an `attributes` map keyed by
+    // field name, with `optional: false` where validation requires a value. It is the
+    // same JSON `sanity typegen` reads, which is why the gate and the generated types
+    // can never disagree about what the schema says.
+    const present = new Set(Object.keys(definition.attributes ?? {}));
+    const missing = fields.filter((field) => !present.has(field));
+    if (missing.length > 0) {
+      found.push(
+        `\`${type}\` is missing field(s) the read path projects: ` +
+          `${missing.map((f) => `\`${f}\``).join(', ')}. ` +
+          `GROQ would return null for ${missing.length === 1 ? 'it' : 'them'} rather ` +
+          `than failing, so the page would render with the content missing. Fields the ` +
+          `schema does have: ${[...present].join(', ')}.`,
+      );
+    }
+  }
+
+  return found;
+}
+
+// Importable for the test suite; only the direct run reports and exits.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const found = problems();
+  if (found.length === 0) {
+    process.exit(0);
+  }
+  console.error('\nSanity schema gate failed.\n');
+  for (const problem of found) console.error(`  ${problem}\n`);
+  process.exit(1);
+}
+
+export { problems, READ_CONTRACT, SCHEMA_JSON, STAMP_JSON, GENERATED_TYPES };

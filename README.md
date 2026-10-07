@@ -14,7 +14,7 @@ Remaining pages, the CMS and the delivery pipeline are not yet wired up.
 | Styling | Plain CSS — design tokens + scoped component styles. **No Tailwind.** |
 | i18n | Astro i18n; HR at `/`, EN at `/en/` |
 | Hosting | GitHub Pages via Actions |
-| CMS | Sanity — *not yet wired* |
+| CMS | Sanity — schemas and read path wired; **no page reads it yet** (MUSE-20) |
 | Video | Cloudflare R2 — *not yet wired* |
 
 Astro rather than a React framework because this is a content site: the build ships
@@ -32,6 +32,13 @@ npm run ds         # design-system compliance
 npm run a11y       # axe on every page, both themes (needs a server running)
 npm run shots      # screenshots of all theme states → /tmp/muse-shots
 npm run ux:schedule  # /schedule: responsive shift, keyboard, filters (needs a server)
+
+npm run sanity:types   # re-extract the schema + regenerate types — commit the result
+npm run sanity:check   # the fast staleness gate that `npm run build` runs first
+npm run sanity:read    # every query against the live dataset: OK / EMPTY / BROKEN
+npm run sanity:dev     # the Studio locally, http://localhost:3333
+npm run sanity:build   # bundle the Studio into .sanity/studio — what CI runs
+npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
 ```
 
 All three browser gates take `ORIGIN`/`BASE` from the environment. `a11y` also takes
@@ -163,6 +170,86 @@ submitting reports that it could not be delivered and offers the studio inbox in
 `/privacy/` is the notice the form links to. It is footer-only and deliberately absent from
 the nav: it exists because the form collects a name, an email address and a phone number,
 which is personal data under the GDPR whether or not this site stores any of it.
+
+## The CMS
+
+Content lives in **Sanity** (project `q6fk9usq`, dataset `production`) and is fetched at
+**build time**. Nothing Sanity-shaped reaches a visitor: the build still emits zero
+JavaScript files, which `test/nojs.test.ts` asserts against `dist`.
+
+```
+sanity.config.ts            the Studio (hosted by Sanity, not mounted here)
+sanity.cli.ts               studioHost + typegen config
+sanity/schemaTypes/         the document types; enums are imported from src/lib/
+sanity/schema.json          extracted schema — generated, committed
+sanity/schema.stamp.json    source fingerprint — generated, committed
+src/lib/sanity/             the one read path; pages import this and nothing else
+src/lib/sanity/sanity.types.ts   generated from the schema + the queries
+```
+
+Document types: `siteSettings` (a singleton), `page`, `class`, `scheduleSlot`,
+`instructor`, `pricingTier`, `event`, `galleryImage`, `post`, `faq`. Field labels and
+descriptions are **Croatian**, because the person editing them is.
+
+Three things about this are decisions rather than defaults, and all three are argued at
+length in the code:
+
+- **Bilingual values are two named fields** (`hr`, `en`) in one object, not a field-level
+  i18n plugin and not one document per locale — `sanity/schemaTypes/objects/locale.ts`.
+- **The closed sets stay in code.** Levels, styles, weekdays and the route list are
+  imported into the schema from `src/lib/schedule.ts` and `src/lib/pages.ts`, so the
+  Studio offers a fixed list — `sanity/schemaTypes/enums.ts`.
+- **The Studio is hosted by Sanity**, at `musebymina.sanity.studio`, redeployed by
+  `.github/workflows/studio.yml` when a schema file lands on `main` — `sanity.config.ts`.
+
+```bash
+SANITY_PROJECT_ID=q6fk9usq SANITY_DATASET=production npm run build
+```
+
+Both are repository **variables**, not secrets, and both have the live values as defaults
+so an unset build still works. The dataset is publicly readable — an unauthenticated query
+returns 200, an unauthenticated write is rejected for want of the `create` permission — so
+**there is no read token in this repo and none should be added**. The only secret the
+project needs is `SANITY_DEPLOY_TOKEN`, a write credential for Sanity's own hosting, used
+by the Studio workflow and nothing else.
+
+GROQ returns `null` for a field that does not exist rather than erroring, so a renamed
+field is a silent failure by default. `npm run build` therefore refuses to run with stale
+generated artefacts:
+
+```bash
+npm run sanity:types    # then commit sanity/schema.json, schema.stamp.json and sanity.types.ts
+```
+
+### What "a schema mismatch fails the build" means
+
+`npm run build` is `sanity:check` → `astro check` → `astro build`, in that order, and all
+three are load-bearing. `.github/workflows/deploy.yml` runs `npm run build` and nothing
+else and does not depend on CI, so that script — not the CI workflow — is the definition
+of what cannot reach production.
+
+| what changed | what stops it |
+|---|---|
+| a schema source edited without regenerating | `sanity:check` — a fingerprint of every file under `sanity/` plus the four app modules the schema is built from |
+| a document type or projected field deleted | `sanity:check` — its read-contract pass over `sanity/schema.json` |
+| a field's *type* changed (`localeString` → `string`) | `astro check`, through `src/lib/sanity/shape.ts` |
+| a typo in a GROQ projection | `astro check`, through the regenerated query types |
+| a level added in `schedule.ts` only, or in the schema only | `astro check`, through `shape.ts`'s mutual-assignability assertions |
+| the Studio made unbuildable | CI's `npm run sanity:build` — see below |
+
+`astro check` is inside the build script for exactly the middle rows: they are invisible
+to the fingerprint, because the schema really was regenerated and the stamp really is
+current — the *shape* is what moved. It costs about nine seconds. CI no longer runs
+`astro check` as a separate step, because the build already has.
+
+The one check that is CI-only is the Studio bundle (`npm run sanity:build`), and that is
+deliberate: a Studio that will not build cannot take the public site down, so failing the
+site's deploy on it would be the wrong trade. It runs on every pull request, which is the
+thing that was missing — `sanity schema extract` and `sanity schema validate` evaluate the
+schema without ever bundling it, so both were green while the Studio could not be built at
+all. `styled-components` is declared in `devDependencies` for that reason: it is a peer
+dependency of `sanity` and therefore present in `node_modules` regardless, but
+`sanity build` preflights *declarations*, not resolution.
 
 ## Deploying
 
