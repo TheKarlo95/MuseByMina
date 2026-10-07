@@ -25,8 +25,8 @@ import { defineArrayMember, defineField, defineType } from 'sanity';
  * Two named fields instead:
  *
  *   - they are exactly `Record<Locale, string>`, the shape this repo already uses for
- *     every bilingual value — `PageMeta.title`, `WEEKDAY_NAME`, `FORM_COPY`,
- *     `SITE_SUMMARY`. MUSE-20 is then a data move, not a reshape;
+ *     every bilingual value — `WEEKDAY_NAME`, `LEVEL_NAME`, `FORM_COPY`. That is what
+ *     made MUSE-20 a data move rather than a reshape;
  *   - each locale is separately `required()`, so the Studio marks both and refuses to
  *     publish one without the other. A missing translation is caught by the person who
  *     can fix it, in the editor, rather than by a visitor;

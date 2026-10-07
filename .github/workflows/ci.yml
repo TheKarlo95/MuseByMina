@@ -143,14 +143,40 @@ jobs:
       # reported as OK / EMPTY / BROKEN. Reads only — the dataset is publicly readable and
       # no token is involved, so there is nothing here that could change content.
       #
-      # The dataset is empty until MUSE-20, so every query legitimately answers with
-      # nothing; the point of running it is that "answered with nothing" and "did not
-      # parse" are different lines of output. `continue-on-error` because this one step
-      # depends on a third-party API being reachable, and a Sanity outage must not block a
-      # pull request that does not touch Sanity.
+      # Most of the dataset is still empty (MUSE-36), so most queries legitimately answer
+      # with nothing; the point of running it is that "answered with nothing" and "did not
+      # parse" are different lines of output — and that the two MUSE-20 seeded, the
+      # `siteSettings` singleton and the `page` documents, answer with content.
+      #
+      # `continue-on-error` so this step's own flakiness cannot fail a pull request. It
+      # used to say that meant "a Sanity outage must not block a pull request that does
+      # not touch Sanity", and since MUSE-20 **that is no longer true and cannot be**: the
+      # pages read their titles from the dataset at build time, so `npm run build` — in
+      # the `check` job above, in the `a11y` job below, and in `deploy.yml` — fails if the
+      # API is unreachable. A Sanity outage therefore blocks every pull request and every
+      # deploy.
+      #
+      # That is the deliberate trade: the alternative is publishing pages with empty
+      # titles, and `src/lib/sanity/decode.ts` exists to refuse exactly that. Note it is
+      # a real availability dependency with no retry or backoff of our own — whatever
+      # `@sanity/client` does by default is all there is. If it starts costing time,
+      # MUSE-21's rebuild loop is where a cached last-good snapshot would belong.
       - name: Probe the live read path
         continue-on-error: true
         run: npm run sanity:read
+
+      # Does the live dataset still say what `sanity/seed/content.ndjson` says? The seed
+      # is the test fixture, so when Mina edits in the Studio the suite starts asserting
+      # against content that is no longer what the site publishes. Nothing is broken when
+      # that happens — the deploy fetches live — but the fixture ages, and this repo's own
+      # standard is that a command nobody is reminded of does not get run.
+      #
+      # `continue-on-error` for the same reason as the probe above, and one more: drift is
+      # information, not a defect. A pull request that has nothing to do with content must
+      # not go red because somebody reworded a title this morning.
+      - name: Is the seed still what the dataset holds?
+        continue-on-error: true
+        run: npm run sanity:seed:check
         env:
           SANITY_PROJECT_ID: ${{ vars.SANITY_PROJECT_ID }}
           SANITY_DATASET: ${{ vars.SANITY_DATASET }}

@@ -19,6 +19,8 @@
     "sanity:types": "sanity schema extract --path sanity/schema.json --enforce-required-fields --force && sanity typegen generate && node scripts/stamp-sanity.mjs",
     "sanity:check": "node scripts/check-sanity.mjs",
     "sanity:read": "node scripts/sanity-read-check.mjs",
+    "sanity:seed": "sanity dataset import sanity/seed/content.ndjson --replace --dataset ${SANITY_DATASET:-production}",
+    "sanity:seed:check": "node scripts/sanity-seed-check.mjs",
     "sanity:dev": "sanity dev",
     "sanity:build": "sanity build .sanity/studio --yes",
     "sanity:deploy": "sanity deploy .sanity/studio --yes"
@@ -38,6 +40,7 @@
     "@astrojs/check": "^0.9.10",
     "@axe-core/playwright": "^4.13.0",
     "@types/node": "^26.6.4",
+    "groq-js": "2.0.0",
     "playwright": "^1.63.0",
     "sanity": "^6.18.0",
     "styled-components": "^6.5.3",

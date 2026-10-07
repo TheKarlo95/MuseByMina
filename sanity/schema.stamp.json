@@ -3,17 +3,18 @@
   "sources": {
     "sanity.cli.ts": "583ad020a0a25c8a",
     "sanity.config.ts": "89443c27781e8d35",
-    "sanity/schema.json": "e5026150163f5f3f",
+    "sanity/schema.json": "df60a70352e44c0c",
     "sanity/schemaTypes/documents/media.ts": "5f4772af20e67e67",
     "sanity/schemaTypes/documents/offering.ts": "a087cfe6c8dfba27",
-    "sanity/schemaTypes/documents/site.ts": "ec07cdb451c0489d",
+    "sanity/schemaTypes/documents/site.ts": "aa20160a64eff56c",
     "sanity/schemaTypes/documents/studio.ts": "e0664553c2217d58",
-    "sanity/schemaTypes/enums.ts": "60c8a104a2670a4b",
+    "sanity/schemaTypes/enums.ts": "23e2953dd6030bdb",
     "sanity/schemaTypes/index.ts": "60719f3babbba879",
     "sanity/schemaTypes/objects/image.ts": "dd5539802c1ad35e",
-    "sanity/schemaTypes/objects/locale.ts": "5e9c487e1692e2b5",
+    "sanity/schemaTypes/objects/locale.ts": "7fd9bb26b8774d1b",
+    "sanity/seed/content.ndjson": "4ab3b206d5e17ed6",
     "sanity/structure.ts": "0e3b5b3c8953a082",
-    "src/lib/pages.ts": "607db4990ed83d2e",
+    "src/lib/pages.ts": "9d61fe5a48770432",
     "src/lib/sanity/queries.ts": "0127097bab2648d9",
     "src/lib/schedule.ts": "062e8b4ef20a08ce"
   }

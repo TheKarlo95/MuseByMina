@@ -1,5 +1,9 @@
+import { ROUTES } from '../pages';
 import { runQuery, sanitySource, type SanitySource } from './client';
 import {
+  SanityContentError,
+  type PageMetaDoc,
+  type SiteSettings,
   decodeClass,
   decodeEvent,
   decodeFaq,
@@ -41,41 +45,38 @@ import {
  *     await getEvents({ minimum: 0 })  // "no events announced yet" is a real state
  *
  * The default is `1`, so forgetting to think about it fails the build rather than
- * shipping a blank section. The dataset is empty until MUSE-20, which is exactly why
- * that default is the strict one.
+ * shipping a blank section. Most of the dataset is still empty — MUSE-20 filled in the
+ * singleton and the page documents, and nothing else — which is exactly why that default
+ * is the strict one.
  *
  * `test/sanity.test.ts` fails if any other file under `src/` imports `@sanity/client` or
  * contains a GROQ query, so "no ad-hoc GROQ in components" is a test, not a convention.
  *
  * ---
  *
- * **Known hole, decided here, closed by MUSE-20: "the only module a page may import" is
- * still only a sentence.**
+ * **"The only module a page may import" is now a test, not a sentence.**
  *
- * The guards that exist are about GROQ text and about `@sanity/client`, and a page can
- * evade both without writing either. `import { runQuery } from '../lib/sanity/client'`
- * plus `import { FAQS_QUERY } from '../lib/sanity/queries'` is two ordinary imports of
- * two sibling modules, and it yields raw rows with no decoding at all — so a renamed
- * field arrives as `undefined` and renders as nothing, which is the exact failure the
- * decoders exist to turn into a named build error. The build gate passes, the suite
- * passes, `astro check` passes, because nothing about those two lines is unusual.
+ * MUSE-19 wrote down the hole and left it open because there was nothing to protect yet:
+ * `import { runQuery } from '../lib/sanity/client'` plus `import { FAQS_QUERY } from
+ * '../lib/sanity/queries'` is two ordinary imports of two sibling modules, it yields raw
+ * rows with no decoding at all, and nothing about those two lines is unusual enough for
+ * the GROQ or `@sanity/client` guards to see.
  *
- * It is not a hole worth closing with runtime machinery, and TypeScript has no
- * package-private. The decision, so MUSE-20 does not have to re-take it:
+ * MUSE-20 is where pages arrived, so the check it specified is now in
+ * `test/sanity.test.ts`: for every file under `src/` that is not itself under
+ * `src/lib/sanity/`, an import specifier ending in `lib/sanity` is allowed and one
+ * containing `lib/sanity/` fails, naming the file and the specifier. The modules in here
+ * go on importing each other freely — the rule is about crossing the directory boundary.
  *
- *   **MUSE-20 adds a source-level depth check, in the same shape as the guards already
- *   here: for every file under `src/` that is not itself under `src/lib/sanity/`, an
- *   import specifier ending in `lib/sanity` is allowed and an import specifier containing
- *   `lib/sanity/` is a failure.** One assertion, read off the source tree like the others,
- *   and it names the file and the specifier. `client.ts`, `queries.ts`, `decode.ts` and
- *   `shape.ts` go on importing each other freely, because the rule is about crossing the
- *   directory boundary, not about the modules inside it.
+ * ---
  *
- * It is written down rather than shipped in MUSE-19 because there is nothing to protect
- * yet — no page imports this module, so the check would assert over an empty set and the
- * first real import would be its first exercise. MUSE-20 is where pages arrive, which is
- * where the check belongs and where it can be proven by mutation. Until then this comment
- * is the honest statement of what is and is not enforced.
+ * **Each reader is memoised for the life of the build.**
+ *
+ * `Footer.astro` reads the singleton, and it renders on nine pages; `TrialForm.astro`
+ * reads it too, on two of them. Without memoisation that is a dozen identical HTTP
+ * requests per build for one document that cannot change while the build runs. The cache
+ * is a promise rather than a value, so concurrent renders share one request, and it lives
+ * for the process — a build is one process, and the next build starts a new one.
  */
 
 export type {
@@ -91,7 +92,7 @@ export type {
   SiteSettings,
   StudioEvent,
 } from './decode';
-export { SanityContentError, SanityUnavailableError } from './decode';
+export { SanityContentError, SanityUnavailableError, addressLines, socialUrl } from './decode';
 export type { SanitySource } from './client';
 
 /** Which project and dataset this build is reading from. For build logs. */
@@ -104,23 +105,125 @@ export interface ListOptions {
   minimum?: number;
 }
 
-export async function getSiteSettings() {
-  const row = await runQuery<unknown>(SITE_SETTINGS_QUERY);
-  return requireDocument(row, 'siteSettings', decodeSiteSettings);
+let settings: Promise<SiteSettings> | undefined;
+
+/** The site-wide singleton: studio name, tagline, summary, address, email, socials. */
+export async function getSiteSettings(): Promise<SiteSettings> {
+  settings ??= (async () => {
+    const row = await runQuery<unknown>(SITE_SETTINGS_QUERY);
+    return requireDocument(row, 'siteSettings', decodeSiteSettings);
+  })();
+  return settings;
 }
 
-export async function getPageMeta({ minimum = 1 }: ListOptions = {}) {
-  const rows = await runQuery<unknown>(PAGES_QUERY);
-  return requireDocuments(rows, 'page', decodePage, minimum);
+let pages: Promise<Map<string, PageMetaDoc>> | undefined;
+
+/**
+ * Every `page` document, keyed by route, with the routes the site serves guaranteed.
+ *
+ * The guarantee is the part worth having. `requireDocuments` can say "there are fewer
+ * than one of these"; it cannot say "the one for `/privacy` is missing", and a build that
+ * is missing exactly one document renders exactly one page with an empty `<title>` and an
+ * absent `<meta name="description">` — and `test/seo.test.ts` is the only thing that
+ * would have noticed, after the fact. So the shortfall is named here, per route, before
+ * any page renders.
+ *
+ * A duplicate is just as bad in the other direction: two documents for `/schedule` means
+ * the page's title depends on which one GROQ returns first, which is not a thing anybody
+ * can debug from the output. The Studio's fixed route list makes both unlikely and
+ * neither impossible — a document outlives the route it was written for.
+ *
+ * **`minimum` is 0 on purpose, and that is load-bearing.** It used to be `ROUTES.length`,
+ * which looks stricter and was strictly worse: `requireDocuments` counts, so with three of
+ * four documents present it threw first and said "the dataset holds 3 `page` document(s);
+ * this page needs at least 4 … this is an empty dataset", naming neither the route nor the
+ * document and offering a remedy — "give the page a path for having none" — that does not
+ * exist for `page`. The per-route message below, the one written for exactly this failure,
+ * could then only fire when the count happened to come out right, which is the one case
+ * that is *not* the common one. The count check is the wrong instrument here because this
+ * reader knows precisely which documents it wants, so it does the reporting itself.
+ */
+async function pagesByRoute(): Promise<Map<string, PageMetaDoc>> {
+  pages ??= (async () => {
+    const rows = await runQuery<unknown>(PAGES_QUERY);
+    const documents = requireDocuments(rows, 'page', decodePage, 0);
+
+    const byRoute = new Map<string, PageMetaDoc>();
+    const duplicated: string[] = [];
+    for (const document of documents) {
+      if (byRoute.has(document.route)) duplicated.push(document.route);
+      byRoute.set(document.route, document);
+    }
+
+    const missing = ROUTES.filter(({ route }) => !byRoute.has(route)).map((r) => r.route);
+    if (missing.length > 0 || duplicated.length > 0) {
+      throw new SanityContentError(
+        [
+          `The \`page\` documents do not match the routes the site serves.`,
+          missing.length > 0
+            ? `  No \`page\` document describes: ${missing.join(', ')}. Add one in the ` +
+              `Studio under „Naslovi i opisi stranica” and pick that route — without it ` +
+              `the page would publish with an empty <title> and no description. The query ` +
+              `ran and the API answered, so this is a document that is not there, not a ` +
+              `broken read path.`
+            : '',
+          duplicated.length > 0
+            ? `  More than one \`page\` document describes: ${duplicated.join(', ')}. ` +
+              `Which title the page gets would depend on query order; open „Naslovi i ` +
+              `opisi stranica” and delete the spare.`
+            : '',
+          `  Routes the site serves: ${ROUTES.map((r) => r.route).join(', ')}.`,
+          `  Documents found: ${
+            documents.length === 0
+              ? 'none at all'
+              : documents.map((d) => `${d.route} (${d.id})`).join(', ')
+          }.`,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      );
+    }
+
+    return byRoute;
+  })();
+  return pages;
+}
+
+/**
+ * The `page` documents, in the order `src/lib/pages.ts` lists the routes.
+ *
+ * Not in `PAGES_QUERY`'s `order(route asc)`: `llms.txt` lists the pages in the order a
+ * reader should meet them — home first — which is the registry's order and not
+ * alphabetical. The query sorts for determinism; the site decides presentation.
+ */
+export async function getPageMeta(): Promise<PageMetaDoc[]> {
+  const byRoute = await pagesByRoute();
+  return ROUTES.map(({ route }) => byRoute.get(route)!);
+}
+
+/** The `page` document for one route. Fails naming the route if there is none. */
+export async function getPage(route: string): Promise<PageMetaDoc> {
+  const byRoute = await pagesByRoute();
+  const document = byRoute.get(route);
+  if (!document) {
+    throw new SanityContentError(
+      `No \`page\` document describes the route "${route}", and a page asked for it. ` +
+        `Either it is missing from the Studio, or the route is not in \`ROUTES\` in ` +
+        `\`src/lib/pages.ts\` — which is what the Studio builds its route list from.`,
+    );
+  }
+  return document;
 }
 
 /**
  * The weekly schedule, as `ClassEntry[]` plus ids.
  *
  * Drops straight into `Schedule.astro`, which already takes its rows as a prop and only
- * defaults to `src/data/schedule.ts` — so MUSE-20 is the one-line change that file's
+ * defaults to `src/data/schedule.ts` — so the swap is the one-line change that file's
  * header comment predicts, and the grid, the filters, the Croatian session counts and
- * both layouts move with nothing.
+ * both layouts move with nothing. Not yet, though: the placeholder rows are invented
+ * (MUSE-36) and the real timetable is entered in the Studio rather than migrated, which
+ * is why MUSE-20 deliberately left this reader unused.
  */
 export async function getSchedule({ minimum = 1 }: ListOptions = {}) {
   const rows = await runQuery<unknown>(SCHEDULE_QUERY);

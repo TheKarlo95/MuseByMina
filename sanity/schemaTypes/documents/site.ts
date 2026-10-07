@@ -1,11 +1,11 @@
 import { defineArrayMember, defineField, defineType } from 'sanity';
 
-import { ROUTE_OPTIONS, SOCIAL_PLATFORM_OPTIONS } from '../enums';
+import { ADDRESS_PATTERN, ROUTE_OPTIONS, SOCIAL_PLATFORM_OPTIONS } from '../enums';
 import { imageField } from '../objects/image';
 
 /**
- * `page` mirrors `PageMeta` in `src/lib/pages.ts` field for field, so MUSE-20 is a copy
- * rather than a redesign:
+ * `page` holds the words `src/lib/pages.ts` used to hold, which is what made MUSE-20 a
+ * copy rather than a redesign:
  *
  *     route       string, one of the routes the site serves
  *     name        Record<Locale, string>   → localeString
@@ -19,7 +19,7 @@ import { imageField } from '../objects/image';
  *
  * Which routes exist stays in code. `test/seo.test.ts` reads the page list off
  * `src/pages/` precisely so the index cannot claim a page the site does not serve, and
- * a CMS field is not allowed to undo that: `route` is a fixed list built from `PAGES`.
+ * a CMS field is not allowed to undo that: `route` is a fixed list built from `ROUTES`.
  */
 export const page = defineType({
   name: 'page',
@@ -107,8 +107,14 @@ export const siteSettings = defineType({
       name: 'address',
       title: 'Adresa',
       type: 'string',
-      initialValue: 'Ilica 209, 10000 Zagreb',
-      validation: (Rule) => Rule.required().error('Adresa je obavezna.'),
+      description:
+        'Ulica i broj, zarez, pa grad — „Ilica 209, Zagreb”. Podnožje je prikazuje u dva ' +
+        'reda i samo dodaje državu, pa zarez mora biti točno jedan. Bez poštanskog broja.',
+      initialValue: 'Ilica 209, Zagreb',
+      validation: (Rule) =>
+        Rule.required()
+          .regex(ADDRESS_PATTERN, { name: 'ulica, grad' })
+          .error('Upiši adresu kao „Ilica 209, Zagreb” — ulica, zarez, grad.'),
     }),
     defineField({
       name: 'email',
@@ -118,19 +124,30 @@ export const siteSettings = defineType({
       validation: (Rule) =>
         Rule.required().email().error('Upiši ispravnu e-mail adresu.'),
     }),
+    /**
+     * `phone` and `openingHours` are **optional**, decided in MUSE-20.
+     *
+     * Both were `required()`. Nothing on the site renders either one, and no real value
+     * exists for either — so the only way to satisfy the Studio was to invent one, and
+     * inventing content to satisfy a validator is exactly how the fabricated schedule
+     * (MUSE-36) reached production. Whichever page first displays them can require them
+     * then, with a real value in hand.
+     */
     defineField({
       name: 'phone',
       title: 'Telefon',
       type: 'string',
-      description: 'U međunarodnom formatu, npr. „+385 1 234 5678”.',
-      validation: (Rule) => Rule.required().error('Telefon je obavezan.'),
+      description:
+        'U međunarodnom formatu, npr. „+385 1 234 5678”. Nije obavezno — ostavi prazno ' +
+        'ako studio nema broj za javnost.',
     }),
     defineField({
       name: 'openingHours',
       title: 'Radno vrijeme',
       type: 'localeText',
-      description: 'Po jedan red po danu ili skupini dana. Raspored satova je zasebno.',
-      validation: (Rule) => Rule.required(),
+      description:
+        'Po jedan red po danu ili skupini dana. Raspored satova je zasebno. Nije ' +
+        'obavezno — stranica ga trenutno ne prikazuje nigdje.',
     }),
     defineField({
       name: 'social',

@@ -1,9 +1,9 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import Contact from '../../components/Contact.astro';
-import { pageMeta } from '../../lib/pages';
+import { getPage } from '../../lib/sanity';
 
-const meta = pageMeta('/contact');
+const meta = await getPage('/contact');
 ---
 
 <BaseLayout locale="en" title={meta.title.en} description={meta.description.en}>

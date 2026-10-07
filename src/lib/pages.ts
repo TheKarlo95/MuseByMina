@@ -1,84 +1,50 @@
-import type { Locale } from './i18n';
-
 /**
- * Per-page metadata, one entry per route — not per locale page, because HR and EN
- * share slugs (see CLAUDE.md).
+ * **Which pages the site serves. Not what they say.**
  *
- * This exists so the `<title>`/`<meta description>` a visitor gets and the one-line
- * description `llms.txt` publishes are the same string. Two copies would drift, and a
- * machine-readable index that disagrees with the page is worse than none.
+ * This file used to hold every page's `<title>` and one-line description as well. Those
+ * are `page` documents in Sanity now (MUSE-20) — one per route, carrying `name`, `title`
+ * and `description` in both locales — and the registry keeps only the half that is
+ * structure: the list of routes.
+ *
+ * The split is the point, and it runs in one direction:
+ *
+ *   - **Which pages exist is decided by `src/pages/`** and declared here. A route cannot
+ *     be invented from the Studio: `sanity/schemaTypes/enums.ts` builds the `route`
+ *     field's dropdown from this list, so a `page` document can only describe a page the
+ *     site actually serves. `test/seo.test.ts` reads its own page list off `src/pages/`
+ *     rather than off any registry, for exactly that reason.
+ *   - **What a page says is Mina's**, and lives in the CMS, so a title can be reworded
+ *     without a deploy.
+ *
+ * One entry per *route*, not per locale page, because HR and EN share slugs (CLAUDE.md).
+ * And one `page` document per route for the same reason: the `<title>`/`<meta
+ * description>` a visitor gets and the one line `llms.txt` publishes have to be the same
+ * string, and two documents would reintroduce the drift that single source exists to
+ * prevent. `test/seo.test.ts` compares the two renderings against each other.
+ *
+ * `src/lib/sanity/index.ts` reads the documents and fails the build, naming the route, if
+ * one is missing — so a page added here without a document in the Studio stops the build
+ * rather than publishing with an empty `<title>`.
  */
-export interface PageMeta {
+export interface SiteRoute {
   /** Route without locale prefix or deploy base — `/`, `/schedule`. */
   route: string;
-  /** Short label, used as link text in indexes. */
-  name: Record<Locale, string>;
-  /** The `<title>`. */
-  title: Record<Locale, string>;
-  /** One line. Serves as both `<meta name="description">` and the `llms.txt` entry. */
-  description: Record<Locale, string>;
+  /**
+   * What the Studio's route dropdown calls this page.
+   *
+   * Studio-only: never rendered, never published, and not the page's `name` — that is a
+   * field of the `page` document, which is what appears in `llms.txt`. It exists because
+   * a dropdown reading `/`, `/schedule`, `/contact` is a worse thing to pick from than
+   * one reading „Početna — /", and because a label for a page that does not exist yet is
+   * not something the CMS can supply.
+   */
+  studioLabel: string;
 }
 
 /** Indexable pages, in the order they should be listed. Error routes are not here. */
-export const PAGES: PageMeta[] = [
-  {
-    route: '/',
-    name: { hr: 'Početna', en: 'Home' },
-    title: {
-      hr: 'Muse by Mina — Plesni studio, Zagreb',
-      en: 'Muse by Mina — Dance studio, Zagreb',
-    },
-    description: {
-      hr: 'Plesni studio u Zagrebu. Bachata za odrasle — bez partnera, bez iskustva. Dođi na besplatni probni sat.',
-      en: 'A dance studio in Zagreb. Bachata for adults — no partner, no experience needed. Come to a free trial class.',
-    },
-  },
-  {
-    route: '/schedule',
-    name: { hr: 'Raspored', en: 'Schedule' },
-    title: {
-      hr: 'Raspored — Muse by Mina',
-      en: 'Schedule — Muse by Mina',
-    },
-    description: {
-      hr: 'Tjedni raspored bachata satova u Zagrebu — dan, vrijeme, razina i instruktor za tradicionalnu, modernu i sensual bachatu.',
-      en: 'The weekly bachata class schedule in Zagreb — day, time, level and instructor for traditional, moderna and sensual bachata.',
-    },
-  },
-  {
-    route: '/contact',
-    name: { hr: 'Kontakt', en: 'Contact' },
-    title: {
-      hr: 'Prijava za probni sat — Muse by Mina',
-      en: 'Trial class sign-up — Muse by Mina',
-    },
-    description: {
-      hr: 'Prijavi se na besplatni probni sat bachate u Zagrebu. Ispuni obrazac ili nam piši — javljamo se u roku od jednog radnog dana.',
-      en: 'Sign up for a free bachata trial class in Zagreb. Fill in the form or write to us — we answer within one working day.',
-    },
-  },
-  {
-    route: '/privacy',
-    name: { hr: 'Izjava o privatnosti', en: 'Privacy notice' },
-    title: {
-      hr: 'Izjava o privatnosti — Muse by Mina',
-      en: 'Privacy notice — Muse by Mina',
-    },
-    description: {
-      hr: 'Što obrazac za probni sat prikuplja, zašto, kome se prenosi, koliko dugo ga čuvamo i koja su tvoja prava prema GDPR-u.',
-      en: 'What the trial-class form collects, why, who it is passed to, how long we keep it and what your rights are under the GDPR.',
-    },
-  },
+export const ROUTES: SiteRoute[] = [
+  { route: '/', studioLabel: 'Početna' },
+  { route: '/schedule', studioLabel: 'Raspored' },
+  { route: '/contact', studioLabel: 'Kontakt' },
+  { route: '/privacy', studioLabel: 'Izjava o privatnosti' },
 ];
-
-export function pageMeta(route: string): PageMeta {
-  const page = PAGES.find((p) => p.route === route);
-  if (!page) throw new Error(`No page metadata for route "${route}".`);
-  return page;
-}
-
-/** One-line summary of the studio, for the top of `llms.txt`. */
-export const SITE_SUMMARY: Record<Locale, string> = {
-  hr: 'Plesni studio u Zagrebu (Ilica 209) — bachata za odrasle, bez partnera i bez iskustva.',
-  en: 'A dance studio in Zagreb, Croatia (Ilica 209) — bachata for adults, no partner and no experience needed.',
-};

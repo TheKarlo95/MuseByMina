@@ -33,10 +33,10 @@ export type SiteSettings = {
   summary: LocaleText;
   address: string;
   email: string;
-  phone: string;
-  openingHours: LocaleText;
+  phone?: string;
+  openingHours?: LocaleText;
   social?: Array<{
-    platform: "instagram" | "facebook" | "tiktok" | "youtube";
+    platform: "instagram" | "facebook" | "linktree" | "tiktok" | "youtube";
     url: string;
     _type: "socialLink";
     _key: string;
@@ -446,13 +446,13 @@ export type SITE_SETTINGS_QUERY_RESULT = {
   };
   address: string;
   email: string;
-  phone: string;
+  phone: string | null;
   openingHours: {
     hr: string;
     en: string;
-  };
+  } | null;
   social: Array<{
-    platform: "facebook" | "instagram" | "tiktok" | "youtube";
+    platform: "facebook" | "instagram" | "linktree" | "tiktok" | "youtube";
     url: string;
   }> | null;
   shareImage: {

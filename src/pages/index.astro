@@ -1,9 +1,9 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import Home from '../components/Home.astro';
-import { pageMeta } from '../lib/pages';
+import { getPage, getSiteSettings } from '../lib/sanity';
 
-const meta = pageMeta('/');
+const [meta, settings] = await Promise.all([getPage('/'), getSiteSettings()]);
 ---
 
 <BaseLayout
@@ -12,5 +12,5 @@ const meta = pageMeta('/');
   description={meta.description.hr}
   detectLanguage
 >
-  <Home locale="hr" />
+  <Home locale="hr" address={settings.address} />
 </BaseLayout>

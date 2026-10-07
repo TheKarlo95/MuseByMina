@@ -1,6 +1,7 @@
 ---
 import { MORE_NAV, PRIMARY_NAV, STUDIO } from '../lib/nav';
 import { localeUrl, type Locale } from '../lib/i18n';
+import { addressLines, getSiteSettings, socialUrl } from '../lib/sanity';
 
 interface Props {
   locale: Locale;
@@ -35,6 +36,26 @@ const t = {
  */
 const quick = [...PRIMARY_NAV, ...MORE_NAV.slice(0, 4)];
 const year = 2026;
+
+/**
+ * The studio's own details come from Sanity (MUSE-20), the address included.
+ *
+ * `addressLines` splits the one `address` field into the two lines this `<address>`
+ * element needs, and fails the build naming the document if it cannot — see the note
+ * there for why splitting beat adding two more fields. Only the country and the maps
+ * link are still code: a translated word and a URL the schema has no field for.
+ *
+ * The social links are asked for by name rather than mapped over the array: the link
+ * text and the order are the design's (§7.1), while the address is content. A platform
+ * missing from Sanity then fails the build naming the document, instead of rendering a
+ * link with no href — see `socialUrl`.
+ *
+ * This read is **frontmatter**: it runs in Node during the build and is never bundled.
+ * A `<script>` in this file may not import the read path, and `test/sanity.test.ts`
+ * asserts that by splitting the file at the fence.
+ */
+const settings = await getSiteSettings();
+const address = addressLines(settings);
 ---
 
 <footer class="footer">
@@ -43,11 +64,7 @@ const year = 2026;
       <p class="logoMark">Muse</p>
       <p class="logoSub">by Mina</p>
       <p class="blurb">
-        {
-          locale === 'hr'
-            ? 'Plesni studio u Zagrebu. Bachata za odrasle — bez partnera, bez iskustva.'
-            : 'A dance studio in Zagreb. Bachata for adults — no partner, no experience needed.'
-        }
+        {settings.tagline[locale]}
       </p>
     </div>
 
@@ -67,22 +84,22 @@ const year = 2026;
     <div class="col">
       <h2 class="h">{t.find}</h2>
       <address>
-        {STUDIO.street}<br />
-        {STUDIO.city}, {STUDIO.country[locale]}
+        {address.street}<br />
+        {address.city}, {STUDIO.country[locale]}
       </address>
       {/* Link-out, not an iframe: no third-party cookies and no LCP hit. */}
       <a class="mapLink" href={STUDIO.maps} target="_blank" rel="noopener noreferrer">
         {t.openMaps}
       </a>
-      <a class="mail" href={`mailto:${STUDIO.email}`}>{STUDIO.email}</a>
+      <a class="mail" href={`mailto:${settings.email}`}>{settings.email}</a>
     </div>
 
     <div class="col">
       <h2 class="h">{t.social}</h2>
       <ul>
-        <li><a href={STUDIO.instagram} target="_blank" rel="noopener noreferrer me">Instagram</a></li>
-        <li><a href={STUDIO.facebook} target="_blank" rel="noopener noreferrer me">Facebook</a></li>
-        <li><a href={STUDIO.linktree} target="_blank" rel="noopener noreferrer me">Linktree</a></li>
+        <li><a href={socialUrl(settings, 'instagram')} target="_blank" rel="noopener noreferrer me">Instagram</a></li>
+        <li><a href={socialUrl(settings, 'facebook')} target="_blank" rel="noopener noreferrer me">Facebook</a></li>
+        <li><a href={socialUrl(settings, 'linktree')} target="_blank" rel="noopener noreferrer me">Linktree</a></li>
       </ul>
     </div>
   </div>
@@ -92,7 +109,7 @@ const year = 2026;
     it is the footnote the trial form links to, not a destination anyone sets out for.
   */}
   <div class="bottom">
-    <span>© {year} {STUDIO.name}</span>
+    <span>© {year} {settings.studioName}</span>
     <a class="bottomLink" href={localeUrl('/privacy', locale)}>{t.privacy}</a>
   </div>
 </footer>

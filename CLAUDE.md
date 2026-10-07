@@ -36,6 +36,8 @@ npm run shots      # screenshots of all theme states to /tmp/muse-shots
 npm run sanity:types   # re-extract the schema and regenerate types — commit the result
 npm run sanity:check   # the fast gate `npm run build` runs first
 npm run sanity:read    # every query against the live dataset: OK / EMPTY / BROKEN
+npm run sanity:seed    # import sanity/seed/content.ndjson into the dataset (by _id)
+npm run sanity:seed:check  # does the live dataset still say what the seed says?
 npm run sanity:dev     # the Studio locally, on localhost:3333
 npm run sanity:build   # bundle the Studio into .sanity/studio — what CI runs
 npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
@@ -48,12 +50,20 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
 - Locale pages are thin wrappers: `src/pages/x.astro` + `src/pages/en/x.astro` both render a
   shared component from `src/components/`.
 - Interactive behaviour goes in a component `<script>`; keep pages static.
-- A page's `<title>` and `description` live in `src/lib/pages.ts`, not in the page. `llms.txt`
-  publishes the same strings, so a new page must be registered there. **`astro build` will not
-  catch an omission** — it exits 0 and quietly leaves the page out of the index. `npm test` is
-  the gate: `test/seo.test.ts` reads the page list off `src/pages/` rather than off the
-  registry, and compares each `llms.txt` description against the `<meta name="description">`
-  in that route's built HTML — so the index cannot drift from the pages.
+- A page's `<title>` and `description` are a **`page` document in Sanity** (MUSE-20), read
+  through `getPage(route)` in the page's frontmatter. `src/lib/pages.ts` keeps only the half
+  that is structure — `ROUTES`, which routes the site serves — and the Studio builds its
+  route dropdown from it, so Sanity owns a page's words and never its existence. `llms.txt`
+  publishes the same strings as the page's `<meta name="description">`, so a new page needs
+  **both** a route in `ROUTES` and a document in the Studio. **`astro build` will not catch a
+  missing route** — it exits 0 and quietly leaves the page out of the index; `npm test` is
+  that gate, because `test/seo.test.ts` reads the page list off `src/pages/` rather than off
+  the registry. A missing *document* does fail the build, naming the route and where to add
+  it — and so does a second document for a route, because which title the page got would
+  otherwise depend on query order. Both are `pagesByRoute` in `src/lib/sanity/index.ts`,
+  which passes `minimum: 0` to `requireDocuments` deliberately: a count check there reports
+  "the dataset holds 3, this page needs 4 … an empty dataset" and shadows the message that
+  names the route, in the single most likely case.
 - No file under `src/` or `public/` may name the deploy host; that is the tree
   `test/seo.test.ts` walks. The host lives in exactly one place, `astro.config.mjs`, as the
   overridable `SITE`/`BASE` default. `sitemap`, `robots.txt` and `llms.txt` all derive their
@@ -111,8 +121,50 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   back twice; `test/isolation.test.ts` now fails if a suite names a build directory,
   deletes anything, or spawns its own build.
 
-## Sanity (MUSE-19)
+## Sanity (MUSE-19, MUSE-20)
 
+- **The build reads Sanity, so a Sanity outage blocks every PR and every deploy.** Three
+  jobs run `npm run build` and it fetches live; there is no cached snapshot and no retry of
+  our own beyond `@sanity/client`'s defaults. That is the deliberate trade — the
+  alternative is publishing pages with empty titles, which `src/lib/sanity/decode.ts`
+  exists to refuse — but it is a real availability dependency, and the `continue-on-error`
+  probe step in `ci.yml` no longer protects anything from it.
+- **The seed is both the migration and the test fixture.** `sanity/seed/content.ndjson`
+  holds the five documents that exist — the `siteSettings` singleton and four `page`
+  documents — and `npm run sanity:seed` imports it, replacing by `_id`, so the migration is
+  reviewable and re-runnable. `vitest.config.ts` points every test build at that same file
+  (`MUSE_CONTENT_FIXTURE`) and `src/lib/sanity/fixture.ts` evaluates the *real* queries
+  against it with `groq-js`. **The suite never touches the network**, and there is no second
+  copy of the content to drift. The deploy has no such variable and fetches live; there is no
+  default path and no fallback, so a fixture build cannot happen by accident — and the build
+  log says which source it read. What can still age is the seed against the dataset once Mina
+  edits in the Studio: `npm run sanity:seed:check` is how you find out, and CI runs it
+  `continue-on-error` so drift is reported without failing a pull request. The fixture
+  drops `drafts.` documents, because `perspective: 'published'` does and a seed refreshed
+  with `sanity dataset export` carries drafts — otherwise the fixture sees a page the
+  deploy cannot.
+- **What the site published before the migration is frozen in `test/content.test.ts`.**
+  `PUBLISHED_BEFORE_THE_MIGRATION` is the only remaining copy of those strings and it is
+  what makes "renders byte-identically to the previous deploy" a test rather than a command
+  somebody once ran — comparing the build to the seed it just read asserts nothing. When
+  Mina legitimately rewords something, delete the entry with a sentence saying so; do not
+  quietly update it to match.
+- **`siteSettings.address` is one field, rendered on four surfaces.** `addressLines`
+  (`src/lib/sanity/decode.ts`) splits it on its one comma for the footer's two-line
+  `<address>`; `ADDRESS_PATTERN` makes the Studio refuse what the build would refuse. The
+  rule exists because a CMS field nothing renders is worse than no field — it looks like it
+  works. Only `country` (a translated word) and `maps` (no field in the schema) are still
+  code, in `STUDIO`.
+- **The schedule and the instructors are deliberately not in Sanity yet** (MUSE-36).
+  `src/data/schedule.ts` is invented content naming instructors who do not exist; importing
+  it would make fiction look authoritative in the Studio. The real timetable is entered
+  there directly, and `Schedule.astro` already takes its rows as a prop.
+- **A page imports `src/lib/sanity` and nothing deeper.** The index is what decodes; a
+  module from inside the read path hands back raw rows with silent nulls. Both halves are
+  tests, not conventions: `test/sanity.test.ts` fails on an import specifier containing
+  `lib/sanity/` from outside the directory, and — splitting each `.astro` file at its
+  frontmatter fence — on `lib/sanity` appearing in the *markup* half, where a `<script>`
+  would ship it to the browser.
 - **Content is fetched at build time and no Sanity code ships to the visitor.** The built
   output contains **zero `.js` files**; `test/nojs.test.ts` asserts that against `dist`
   along with an allow-list of output extensions. Inline `<script>` blocks are fine and
@@ -163,8 +215,8 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   installed regardless, but `sanity build` preflights *declarations*, not resolution.
 - **A missing or malformed document fails the build naming itself** — `_id`, type and
   field path — through `src/lib/sanity/decode.ts`. "Unreachable", "empty" and "malformed"
-  are three different error types on purpose: the dataset is empty until MUSE-20, so
-  "nothing on the page" has to be readable as which of the three it was.
+  are three different error types on purpose: most of the dataset is still empty
+  (MUSE-36), so "nothing on the page" has to be readable as which of the three it was.
 - **The Studio is hosted by Sanity**, at `musebymina.sanity.studio`, never mounted at
   `/studio` here. `.github/workflows/studio.yml` redeploys it when a schema file lands on
   `main`. `SANITY_PROJECT_ID` and `SANITY_DATASET` are repository *variables*; there is

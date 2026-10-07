@@ -1,6 +1,6 @@
 ---
 import { localeUrl, type Locale } from '../lib/i18n';
-import { STUDIO } from '../lib/nav';
+import { getSiteSettings } from '../lib/sanity';
 
 /**
  * `/privacy` — the notice the trial form has to be able to link to.
@@ -19,6 +19,13 @@ interface Props {
 }
 const { locale } = Astro.props;
 
+/**
+ * The controller's name and inbox come from Sanity (MUSE-20) — they are the studio's
+ * contact details, and they appear on four other pages too. The *notice* does not: legal
+ * text needs a git history and a reviewer, so the wording below stays in code.
+ */
+const settings = await getSiteSettings();
+
 const t = {
   hr: {
     eyebrow: 'Kratko i bez pravnog žargona',
@@ -29,7 +36,7 @@ const t = {
       {
         h: 'Tko obrađuje podatke',
         p: [
-          `${STUDIO.name}, ${STUDIO.street}, ${STUDIO.city}, Hrvatska. Za svako pitanje o podacima dovoljan je e-mail na ${STUDIO.email}.`,
+          `${settings.studioName}, ${settings.address}, Hrvatska. Za svako pitanje o podacima dovoljan je e-mail na ${settings.email}.`,
         ],
       },
       {
@@ -57,7 +64,7 @@ const t = {
         h: 'Tvoja prava',
         p: [
           'Imaš pravo na pristup svojim podacima, ispravak, brisanje, ograničenje obrade, prigovor na obradu i prenosivost. Dovoljan je e-mail na ' +
-            `${STUDIO.email} i odgovaramo u roku od mjesec dana.`,
+            `${settings.email} i odgovaramo u roku od mjesec dana.`,
           'Ako misliš da s podacima postupamo pogrešno, možeš se obratiti Agenciji za zaštitu osobnih podataka (AZOP), Selska cesta 136, 10000 Zagreb.',
         ],
       },
@@ -79,7 +86,7 @@ const t = {
       {
         h: 'Who processes the data',
         p: [
-          `${STUDIO.name}, ${STUDIO.street}, ${STUDIO.city}, Croatia. For anything at all about your data, an email to ${STUDIO.email} is enough.`,
+          `${settings.studioName}, ${settings.address}, Croatia. For anything at all about your data, an email to ${settings.email} is enough.`,
         ],
       },
       {
@@ -106,7 +113,7 @@ const t = {
       {
         h: 'Your rights',
         p: [
-          `You have the right of access, and to rectification, erasure, restriction, objection and portability. An email to ${STUDIO.email} is enough, and we answer within one month.`,
+          `You have the right of access, and to rectification, erasure, restriction, objection and portability. An email to ${settings.email} is enough, and we answer within one month.`,
           'If you think we are handling your data badly, you can complain to the Croatian Personal Data Protection Agency (AZOP), Selska cesta 136, 10000 Zagreb.',
         ],
       },

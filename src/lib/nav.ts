@@ -59,14 +59,27 @@ export const CTA = {
   label: { hr: 'Besplatni probni sat', en: 'Free trial class' },
 } as const;
 
+/**
+ * What is left of the studio record after MUSE-20: the two values the CMS has no field
+ * for.
+ *
+ * The name, the address, the email address and the three social URLs are `siteSettings`
+ * in Sanity, and every surface that shows them reads them from there — including the
+ * street and the city, which `addressLines` splits off the one `address` field. There is
+ * deliberately no copy of them here: a value in both places is a value that drifts, and
+ * the dataset is what deploys.
+ *
+ * These two stay:
+ *
+ *   - `country` — a translated word rather than part of the address. Mina types one
+ *     address, and „Hrvatska"/"Croatia" is the site saying it in the page's language.
+ *     A CMS field for it would be a field whose two values must match a locale, which is
+ *     the kind of thing a typo makes incoherent rather than merely wrong.
+ *   - `maps` — a Google Maps share link, which has no field in the schema. It is also
+ *     the one value here a wrong edit would break silently: a mistyped URL still looks
+ *     like a link.
+ */
 export const STUDIO = {
-  name: 'Muse by Mina',
-  street: 'Ilica 209',
-  city: 'Zagreb',
   country: { hr: 'Hrvatska', en: 'Croatia' },
-  email: 'dancestudio.muse@gmail.com',
   maps: 'https://maps.app.goo.gl/PK2hgiB5ALUi93Er7',
-  instagram: 'https://www.instagram.com/dancestudio.muse',
-  facebook: 'https://www.facebook.com/profile.php?id=61592250952126',
-  linktree: 'https://linktr.ee/dancestudio.muse',
 } as const;

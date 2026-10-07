@@ -14,7 +14,7 @@ Remaining pages, the CMS and the delivery pipeline are not yet wired up.
 | Styling | Plain CSS — design tokens + scoped component styles. **No Tailwind.** |
 | i18n | Astro i18n; HR at `/`, EN at `/en/` |
 | Hosting | GitHub Pages via Actions |
-| CMS | Sanity — schemas and read path wired; **no page reads it yet** (MUSE-20) |
+| CMS | Sanity — the per-page titles/descriptions and the studio details are read from it at build time (MUSE-20); the schedule is not there yet (MUSE-36) |
 | Video | Cloudflare R2 — *not yet wired* |
 
 Astro rather than a React framework because this is a content site: the build ships
@@ -86,7 +86,9 @@ src/
                 as the default, so the Sanity swap is a prop change
   layouts/      BaseLayout — head, theme script, header/footer
   lib/          theme.ts (pre-paint script), i18n.ts, lang.ts, nav.ts,
-                pages.ts (per-route title + description), site.ts (deploy-root URLs),
+                pages.ts (which routes the site serves — the words are in Sanity),
+                sanity/ (the one read path: client, queries, decoders, fixture),
+                site.ts (deploy-root URLs),
                 schedule.ts (class model, locale wording, Croatian pluralisation)
                 forms.ts (trial-form fields, endpoint and HR/EN copy)
   pages/        thin wrappers over components, one per locale
@@ -133,14 +135,18 @@ absolute and the origin comes from `SITE`/`BASE`:
 | `robots.txt` | `src/pages/robots.txt.ts` |
 | `llms.txt` | `src/pages/llms.txt.ts`, listing each page with its own `<meta description>` |
 
-`llms.txt` descriptions come from `src/lib/pages.ts`, which is also what the pages render, so
-the index cannot drift from the site — and `test/seo.test.ts` enforces that rather than
-assuming it, comparing every `llms.txt` description against the `<meta name="description">`
-parsed out of that route's built HTML.
+`llms.txt` descriptions come from the `page` documents in Sanity, which is also where the
+pages themselves get them, so the index cannot drift from the site — and
+`test/seo.test.ts` enforces that rather than assuming it, comparing every `llms.txt`
+description against the `<meta name="description">` parsed out of that route's built HTML.
 
-**Add a page → add it there.** Forgetting is not a build error: `astro build` exits 0 and
-silently omits the page from both the index and the sitemap. `npm test` is what fails — it
-derives the expected page list from `src/pages/`, not from the registry.
+**Add a page → add its route to `src/lib/pages.ts` and a `page` document in the Studio.**
+Forgetting the route is not a build error: `astro build` exits 0 and silently omits the
+page from both the index and the sitemap. `npm test` is what fails — it derives the
+expected page list from `src/pages/`, not from the registry. Forgetting the *document* is
+a build error, naming the route and where to add it (`src/lib/sanity/index.ts`), because
+a page with no document would publish with an empty `<title>`. Two documents for one route
+is an error too: which title the page got would otherwise depend on query order.
 
 One caveat worth knowing: on the GitHub Pages project URL these land at
 `/MuseByMina/robots.txt`, not the origin root, so crawlers will not find `robots.txt` until
@@ -214,6 +220,51 @@ returns 200, an unauthenticated write is rejected for want of the `create` permi
 **there is no read token in this repo and none should be added**. The only secret the
 project needs is `SANITY_DEPLOY_TOKEN`, a write credential for Sanity's own hosting, used
 by the Studio workflow and nothing else.
+
+### What is in the dataset, and how the tests get it
+
+Two document types hold real content today (MUSE-20): the `siteSettings` singleton —
+studio name, tagline, summary, address, email, the three social links — and four `page`
+documents carrying each route's short name, `<title>` and one-line description. The weekly
+schedule and the instructors are deliberately **not** there: `src/data/schedule.ts` is
+invented placeholder content naming two instructors who do not exist (MUSE-36), and the
+real timetable goes into the Studio directly rather than through a migration.
+
+The migration itself is a committed artefact, not a Studio session:
+
+```bash
+npm run sanity:seed         # import sanity/seed/content.ndjson, replacing by _id
+npm run sanity:seed:check   # does the live dataset still say what the seed says?
+```
+
+That one file is also **the test fixture**. `npm test` runs ten real `astro build`s in
+parallel workers, and ten HTTP round-trips per run would make the suite's result depend on
+whether anybody is mid-edit in the Studio — so `vitest.config.ts` sets
+`MUSE_CONTENT_FIXTURE=sanity/seed/content.ndjson` and `src/lib/sanity/fixture.ts`
+evaluates the real queries against it with `groq-js`, Sanity's own GROQ engine. One file,
+so the migration and the fixture cannot drift apart.
+
+The deploy fetches live, and cannot do otherwise by accident: there is no default fixture
+path and no fallback (a path that does not resolve *fails* the build), the build log says
+which source it read with `FIXTURE` in capitals, and `test/content.test.ts` asserts that no
+workflow and no npm script *assigns* the variable. What *can* still drift is the seed
+against the dataset once Mina edits in the Studio — the deploy publishes her words either
+way, and `npm run sanity:seed:check` diffs the two, field by field. CI runs it
+`continue-on-error`, so drift is reported and never blocks a pull request.
+
+Two consequences worth knowing before they surprise you:
+
+- **A Sanity outage blocks every pull request and every deploy.** `npm run build` fetches
+  live and fails if the API does not answer, and three jobs run it. There is no cached
+  last-good snapshot and no retry beyond `@sanity/client`'s defaults. The trade is
+  deliberate — the alternative is publishing pages with empty titles — but it is a real
+  availability dependency, and `ci.yml`'s `continue-on-error` probe step does not soften
+  it.
+- **What the site said before the migration is frozen in `test/content.test.ts`.** It is
+  the only copy of those strings left, and it is what makes "byte-identical to the previous
+  deploy" an assertion instead of a command run once by hand. It is allowed to stop
+  matching the day Mina rewords something — delete the entry with a sentence saying who
+  changed it, rather than quietly updating it.
 
 GROQ returns `null` for a field that does not exist rather than erroring, so a renamed
 field is a silent failure by default. `npm run build` therefore refuses to run with stale
