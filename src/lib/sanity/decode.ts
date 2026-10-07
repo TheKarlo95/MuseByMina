@@ -472,7 +472,27 @@ export interface Instructor {
   slug: string;
   role: Record<Locale, string>;
   bio: Record<Locale, string>;
-  portrait: ImageRef;
+  /**
+   * Optional as of MUSE-23, for the reason `phone` is: no photography of this studio
+   * exists, so a required portrait could only be satisfied by uploading something that is
+   * not one — and inventing content to satisfy a validator is how MUSE-36 happened.
+   *
+   * `/aboutus` renders a placeholder frame at the same 3:4 box instead, so the layout does
+   * not move when a photograph finally lands. Note that **optional is not unchecked**: a
+   * portrait that is present still has to carry an asset id and both alt locales, which is
+   * what keeps the MUSE-49 shape — an image object whose asset reference has gone — a named
+   * build failure rather than an empty frame.
+   */
+  portrait?: ImageRef;
+  /**
+   * The instructor's own Instagram profile, if they have a public one.
+   *
+   * Optional, and the page renders a plain name when it is absent: a name linking nowhere
+   * is worse than a name. The URL is content and lives in Sanity rather than in the
+   * component — MUSE-23's words — because it is the sort of thing that changes without a
+   * deploy and differs per person.
+   */
+  instagram?: string;
 }
 
 export function decodeInstructor(row: unknown): Instructor {
@@ -483,7 +503,44 @@ export function decodeInstructor(row: unknown): Instructor {
     slug: text(row, 'slug', where),
     role: localised(row, 'role', where),
     bio: localised(row, 'bio', where),
-    portrait: image(row, 'portrait', where),
+    portrait: optionalImage(row, 'portrait', where),
+    instagram: optionalText(row, 'instagram', where),
+  };
+}
+
+/**
+ * The studio's origin story: a heading, the date it started, and the paragraphs.
+ *
+ * `foundedOn` stays an ISO date string. Rendering it is `formatDate` in
+ * `src/lib/dates.ts`, because the two locales want two different forms of the same date
+ * (§10) and a decoder that picked one would make the other page wrong.
+ */
+export interface StudioStory {
+  id: string;
+  heading: Record<Locale, string>;
+  /** ISO calendar date, `YYYY-MM-DD`. Formatted per locale by the page. */
+  foundedOn: string;
+  /** Paragraphs, in the order Mina wrote them. At least one. */
+  story: Record<Locale, string>[];
+}
+
+export function decodeStudioStory(row: unknown): StudioStory {
+  const where = frame(row, 'studioStory');
+  const foundedOn = text(row, 'foundedOn', where);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(foundedOn)) {
+    fail(at(where, 'foundedOn'), 'a calendar date like `2026-08-13`', foundedOn);
+  }
+
+  const story = read(row, 'story');
+  if (!Array.isArray(story) || story.length === 0) {
+    fail(at(where, 'story'), 'at least one paragraph', story);
+  }
+
+  return {
+    id: where.id,
+    heading: localised(row, 'heading', where),
+    foundedOn,
+    story: story.map((_, index) => localisedMember(story, index, where, 'story')),
   };
 }
 
@@ -507,18 +564,25 @@ export function decodePricingTier(row: unknown): PricingTier {
     name: localised(row, 'name', where),
     priceEur: integer(row, 'priceEur', where),
     period: text(row, 'period', where),
-    features: features.map((_, index) => localisedAt(features, index, where)),
+    features: features.map((_, index) => localisedMember(features, index, where, 'features')),
     featured: flag(row, 'featured', where, false),
   };
 }
 
-/** One entry of a `localeString` array, named by index so an error points at the row. */
-function localisedAt(
+/**
+ * One entry of a bilingual array, named by index so an error points at the row.
+ *
+ * `field` is passed in rather than baked in: there are two of these arrays now —
+ * `pricingTier.features` and `studioStory.story` — and an error reading `features[2].en`
+ * for a paragraph of the origin story would send Mina to the wrong document.
+ */
+function localisedMember(
   list: readonly unknown[],
   index: number,
   where: Where,
+  field: string,
 ): Record<Locale, string> {
-  const here = at(where, `features[${index}]`);
+  const here = at(where, `${field}[${index}]`);
   const entry = list[index];
   if (typeof entry !== 'object' || entry === null) {
     fail(here, 'an object with `hr` and `en`', entry);

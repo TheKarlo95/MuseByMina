@@ -9,6 +9,7 @@ import type {
   PRICING_QUERY_RESULT,
   SCHEDULE_QUERY_RESULT,
   SITE_SETTINGS_QUERY_RESULT,
+  STUDIO_STORY_QUERY_RESULT,
 } from './sanity.types';
 
 /**
@@ -122,6 +123,20 @@ const _classFields: [
   Guaranteed<ClassRow, 'image'>,
 ] = [true, true, true, true, true, true, true, true, true];
 
+/**
+ * `portrait` and `instagram` are deliberately **not** on this list (MUSE-23), the same way
+ * `phone` and `openingHours` came off the `siteSettings` list in MUSE-20 — and for the
+ * same reason, which is this assertion working rather than being relaxed.
+ *
+ * `Guaranteed` stops compiling the moment a field can be `null`, so the two lines *had* to
+ * come out when both fields became optional; an optional field cannot be left here by
+ * accident. The decision itself is recorded on `Instructor` in `./decode.ts`: no
+ * photography of this studio exists, and an instructor may have no public Instagram, so a
+ * required field for either could only be satisfied with fiction (MUSE-36).
+ *
+ * What still holds the two of them honest is `AssertInstructorPortraitOptional` below —
+ * a field that goes back to being required also breaks a build, from the other side.
+ */
 type InstructorRow = INSTRUCTORS_QUERY_RESULT[number];
 const _instructorFields: [
   Guaranteed<InstructorRow, '_id'>,
@@ -129,8 +144,50 @@ const _instructorFields: [
   Guaranteed<InstructorRow, 'slug'>,
   Guaranteed<InstructorRow, 'role'>,
   Guaranteed<InstructorRow, 'bio'>,
-  Guaranteed<InstructorRow, 'portrait'>,
-] = [true, true, true, true, true, true];
+] = [true, true, true, true, true];
+
+/**
+ * The two optional instructor fields are *still projected*, and still optional.
+ *
+ * Dropping a field off `Guaranteed` leaves nothing watching it: delete `instagram` from
+ * the query and `INSTRUCTORS_QUERY_RESULT` simply stops having the key, which no
+ * `Guaranteed` line can notice because there is no line. These two say the key is there
+ * **and** that it can be absent — so a deleted projection, a renamed one, and a
+ * `required()` quietly returning both fail here, naming the field.
+ */
+type OptionalIn<T, K extends keyof T> = [null] extends [T[K]]
+  ? true
+  : {
+      ERROR: 'This field is projected as non-nullable, which means the Sanity schema now requires it. MUSE-23 made it optional on purpose: no photography of this studio exists, and an instructor may have no public Instagram, so a required field here can only be filled in with fiction (MUSE-36). If the photographs now exist, say so in the schema AND move this to the Guaranteed list above — do not delete the assertion.';
+      field: K;
+    };
+
+export type AssertInstructorPortraitOptional = OptionalIn<InstructorRow, 'portrait'>;
+export type AssertInstructorInstagramOptional = OptionalIn<InstructorRow, 'instagram'>;
+
+const _portraitOptional: AssertInstructorPortraitOptional = true;
+const _instagramOptional: AssertInstructorInstagramOptional = true;
+
+/**
+ * The origin story's fields, all three of which `/aboutus` cannot render without.
+ *
+ * The singleton is nullable by construction — `[0]` on an empty set is `null` — so, as
+ * with `siteSettings`, the assertion is on the document's fields rather than on the
+ * document. `story` being an array is asserted separately: `Guaranteed` would be satisfied
+ * by a renamed projection that happened to resolve to a single object.
+ */
+type StoryRow = NonNullable<STUDIO_STORY_QUERY_RESULT>;
+const _storyFields: [
+  Guaranteed<StoryRow, 'heading'>,
+  Guaranteed<StoryRow, 'foundedOn'>,
+  Guaranteed<StoryRow, 'story'>,
+] = [true, true, true];
+
+export type AssertStoryIsParagraphs = Same<
+  StoryRow['story'],
+  Record<Locale, string>[]
+>;
+const _storyParagraphs: AssertStoryIsParagraphs = true;
 
 type TierRow = PRICING_QUERY_RESULT[number];
 const _tierFields: [
@@ -215,6 +272,9 @@ export const SCHEMA_ASSERTIONS = Object.freeze({
   scheduleEntryIsClassEntry: _entry,
   localisedIsRecord: _localised,
   pageMetaShape: _pageMeta,
+  portraitOptional: _portraitOptional,
+  instagramOptional: _instagramOptional,
+  storyParagraphs: _storyParagraphs,
   fields: Object.freeze({
     scheduleSlot: _slotFields,
     class: _classFields,
@@ -223,5 +283,6 @@ export const SCHEMA_ASSERTIONS = Object.freeze({
     faq: _faqFields,
     page: _pageFields,
     siteSettings: _settingsFields,
+    studioStory: _storyFields,
   }),
 });

@@ -2,6 +2,13 @@
 import { defineConfig } from 'astro/config';
 import sitemap from '@astrojs/sitemap';
 
+import {
+  PREVIEW_ROUTE_ENV,
+  PREVIEW_ROUTES,
+  previewPatterns,
+  requestedPreviews,
+} from './src/lib/preview';
+
 /**
  * Deploy target.
  *
@@ -41,6 +48,47 @@ const DEFAULT_LOCALE = 'hr';
  * sitemap and the pages disagree, so this stays mechanical rather than aspirational.
  */
 const HREFLANG = { hr: 'hr-HR', en: 'en' };
+
+/**
+ * Throwaway routes for a component whose page does not exist yet. **Test-only.**
+ *
+ * `src/lib/preview.ts` holds the registry and the long argument for why this exists at
+ * all; the short version is that MUSE-23 built `/aboutus` against a dataset that has no
+ * origin story and no instructors in it, and routing the page would stop `main` from
+ * building. Unset — which is every deploy, every CI job and every `npm run build` — this
+ * injects nothing and the output is identical to a build that has never heard of it.
+ *
+ * `integrations` below spreads the result, so an empty list is genuinely no integration
+ * rather than an integration that does nothing.
+ */
+function previewRoutes() {
+  const requested = requestedPreviews(process.env[PREVIEW_ROUTE_ENV]);
+  if (requested.length === 0) return [];
+
+  return [
+    {
+      name: 'muse-preview-routes',
+      hooks: {
+        /** @param {{ injectRoute: (route: { pattern: string, entrypoint: string }) => void, logger: { warn: (msg: string) => void } }} ctx */
+        'astro:config:setup': ({ injectRoute, logger }) => {
+          for (const name of requested) {
+            for (const pattern of previewPatterns(name)) {
+              injectRoute({ pattern, entrypoint: PREVIEW_ROUTES[name] });
+            }
+          }
+          // Capitals, for the reason `src/lib/sanity/client.ts` announces a fixture read
+          // in capitals: a build carrying extra routes is otherwise indistinguishable in
+          // its log from one that is not.
+          logger.warn(
+            `PREVIEW ROUTES injected: ${requested.join(', ')}. ` +
+              `${PREVIEW_ROUTE_ENV} is set; this output is for the test suite and must ` +
+              `never be deployed.`,
+          );
+        },
+      },
+    },
+  ];
+}
 
 export default defineConfig({
   site: SITE,
@@ -91,6 +139,8 @@ export default defineConfig({
   // alternate per locale.
   integrations: [
     sitemap({ i18n: { defaultLocale: DEFAULT_LOCALE, locales: HREFLANG } }),
+    // Empty unless MUSE_PREVIEW_ROUTES is set. See `previewRoutes` above.
+    ...previewRoutes(),
   ],
 
   build: {

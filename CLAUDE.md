@@ -155,6 +155,27 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   rule exists because a CMS field nothing renders is worse than no field — it looks like it
   works. Only `country` (a translated word) and `maps` (no field in the schema) are still
   code, in `STUDIO`.
+- **A component can be built before its page can be routed** (MUSE-23). `/aboutus` is
+  built and deliberately not published: its `studioStory` and `instructor` documents do
+  not exist, the read path fails the build naming a missing document, and a routed page
+  would therefore stop `main` building — every PR, every deploy, every scheduled rebuild.
+  `MUSE_PREVIEW_ROUTES=aboutus npm run build` injects `/aboutus-preview` so the component
+  can still be asserted on against `dist`, which is the only way to check CSS — Astro's
+  container API renders markup without the stylesheet pipeline. `src/lib/preview.ts` is
+  the registry, the entry points live under `test/` so `test/seo.test.ts`'s page list
+  cannot see them, and unset the variable injects nothing. **Delete the entry with the
+  ticket that routes the page**; an entry that outlives its ticket is a page nobody
+  shipped.
+- **An optional field is a decision, not laziness.** `instructor.portrait`,
+  `instructor.instagram`, `siteSettings.phone` and `openingHours` are optional because no
+  real value exists for any of them, and a `required()` field with no value can only be
+  filled with fiction — which is how MUSE-36 happened. The cost is paid in the page: the
+  3:4 placeholder frame in `AboutUs.astro` reserves exactly the box a photograph will take,
+  so nothing shifts when one lands. Making one required later is a schema change plus a
+  line moved back onto the `Guaranteed` list in `src/lib/sanity/shape.ts` — and note the
+  `OptionalIn<>` assertions beside it, which exist because a field with no assertion at all
+  is a field nothing watches: delete `instagram` from the projection and the generated type
+  simply stops having the key.
 - **The schedule and the instructors are deliberately not in Sanity yet** (MUSE-36).
   `src/data/schedule.ts` is invented content naming instructors who do not exist; importing
   it would make fiction look authoritative in the Studio. The real timetable is entered

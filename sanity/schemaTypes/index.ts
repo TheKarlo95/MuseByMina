@@ -1,6 +1,6 @@
 import type { SchemaTypeDefinition } from 'sanity';
 
-import { danceClass, instructor, scheduleSlot } from './documents/studio';
+import { danceClass, instructor, scheduleSlot, studioStory } from './documents/studio';
 import { event, pricingTier } from './documents/offering';
 import { faq, galleryImage, post } from './documents/media';
 import { page, siteSettings } from './documents/site';
@@ -20,6 +20,7 @@ export const schemaTypes: SchemaTypeDefinition[] = [
   localeRichText,
 
   // The studio
+  studioStory,
   instructor,
   danceClass,
   scheduleSlot,
@@ -38,5 +39,13 @@ export const schemaTypes: SchemaTypeDefinition[] = [
   siteSettings,
 ];
 
-/** The singleton document types: one instance each, with a fixed id. */
-export const SINGLETON_TYPES = ['siteSettings'] as const;
+/**
+ * The singleton document types: one instance each, with a fixed id.
+ *
+ * `sanity.config.ts` reads this list to keep every one of them out of the "create new"
+ * menu and out of the delete/duplicate actions, and `sanity/structure.ts` gives each one a
+ * sidebar entry pinned to its own document id. Adding a name here is what makes a type a
+ * singleton; the queries in `src/lib/sanity/queries.ts` then pin the same id, so a second
+ * copy is a document the site never reads rather than a document it reads at random.
+ */
+export const SINGLETON_TYPES = ['siteSettings', 'studioStory'] as const;

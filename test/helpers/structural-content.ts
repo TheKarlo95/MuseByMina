@@ -226,6 +226,23 @@ export const SITE_SETTINGS_DOC: FixtureDoc = {
       platform: 'facebook',
       url: 'https://example.invalid/facebook',
     },
+    /**
+     * `linktree` is here because the **footer links to it**, and the footer renders on
+     * every page (MUSE-23).
+     *
+     * `socialUrl` fails the build naming the platform when `siteSettings` has no entry for
+     * one the site links to — correctly, since a link with no href looks fine and goes
+     * nowhere. Before this entry existed, `FULL` could drive the readers but could not
+     * drive an `astro build`, which is what `test/aboutus.test.ts` needs in order to
+     * assert on a page rather than on a return value. The three platforms here are the
+     * three the real `siteSettings` carries.
+     */
+    {
+      _key: 'linktree',
+      _type: 'socialLink',
+      platform: 'linktree',
+      url: 'https://example.invalid/linktree',
+    },
   ],
   shareImage: imageOf('Share', [0.11, 0.12, 0.13, 0.14], [0.15, 0.16, 0.17, 0.18]),
 };
@@ -245,6 +262,32 @@ export const PAGE_DOCS: FixtureDoc[] = ROUTES.map(({ route }, index) => ({
   title: localeString(`title ${index}`),
   description: localeString(`description ${index}`),
 }));
+
+/**
+ * The studio's origin story — the other half of `/aboutus` (MUSE-23).
+ *
+ * A singleton, like `siteSettings`, so the query is `[0]` on a filter pinned to a fixed
+ * `_id` and "there is no story yet" is a `null` rather than an empty array.
+ *
+ * Two paragraphs, not one. `story` is an array of bilingual paragraphs, and a projection
+ * that returned only the first member — or flattened the array — would look right with a
+ * single paragraph in the fixture.
+ *
+ * `foundedOn` is the dated part of the ticket's "dated origin story". It is an ISO date
+ * because the *format* is the page's decision per locale (design system §10: HR
+ * `13. kolovoza 2026.`, EN `13 August 2026`), the same reason an image carries a hotspot
+ * rather than a URL.
+ */
+export const STUDIO_STORY_DOC: FixtureDoc = {
+  _id: 'studioStory',
+  _type: 'studioStory',
+  heading: localeString('story heading'),
+  foundedOn: '2026-08-13',
+  story: [
+    { _key: 'p1', _type: 'localeText', hr: 'HR story one.', en: 'EN story one.' },
+    { _key: 'p2', _type: 'localeText', hr: 'HR story two.', en: 'EN story two.' },
+  ],
+};
 
 /**
  * Three instructors, because the `coalesce` fallback needs three to be unambiguous.
@@ -267,6 +310,10 @@ export const INSTRUCTOR_A: FixtureDoc = {
   role: localeString('role A'),
   bio: localeText('bio A'),
   portrait: imageOf('PortraitA', [0.21, 0.22, 0.23, 0.24], [0.25, 0.26, 0.27, 0.28]),
+  // The only instructor with an Instagram URL (MUSE-23). Optional in the schema, so it is
+  // the one row that can tell `instagram` from `instagra` — the other two answer
+  // `undefined` either way.
+  instagram: 'https://example.invalid/instagram/instructor-a',
 };
 
 export const INSTRUCTOR_B: FixtureDoc = {
@@ -280,6 +327,20 @@ export const INSTRUCTOR_B: FixtureDoc = {
   order: 0,
 };
 
+/**
+ * **The instructor with no photograph**, which is every instructor today (MUSE-23).
+ *
+ * `portrait` became optional in MUSE-23 for the reason `phone` did in MUSE-20: no
+ * photography of this studio exists, so a `required()` portrait could only be satisfied by
+ * uploading something that is not a portrait of the person. The page therefore has to have
+ * a placeholder frame, and a placeholder frame nothing ever renders is a placeholder frame
+ * nobody has checked — so one of the three fixture instructors goes without.
+ *
+ * C rather than a fourth document: `FULL_COUNTS` and the `coalesce(order, 999)` ordering
+ * assertions are about three instructors, and a fourth would make them fail for a reason
+ * that has nothing to do with portraits. C also teaches no class, so dropping its portrait
+ * cannot reach `CLASSES_QUERY`.
+ */
 export const INSTRUCTOR_C: FixtureDoc = {
   _id: 'instructor-c',
   _type: 'instructor',
@@ -287,7 +348,6 @@ export const INSTRUCTOR_C: FixtureDoc = {
   slug: slug('instructor-c'),
   role: localeString('role C'),
   bio: localeText('bio C'),
-  portrait: imageOf('PortraitC', [0.41, 0.42, 0.43, 0.44], [0.45, 0.46, 0.47, 0.48]),
 };
 
 /**
@@ -608,6 +668,7 @@ export const DRAFTS: FixtureDoc[] = [DRAFT_SLOT_TWIN, DRAFT_TIER, DRAFT_INSTRUCT
 export const FULL: FixtureDoc[] = [
   SITE_SETTINGS_DOC,
   ...PAGE_DOCS,
+  STUDIO_STORY_DOC,
   INSTRUCTOR_A,
   INSTRUCTOR_B,
   INSTRUCTOR_C,
@@ -646,6 +707,7 @@ export const FULL: FixtureDoc[] = [
  */
 export const FULL_COUNTS: Record<string, number> = {
   siteSettings: 1,
+  studioStory: 1,
   page: PAGE_DOCS.length,
   class: 2,
   scheduleSlot: 3,
