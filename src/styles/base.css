@@ -32,6 +32,43 @@ body {
     color var(--dur-base) var(--ease);
 }
 
+/* ---------- numerals — MUSE-14 ----------
+   Cormorant Garamond's DEFAULT figures are old-style (text) figures. Measured in
+   the shipped subset (`public/fonts/cormorant-garamond-latin.woff2`, 1000 upem):
+
+     glyph        ink top   advance     reads as
+     one           386       332         a serifed capital I  ← x-height
+     zero          399       477         a small o            ← x-height
+     one.tf        635       491         a one                ← cap height (H = 625)
+     zero.tf       637       491         a zero
+
+   So `19:00` set in the display face renders `I9:OO`. `tabular-nums` alone does
+   not help: `tnum` maps one → one.tosf, which is still 386 tall. `lnum` is the
+   feature that changes the shape, and the subset ships it — `lnum` maps
+   one → one.lf, then `tnum` maps one.lf → one.tf, so asking for both gives
+   tabular LINING figures and columns still align.
+
+   Declared once, on the document, because /schedule was only the first page to
+   put a number in the display face — prices, event dates and the countdown are
+   all queued behind it, and none of them should have to rediscover this. Jost
+   and Inter have no `lnum` at all (their figures are already lining), so the
+   keyword is a no-op for them; `tnum` gives them uniform digit widths, which is
+   what a site made of times, dates, prices and durations wants anyway. The one
+   cost is that a digit inside running Inter copy is set tabular too — Inter's
+   `1` widens from 833 to 1328 of 2048 upem. That is the deliberate trade for a
+   rule nothing can forget.
+
+   `font-variant-numeric` is a SINGLE inherited property, so a component writing
+   `font-variant-numeric: tabular-nums` does not add to this value, it REPLACES
+   it — and silently reopens the bug, because the declaration still applies and
+   the column still aligns. Never declare it in a component; `npm run ds` fails
+   the build if you do, and `test/numerals.test.ts` checks the glyph rather than
+   the cascade.
+   ---------------------------------------- */
+:root {
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
 ::selection {
   background: var(--accent-fill);
   color: var(--accent-fill-text);
