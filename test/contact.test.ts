@@ -65,7 +65,7 @@ let browser: Browser;
 let preview: Preview;
 
 beforeAll(async () => {
-  [preview, browser] = await Promise.all([startPreview(), chromium.launch()]);
+  [preview, browser] = await Promise.all([startPreview('contact'), chromium.launch()]);
 }, 240_000);
 
 afterAll(async () => {
