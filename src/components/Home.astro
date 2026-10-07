@@ -2,6 +2,17 @@
 import TrialForm from './TrialForm.astro';
 import { localeUrl, type Locale } from '../lib/i18n';
 import { CTA, STUDIO } from '../lib/nav';
+import { SCHEDULE } from '../data/schedule';
+import {
+  formatTime,
+  groupByDay,
+  LEVEL_NAME,
+  STYLES,
+  STYLE_NAME,
+  WEEKDAY_NAME,
+  type ClassEntry,
+  type Level,
+} from '../lib/schedule';
 
 interface Props {
   locale: Locale;
@@ -23,6 +34,15 @@ const t = {
     openMaps: 'Otvori u Google Maps',
     trial: 'Dođi na probni sat',
     trialLede: 'Prvi sat je besplatan. Javi nam se i dogovorit ćemo termin.',
+    doorWho: {
+      beginner: 'Nikad nisi plesao/la. Počni ovdje.',
+      intermediate: 'Plešeš oko godinu dana.',
+    },
+    flavour: {
+      traditional: 'Korijeni plesa — zaigrana, ritmična, bliska glazbi.',
+      moderna: 'Čišće linije i okreti, s naglaskom na vođenje i praćenje.',
+      sensual: 'Mekani pokreti tijela i valovi, uvijek kroz vezu u paru.',
+    },
   },
   en: {
     eyebrow: 'Dance studio · Zagreb',
@@ -38,32 +58,64 @@ const t = {
     openMaps: 'Open in Google Maps',
     trial: 'Come to a trial class',
     trialLede: 'Your first class is free. Get in touch and we will find you a slot.',
+    doorWho: {
+      beginner: 'You have never danced. Start here.',
+      intermediate: 'About a year of dancing.',
+    },
+    flavour: {
+      traditional: 'The roots — playful, rhythmic, close to the music.',
+      moderna: 'Cleaner lines and turns, built on leading and following.',
+      sensual: 'Soft body movement and waves, always through the connection.',
+    },
   },
 }[locale];
 
-const doors =
-  locale === 'hr'
-    ? [
-        { name: 'Početni', when: 'Utorak · 19:00', who: 'Nikad nisi plesao/la. Počni ovdje.' },
-        { name: 'Srednji', when: 'Četvrtak · 20:00', who: 'Plešeš oko godinu dana.' },
-      ]
-    : [
-        { name: 'Beginner', when: 'Tuesday · 19:00', who: 'You have never danced. Start here.' },
-        { name: 'Intermediate', when: 'Thursday · 20:00', who: 'About a year of dancing.' },
-      ];
+/**
+ * Which levels get a door. This list is the whole editorial decision, and the
+ * only part of a door written on this page.
+ *
+ * "Two doors, not six" is the design brief's: the people who need telling where
+ * to start are the one who has never danced and the one who is a year in.
+ * Advanced dancers already know, so advanced deliberately has no door — which is
+ * why this is a hand-picked pair of levels and not `LEVELS`.
+ */
+const DOOR_LEVELS = ['beginner', 'intermediate'] as const satisfies readonly Level[];
 
-const flavours =
-  locale === 'hr'
-    ? [
-        { name: 'Tradicionalna', text: 'Korijeni plesa — zaigrana, ritmična, bliska glazbi.' },
-        { name: 'Moderna', text: 'Čišće linije i okreti, s naglaskom na vođenje i praćenje.' },
-        { name: 'Sensual', text: 'Mekani pokreti tijela i valovi, uvijek kroz vezu u paru.' },
-      ]
-    : [
-        { name: 'Traditional', text: 'The roots — playful, rhythmic, close to the music.' },
-        { name: 'Moderna', text: 'Cleaner lines and turns, built on leading and following.' },
-        { name: 'Sensual', text: 'Soft body movement and waves, always through the connection.' },
-      ];
+/**
+ * The class a door points at: the first session of that level in the week.
+ *
+ * MUSE-11 — the day and time used to be typed into this file, and had already
+ * drifted: the intermediate door advertised Thursday 20:00, which is an
+ * *advanced* class. So the session is derived rather than hand-picked, and a
+ * schedule edit can no longer leave the homepage pointing at a class that is not
+ * there. `groupByDay` is week-ordered and sorts each day by start time, so
+ * "first" means the soonest in the week — the nearest way in.
+ */
+function firstSession(level: Level): ClassEntry {
+  for (const { entries } of groupByDay(SCHEDULE)) {
+    const entry = entries.find((candidate) => candidate.level === level);
+    if (entry) return entry;
+  }
+  // A door onto a level nobody teaches is worse than one door fewer: fail the build.
+  throw new Error(`No ${level} class in the schedule — a homepage door has nothing to open.`);
+}
+
+/** Level name, day and time all come from the schedule; only `who` is page copy. */
+const doors = DOOR_LEVELS.map((level) => {
+  const entry = firstSession(level);
+  return {
+    level,
+    name: LEVEL_NAME[locale][level],
+    when: `${WEEKDAY_NAME[locale][entry.day]} · ${formatTime(entry.start)}`,
+    who: t.doorWho[level],
+  };
+});
+
+/** The three styles, named by `STYLE_NAME` for the same reason the doors are. */
+const flavours = STYLES.map((style) => ({
+  name: STYLE_NAME[locale][style],
+  text: t.flavour[style],
+}));
 ---
 
 <section class="hero">
@@ -83,9 +135,15 @@ const flavours =
     <ul class="cards two">
       {
         doors.map((d) => (
-          <li class="card">
-            <p class="cardName">{d.name}</p>
-            <p class="cardWhen">{d.when}</p>
+          <li class="card" data-door={d.level}>
+            {/*
+              `data-level-name` is the site-wide contract (MUSE-11): an element
+              that shows a level's name declares which level it is, so the suite
+              can check every one of them against `LEVEL_NAME` and compare this
+              page against `/schedule` without matching on copy.
+            */}
+            <p class="cardName" data-level-name={d.level}>{d.name}</p>
+            <p class="cardWhen" data-when>{d.when}</p>
             <p class="cardWho">{d.who}</p>
           </li>
         ))
