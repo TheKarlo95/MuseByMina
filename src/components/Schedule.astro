@@ -580,7 +580,12 @@ const filterGroups = [
     border-top: 0;
   }
   /* The reference bundle sets this at 1.25rem; Cormorant's floor is 26px, below
-     which the đ crossbar disappears — so 1.625rem, the display-s floor (§4). */
+     which the đ crossbar disappears — so 1.625rem, the display-s floor (§4).
+
+     No `font-variant-numeric` here. Lining + tabular figures are inherited from
+     the document (`src/styles/base.css`, MUSE-14); redeclaring the property here
+     would replace that value rather than add to it, and `19:00` would go back to
+     reading `I9:OO` with the column still perfectly aligned. */
   .slotTime {
     flex: none;
     width: 4.5rem;
@@ -588,7 +593,6 @@ const filterGroups = [
     font-size: 1.625rem;
     line-height: 1.15;
     color: var(--accent);
-    font-variant-numeric: tabular-nums;
   }
   .slotBody {
     display: flex;
@@ -641,12 +645,12 @@ const filterGroups = [
     border-top: 1px solid var(--line);
     white-space: nowrap;
   }
+  /* Figures are inherited, not set here — see `.slotTime` above and MUSE-14. */
   .gutter time {
     font-family: var(--font-display);
     font-size: 1.625rem;
     line-height: 1.15;
     color: var(--accent);
-    font-variant-numeric: tabular-nums;
   }
   .grid td {
     vertical-align: top;

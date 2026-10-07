@@ -12,6 +12,12 @@ are load-bearing, not stylistic. The three that break things silently:
   `npm run ds` enforces this.
 - **Cormorant never below 26px** — its `đ` crossbar vanishes and *Dođi* renders as "Dodi".
 - **No drop shadows, either theme.** Depth is surface value plus hairlines.
+- **Numerals are set once, on the document.** Cormorant's default figures are old-style,
+  so a number in the display face renders `19:00` as `I9:OO`. `src/styles/base.css` asks
+  for `lining-nums tabular-nums` and everything inherits it. `font-variant-numeric` is a
+  single value, so a component that redeclares it *replaces* that rule rather than adding
+  to it — and the bug comes back with the column still neatly aligned. `npm run ds`
+  rejects the property in a component; `test/numerals.test.ts` measures the glyphs.
 
 Header and footer sit on a band that is plum-ink in *both* themes, so they use the
 `--band-*` roles rather than page-theme roles.

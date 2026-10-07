@@ -1,7 +1,11 @@
 /* Muse by Mina — brand typefaces.
    All three are VARIABLE fonts, so each subset is one file covering a weight
    range. Latin-ext carries č ć ž š đ; see the Đđ note in the design system §4 —
-   the display floor is 26px because Cormorant's đ crossbar is solid from 24px. */
+   the display floor is 26px because Cormorant's đ crossbar is solid from 24px.
+
+   Cormorant's default figures are OLD-STYLE, so `19:00` renders `I9:OO`. The
+   fix is one inherited declaration on the document, not a rule per face —
+   see the numerals block in `base.css` (MUSE-14). */
 
 @font-face {
   font-family: 'Cormorant Garamond';
