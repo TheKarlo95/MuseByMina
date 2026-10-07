@@ -24,7 +24,16 @@ const t = {
   },
 }[locale];
 
-const quick = [...PRIMARY_NAV.filter((i) => !i.mobileOnly), ...MORE_NAV.slice(0, 4)];
+/**
+ * The footer is an index, not a second copy of the desktop bar.
+ *
+ * It used to drop every `mobileOnly` entry, which is a rule about horizontal space in a
+ * 64px band and means nothing in a four-column grid — and with the dead routes gone
+ * (MUSE-13) it left this column with two links while the mobile panel listed three. So
+ * it takes the whole primary list, the way the mobile panel does, plus the head of
+ * "More" once there is a "More" to take a head of.
+ */
+const quick = [...PRIMARY_NAV, ...MORE_NAV.slice(0, 4)];
 const year = 2026;
 ---
 

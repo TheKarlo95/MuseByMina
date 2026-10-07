@@ -6,8 +6,19 @@ import ThemeSwitch from './ThemeSwitch.astro';
 
 interface Props {
   locale: Locale;
+  /**
+   * Does this page have a URL of its own, in both locales?
+   *
+   * False on the 404 (MUSE-13): GitHub Pages serves one root `404.html` for every
+   * unknown path, so the page has no address — `/404/`, `/en/404` and `/en/404/` are
+   * all themselves 404s. The language switcher is a prefix swap on the current route,
+   * which makes it two dead links on the one page a visitor reaches *because* a link
+   * was dead. `BaseLayout` passes its `indexable` prop straight through, because "has
+   * no URL of its own" is exactly what that prop already means.
+   */
+  localeSwitch?: boolean;
 }
-const { locale } = Astro.props;
+const { locale, localeSwitch = true } = Astro.props;
 
 const here = routeKey(Astro.url.pathname);
 const t = {
@@ -50,26 +61,34 @@ const t = {
           ))
         }
 
-        <li class="navItem hasMore">
-          {/*
-            A real disclosure, not a hover trap. axcentdance's "More" is hover-only on a
-            button with no aria-expanded and no key handling, so keyboard and touch users
-            simply cannot open it. Click/Enter/Space opens; Escape closes; hover is only
-            an enhancement layered on top.
-          */}
-          <button
-            class="moreBtn"
-            type="button"
-            aria-controls="more-menu"
-            aria-expanded="false"
-            data-more-btn
-          >
-            {t.more}
-            <span class="chev" aria-hidden="true"></span>
-          </button>
-          <ul id="more-menu" class="moreMenu" data-more-menu hidden>
-            {
-              MORE_NAV.map((item) => (
+        {/*
+          The disclosure exists only when there is something to disclose (MUSE-13).
+          `MORE_NAV` is empty while the content pages are unbuilt, and a "More" button
+          that opens an empty list is worse than no button: it is a visible affordance
+          that promises the rest of the site and delivers nothing, and for a screen
+          reader an `aria-expanded` control over an empty `<ul>` is a dead end rather
+          than a disappointment. The button and the menu come back with the first entry.
+        */}
+        {MORE_NAV.length > 0 && (
+          <li class="navItem hasMore">
+            {/*
+              A real disclosure, not a hover trap. axcentdance's "More" is hover-only on
+              a button with no aria-expanded and no key handling, so keyboard and touch
+              users simply cannot open it. Click/Enter/Space opens; Escape closes; hover
+              is only an enhancement layered on top.
+            */}
+            <button
+              class="moreBtn"
+              type="button"
+              aria-controls="more-menu"
+              aria-expanded="false"
+              data-more-btn
+            >
+              {t.more}
+              <span class="chev" aria-hidden="true"></span>
+            </button>
+            <ul id="more-menu" class="moreMenu" data-more-menu hidden>
+              {MORE_NAV.map((item) => (
                 <li>
                   <a
                     href={localeUrl(item.route, locale)}
@@ -78,15 +97,15 @@ const t = {
                     {item.label[locale]}
                   </a>
                 </li>
-              ))
-            }
-          </ul>
-        </li>
+              ))}
+            </ul>
+          </li>
+        )}
       </ul>
 
       <div class="chrome">
         <a class="cta" href={localeUrl(CTA.route, locale)}>{CTA.label[locale]}</a>
-        <LocaleSwitch locale={locale} />
+        {localeSwitch && <LocaleSwitch locale={locale} />}
         <ThemeSwitch locale={locale} />
       </div>
     </nav>
@@ -384,7 +403,10 @@ const t = {
       align-items: center;
       gap: var(--space-5);
     }
-    /* Home and Contact live only in the mobile panel — this is the whole trick. */
+    /* Entries flagged `mobileOnly` live only in the mobile panel — this is the whole
+       trick. Today that is Home alone: the logo is the home link on desktop, which is
+       true however long the list gets, and the bar is short enough that Contact earns
+       its place in it. See `src/lib/nav.ts`. */
     .navItem.mobileOnly {
       display: none;
     }

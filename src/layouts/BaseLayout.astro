@@ -117,7 +117,12 @@ const skipLabel = locale === 'hr' ? 'Preskoči na sadržaj' : 'Skip to content';
 
   <body>
     <a class="skip-link" href="#main">{skipLabel}</a>
-    <Header locale={locale} />
+    {/*
+      `indexable` is also the answer to "does this page have a URL of its own", which is
+      what decides whether a language switcher can work at all — see Header's prop
+      (MUSE-13).
+    */}
+    <Header locale={locale} localeSwitch={indexable} />
     <main id="main">
       <slot />
     </main>
