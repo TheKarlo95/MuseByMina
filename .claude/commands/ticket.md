@@ -3,18 +3,25 @@ description: Pick up Linear tickets in To Do, implement them test-first in isola
 ---
 
 Work the Linear board. Arguments (optional): a specific ticket id like `MUSE-6`, otherwise
-take everything currently in **To Do**.
+drain **both** queues.
 
 $ARGUMENTS
 
-## 1. Read the board
+## 1. Read the board — BOTH queues
 
 Use the Linear MCP. Team is `MuseByMina`.
 
-- No argument → `list_issues` with `state: "To Do"` (the team may name it `Todo`; accept either).
+- No argument → `list_issues` for **`To Do`** (the team may name it `Todo`; accept either)
+  **and** for **`QA Ready`**. Both. Every run.
 - An argument → `get_issue` for that id, whatever state it is in.
 
-If nothing is in To Do, say so and stop. Do not invent work.
+To Do is work to build (§2–§7). QA Ready is work to verify (§8). A run that handles one and
+silently ignores the other is the bug this instruction exists to prevent: there is no daemon
+here, so a queue nobody reads is a queue that never moves. Tickets sat in QA Ready for a
+whole session because this command only ever looked at To Do.
+
+Report both queues up front, even when one is empty, so it is visible that both were checked.
+If both are empty, say so and stop. Do not invent work.
 
 **Read the ticket properly before starting.** If the acceptance criteria are vague,
 contradictory, or would need a decision you cannot make from the repo, move the ticket to
@@ -93,26 +100,34 @@ anything you are unsure about. Then stop.
 **A human merges.** Agents do not merge, and do not try to approve — Anthropic blocks
 self-approval by design, and the merge decision is deliberately yours.
 
-## 8. After the merge — QA is a separate pass
+## 8. The QA Ready queue
 
-On merge the ticket moves to **QA Ready** and waits there. QA Ready is a queue, not a
-status: it means "deployed and nobody has verified it yet".
+On merge the ticket lands in **QA Ready** and waits. QA Ready is a queue, not a status: it
+means "deployed and nobody has verified it yet". Drain it on every run, alongside To Do.
 
-**Do not QA your own work inline.** Spawn a fresh subagent for it, with no knowledge of how
-the thing was built. Whoever just implemented a change is the worst person to check it —
-they will verify what they intended rather than what shipped, and they already believe it
-works. The separation is the entire point of the stage.
+**Never QA your own work inline.** Spawn a fresh subagent per ticket, with no knowledge of
+how the thing was built. Whoever implemented a change is the worst person to check it — they
+verify what they intended rather than what shipped, and they already believe it works. That
+separation is the entire point of the stage.
 
-The QA subagent:
+Give each QA subagent the ticket id and the deployed URL, and nothing else. Specifically:
 
-1. Moves the ticket to **QA Testing**.
-2. Verifies **against the deployed site**, not a local build — the artefact a visitor gets
-   is the only one that counts. A green CI run is not QA.
-3. Works from the ticket's acceptance criteria alone, re-reading them from Linear rather
-   than from the PR description. Checking against the PR means checking the work against
-   its own author's account of itself.
-4. Looks for collateral damage outside the ticket's scope too. Two live defects on this
-   project were found exactly that way, by a reviewer probing the deployed site while
-   checking something unrelated.
-5. On pass → **QA Approved** → **Done**. On fail → back to **Todo** with a comment saying
-   what broke, or a new ticket if it is pre-existing rather than a regression.
+1. Move the ticket to **QA Testing** before dispatching.
+2. It reads the acceptance criteria **from Linear itself**, never a second-hand summary, and
+   never the PR description — checking against the PR is checking the work against its own
+   author's account of itself.
+3. It verifies **against the deployed site**, not a local build. The artefact a visitor
+   receives is the only one that counts, and a green CI run is not QA.
+4. It writes its own throwaway probe rather than running the repo's suite or `scripts/*.mjs`
+   — those encode the implementer's assumptions, including any blind spot being checked for.
+5. It looks for **collateral damage outside the ticket's scope**. Several live defects on
+   this project surfaced exactly that way, while checking something unrelated.
+6. It reports a verdict per criterion with the command and output behind each, and does not
+   change ticket state itself.
+
+Then you move it: all criteria pass → **QA Approved** → **Done**. Anything failed → back to
+**Todo** with a comment naming what broke. Pre-existing problems become their own ticket
+rather than blocking this one — and say which is which.
+
+A criterion that cannot be checked yet (a missing credential, an unset variable) is
+**blocked**, not passed. Name it, and name what would settle it.
