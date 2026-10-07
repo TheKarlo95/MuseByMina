@@ -18,7 +18,13 @@ interface Props {
   locale: Locale;
   title: string;
   description: string;
-  /** Redirect non-Croatian browsers to /en. Homepage only. */
+  /**
+   * May a stored choice or the browser's language route this page elsewhere? Homepage
+   * only — a deep link must land where it points, for everyone (MUSE-10).
+   *
+   * `?lang=` is not gated on this: it works on every page, because it is the link itself
+   * asking rather than an inference about the visitor (MUSE-33). See `src/lib/lang.ts`.
+   */
   detectLanguage?: boolean;
   /**
    * Does this page have a URL of its own that a crawler should index?
@@ -42,6 +48,16 @@ const {
 
 const route = routeKey(Astro.url.pathname);
 const canonical = new URL(localeUrl(route, locale), Astro.site).href;
+
+/**
+ * Does this page have a locale twin to route to?
+ *
+ * The same condition as `indexable`, and for the same reason: the host serves the 404 body
+ * for any unknown path, so its `Astro.url.pathname` is `/404/` and the `/en/404/` this
+ * would compute is not a page either. Sending a 404 to another 404 in a different language
+ * helps nobody, so the locale script rides with having a URL of one's own.
+ */
+const localeRouting = indexable;
 const skipLabel = locale === 'hr' ? 'Preskoči na sadržaj' : 'Skip to content';
 ---
 
@@ -53,9 +69,20 @@ const skipLabel = locale === 'hr' ? 'Preskoči na sadržaj' : 'Skip to content';
 
     {/* Before first paint — otherwise a viewer who chose light watches the page flip. */}
     <script is:inline set:html={THEME_INIT_SCRIPT} />
+    {/* Locale routing, also pre-paint: `?lang=` has to be honoured before the wrong
+        language is painted, and it is honoured on every page (MUSE-33). `detect` is what
+        narrows the *inferred* half — a stored choice, the browser's preference — to the
+        homepage. Never move this into a component; it must block. */}
     {
-      detectLanguage && (
-        <script is:inline set:html={langInitScript(localeUrl('/', 'en'))} />
+      localeRouting && (
+        <script
+          is:inline
+          set:html={langInitScript({
+            urlFor: (l) => localeUrl(route, l),
+            locale,
+            detect: detectLanguage,
+          })}
+        />
       )
     }
 

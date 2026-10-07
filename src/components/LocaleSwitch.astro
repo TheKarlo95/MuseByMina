@@ -30,7 +30,7 @@ const label = locale === 'hr' ? 'Jezik' : 'Language';
 
 <script>
   import { isLocale } from '../lib/i18n';
-  import { carryLocation, LANG_STORAGE_KEY } from '../lib/lang';
+  import { carryLocation } from '../lib/lang';
 
   const links = [
     ...document.querySelectorAll<HTMLAnchorElement>('[data-locale-switch] a'),
@@ -42,13 +42,21 @@ const label = locale === 'hr' ? 'Jezik' : 'Language';
   const rendered = new Map(links.map((a) => [a, a.getAttribute('href') ?? '']));
 
   /**
-   * Point each link at the *current* URL's query and fragment.
+   * Point each link at the *current* URL's query and fragment, and at its own locale.
    *
    * A fragment is never sent to the server, so this is the only place it can be attached
    * (MUSE-16). Done as an href rewrite rather than inside the click handler so that every
    * way of following the link benefits — middle-click, "open in new tab", and "copy link
    * address" never fire a `click` event, and a switcher that only worked for a plain left
    * click would still be dropping the fragment for everyone else.
+   *
+   * That argument applies just as much to *recording* the choice, which is what MUSE-33
+   * found still sitting in the click handler: a middle-clicked HR link opened a new tab at
+   * a bare `/MuseByMina/#trial` with nothing stored, and the homepage redirect bounced a
+   * non-Croatian browser to `/en/`. So the locale goes into the href as `?lang=`, where
+   * every path that follows the link carries it, and `src/lib/lang.ts` persists it on
+   * arrival. There is no click handler to miss, and the URL a visitor copies out of the
+   * address bar is a link to the language they are reading.
    */
   const sync = () => {
     for (const a of links) {
@@ -66,20 +74,13 @@ const label = locale === 'hr' ? 'Jezik' : 'Language';
   addEventListener('hashchange', sync);
   addEventListener('popstate', sync);
 
-  for (const a of links) {
-    a.addEventListener('click', () => {
-      // Belt and braces: the href is read after this handler returns, so a URL changed by
-      // something that fired neither event is still caught at the moment it matters.
-      sync();
-      // An explicit choice must stick, or the homepage auto-redirect would keep
-      // overriding it on the next visit.
-      try {
-        localStorage.setItem(LANG_STORAGE_KEY, a.dataset.locale ?? '');
-      } catch {
-        /* private mode — the navigation still happens */
-      }
-    });
-  }
+  // Belt and braces: the href is read after this handler returns, so a URL changed by
+  // something that fired neither event above is still caught at the moment it matters.
+  //
+  // Nothing is written to storage here. The href carries `?lang=`, so the choice is
+  // recorded by the page that is navigated to — for a left click and for every way of
+  // following a link that never reaches a `click` handler alike (MUSE-33).
+  for (const a of links) a.addEventListener('click', sync);
 </script>
 
 <style>
