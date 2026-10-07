@@ -76,9 +76,10 @@ describe('the built site ships no JavaScript files and no CMS client', () => {
   });
 
   it('renders exactly the pages it rendered before the CMS existed', () => {
-    // MUSE-19 adds capability, not content: migrating is MUSE-20. Until then every route
-    // must build as it did, and in particular no page may have started depending on a
-    // dataset that is still empty.
+    // The routes the site publishes, spelled out. MUSE-20 moved the words of these pages
+    // into the CMS and added none, which is what makes a migration a migration — and a
+    // page that silently stopped building (a content error swallowed somewhere) would
+    // otherwise look like a pass everywhere else in this file.
     expect(build.htmlFiles()).toEqual([
       '404.html',
       'contact/index.html',

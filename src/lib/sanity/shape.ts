@@ -160,6 +160,14 @@ const _pageFields: [
 /**
  * The singleton is nullable by construction — `[0]` on an empty set is `null` — so the
  * assertion is on the document's fields, not on the document.
+ *
+ * `phone` and `openingHours` are deliberately **not** here (MUSE-20). They were, and the
+ * two lines had to come out when both fields became optional — which is the assertion
+ * working rather than being relaxed: `Guaranteed` stops compiling the moment a field can
+ * be `null`, so an optional field cannot be left on this list by accident. The decision
+ * to make them optional is recorded on `SiteSettings` in `./decode.ts`: the site renders
+ * neither, no real value exists for either, and a required field with no consumer can
+ * only be filled in with fiction.
  */
 type SettingsRow = NonNullable<SITE_SETTINGS_QUERY_RESULT>;
 const _settingsFields: [
@@ -168,9 +176,7 @@ const _settingsFields: [
   Guaranteed<SettingsRow, 'summary'>,
   Guaranteed<SettingsRow, 'address'>,
   Guaranteed<SettingsRow, 'email'>,
-  Guaranteed<SettingsRow, 'phone'>,
-  Guaranteed<SettingsRow, 'openingHours'>,
-] = [true, true, true, true, true, true, true];
+] = [true, true, true, true, true];
 
 /* ------------------------------------------------------------------------- */
 /* Bilingual values arrive as Record<Locale, string>, which is what the site  */
@@ -182,7 +188,11 @@ export type AssertLocalisedIsRecord = FaqRow['question'] extends Record<Locale, 
   : never;
 const _localised: AssertLocalisedIsRecord = true;
 
-/** A decoded `page` is a `PageMeta` minus the id — MUSE-20 is an assignment. */
+/**
+ * A decoded `page` carries exactly the fields a page and `llms.txt` render from it.
+ * Spelled out rather than compared to a type in `src/lib/pages.ts`, which after MUSE-20
+ * holds the route list and no copy at all.
+ */
 export type AssertPageMetaShape = PageMetaDoc extends {
   route: string;
   name: Record<Locale, string>;

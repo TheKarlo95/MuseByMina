@@ -1,9 +1,9 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import Privacy from '../../components/Privacy.astro';
-import { pageMeta } from '../../lib/pages';
+import { getPage } from '../../lib/sanity';
 
-const meta = pageMeta('/privacy');
+const meta = await getPage('/privacy');
 ---
 
 <BaseLayout locale="en" title={meta.title.en} description={meta.description.en}>

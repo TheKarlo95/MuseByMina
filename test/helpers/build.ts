@@ -64,9 +64,13 @@ function walkOutput(dir: string): string[] {
  *
  * The output directory is minted by `astroBuild`, not chosen here: see `./scratch.ts`
  * for why that is the fix for MUSE-17 rather than another per-suite naming scheme.
+ *
+ * `env` adds to the deploy target without replacing it. MUSE-20 uses it to point one
+ * build at a different content fixture — "the same site with one document edited" is a
+ * build, not a mock, and that is the only way to prove the content is not compiled in.
  */
-export function buildSite(deploy: Deploy): Build {
-  const outDir = astroBuild({ SITE: deploy.SITE, BASE: deploy.BASE });
+export function buildSite(deploy: Deploy, env: NodeJS.ProcessEnv = {}): Build {
+  const outDir = astroBuild({ SITE: deploy.SITE, BASE: deploy.BASE, ...env });
 
   const basePath = deploy.BASE === '/' ? '' : deploy.BASE.replace(/\/$/, '');
 
@@ -94,6 +98,31 @@ export function buildSite(deploy: Deploy): Build {
         .map((f) => relative(outDir, f).replace(/\\/g, '/'))
         .sort(),
   };
+}
+
+/**
+ * Build the site expecting it to **fail**, and return everything it said.
+ *
+ * "The build fails naming the document" is an acceptance criterion in its own right
+ * (MUSE-20), and the only honest way to check it is to read what a real build printed:
+ * a decoder unit-tested in isolation proves the message exists, not that the build is
+ * the thing that prints it. `astroBuild` folds the child's stdout and stderr into the
+ * error it throws, which is what makes this possible at all.
+ *
+ * A build that *succeeds* here is a failure of the test, and says so — otherwise a guard
+ * that stopped guarding would read as a pass.
+ */
+export function buildFailure(deploy: Deploy, env: NodeJS.ProcessEnv = {}): string {
+  try {
+    astroBuild({ SITE: deploy.SITE, BASE: deploy.BASE, ...env });
+  } catch (cause) {
+    return (cause as Error).message;
+  }
+  throw new Error(
+    'The build was expected to fail and did not. Whatever was supposed to be broken ' +
+      'about the content was accepted, which means the page would have shipped with a ' +
+      'hole in it.',
+  );
 }
 
 /**

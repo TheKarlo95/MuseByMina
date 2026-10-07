@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 // restating them. `SOURCE_GLOBS` is the list `.github/workflows/studio.yml` has to match.
 import { fingerprint, SOURCE_GLOBS } from '../scripts/check-sanity.mjs';
 import { schemaTypes, SINGLETON_TYPES } from '../sanity/schemaTypes';
+import { SOCIAL_PLATFORMS, SOCIAL_PLATFORM_NAME } from '../sanity/schemaTypes/enums';
 import {
   LEVELS,
   LEVEL_NAME,
@@ -16,7 +17,7 @@ import {
   WEEKDAYS,
   WEEKDAY_NAME,
 } from '../src/lib/schedule';
-import { PAGES } from '../src/lib/pages';
+import { ROUTES } from '../src/lib/pages';
 import { LOCALES } from '../src/lib/i18n';
 import {
   decodeFaq,
@@ -50,8 +51,8 @@ import { SCHEMA_ASSERTIONS } from '../src/lib/sanity/shape';
  *      against hand-written documents, broken in the ways a CMS actually breaks them,
  *      and the error messages are asserted to contain the document id and the field path.
  *   5. **Empty is not broken.** The three outcomes — unreachable, empty, malformed — are
- *      distinguishable by type, because the dataset is legitimately empty until MUSE-20
- *      and "nothing came back" has to be readable as which of the three it was.
+ *      distinguishable by type, because most of the dataset is legitimately empty and
+ *      "nothing came back" has to be readable as which of the three it was.
  */
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -242,6 +243,22 @@ describe('the Studio Mina opens', () => {
     expect(requiredFieldsOf('instructor')).toEqual(['bio', 'name', 'portrait', 'role', 'slug']);
     expect(requiredFieldsOf('scheduleSlot')).toEqual(['active', 'class', 'day', 'start']);
     expect(requiredFieldsOf('page')).toEqual(['description', 'name', 'route', 'title']);
+    /**
+     * `phone` and `openingHours` are deliberately absent (MUSE-20).
+     *
+     * Both were `required()`, the site renders neither, and no real value exists for
+     * either — so the only way to satisfy them was to invent one, which is exactly how
+     * the invented schedule (MUSE-36) reached production. A required field with no
+     * consumer is a required field that can only be filled with fiction; whichever page
+     * first displays them can require them then.
+     */
+    expect(requiredFieldsOf('siteSettings')).toEqual([
+      'address',
+      'email',
+      'studioName',
+      'summary',
+      'tagline',
+    ]);
     expect(requiredFieldsOf('class')).toEqual([
       'description',
       'durationMin',
@@ -336,12 +353,29 @@ describe('the closed sets stay in code, not in the CMS', () => {
     );
   });
 
+  it('offers exactly the social platforms the footer can render', () => {
+    /**
+     * `SOCIAL_PLATFORMS` was a tuple with no consumers sitting next to a hand-written
+     * option list, so adding `linktree` for MUSE-20 meant adding it twice in one file —
+     * in the file whose own opening rule is that an option list is derived from the
+     * constant that owns it. Adding it once would have been a platform the Studio offers
+     * and nothing renders, or renders and nothing offers. Derived now, and pinned here
+     * the same way the levels are.
+     */
+    const social = typeNamed('siteSettings').fields?.find((field) => field.name === 'social');
+    const platform = social?.of?.[0]?.fields?.find((field) => field.name === 'platform');
+    expect(platform?.options?.list).toEqual(
+      SOCIAL_PLATFORMS.map((value) => ({ title: SOCIAL_PLATFORM_NAME[value], value })),
+    );
+  });
+
   it('lets a page document describe only a route the site actually serves', () => {
     // Which pages exist is decided by `src/pages/` and registered in `src/lib/pages.ts`;
-    // Sanity owns a page's words, never its existence.
+    // Sanity owns a page's words, never its existence. After MUSE-20 the registry holds
+    // *only* that — the route list — because the words moved into the `page` documents.
     const route = typeNamed('page').fields?.find((field) => field.name === 'route');
     const values = (route?.options?.list as { value: string }[]).map((o) => o.value);
-    expect(values).toEqual(PAGES.map((page) => page.route));
+    expect(values).toEqual(ROUTES.map((entry) => entry.route));
   });
 
   it('keeps a level out of free text, so a typo cannot reach a badge', () => {
@@ -402,6 +436,20 @@ describe('the closed sets stay in code, not in the CMS', () => {
 
 /* ------------------------------------------------------------ 3. one typed client */
 
+/**
+ * The half of an `.astro` file that Astro ships: everything below the frontmatter fence.
+ *
+ * Frontmatter is the leading `---` … `---` block and only that; it runs in Node during
+ * the build and is never bundled. A file without the fence is all markup, so it is
+ * returned whole — the strict reading, deliberately, because that is the case where a
+ * `<script>` is the only thing the file can be.
+ */
+function markupHalf(source: string): string {
+  if (!source.startsWith('---')) return source;
+  const close = source.indexOf('\n---', 3);
+  return close === -1 ? source : source.slice(close + '\n---'.length);
+}
+
 describe('every query goes through one module', () => {
   /** Every `.ts`/`.astro` file under `src/`, as repo-relative paths. */
   function sources(): string[] {
@@ -453,39 +501,66 @@ describe('every query goes through one module', () => {
     /**
      * A `<script>` in an Astro component is bundled and shipped. Frontmatter is not.
      *
-     * **This assertion is deliberately too strict, and MUSE-20 has to replace it rather
-     * than delete it.** As written it forbids the string `lib/sanity` anywhere in a
-     * `.astro` file, which is correct today only because no page reads Sanity yet. The
-     * moment a page does the intended thing — `import { getFaqs } from
-     * '../lib/sanity'` in frontmatter — this fails, while `test/nojs.test.ts` stays
-     * green. So the temptation will be to delete the line, and deleting it removes the
-     * only *source-level* guard against the one mistake that actually ships a CMS client
-     * to a browser.
-     *
-     * That mistake is not hypothetical and it is not caught by counting files: a
-     * `<script>` importing the Sanity client gets **inlined into the HTML** by Astro, so
-     * `dist` still has zero `.js` files and the only thing that notices is
-     * `test/nojs.test.ts`'s marker string in the markup. File-count guards are blind to
-     * it by construction.
-     *
-     * The decision, so MUSE-20 inherits it instead of re-litigating it:
+     * MUSE-19 forbade the string `lib/sanity` anywhere in a `.astro` file, which was
+     * correct only while no page read Sanity. MUSE-20 is where pages arrive, so the
+     * assertion is **replaced rather than deleted**, in the shape MUSE-19 recorded:
      *
      *   **Split the file at the frontmatter fence and assert on the halves separately.**
-     *   Everything above the closing `---` is frontmatter, which Astro evaluates at build
-     *   time on the server and never ships — `lib/sanity` is allowed there, and that is
-     *   the intended MUSE-20 pattern. Everything below it is markup, and `lib/sanity` in
-     *   any `<script>` region there is a failure that names the file. A component with no
-     *   frontmatter fence is all markup, so the whole file is held to the strict rule.
+     *   Everything above the closing `---` is frontmatter, which Astro evaluates in Node
+     *   at build time and never ships — `lib/sanity` is allowed there, and that is the
+     *   MUSE-20 pattern. Everything below is markup, and `lib/sanity` in a `<script>`
+     *   region there is a failure that names the file. A component with no frontmatter
+     *   fence is all markup, so the whole file is held to the strict rule.
      *
-     * Three layers then stand where one stands now, and they fail at different times:
-     * this one at `npm test` naming the component, `test/nojs.test.ts`'s `.js` file count
-     * on the built output, and `test/nojs.test.ts`'s CMS marker string in the HTML — which
-     * is the only one that catches the inlined case, and is why none of the three is
-     * redundant.
+     * Deleting it would remove the only *source-level* guard against the one mistake
+     * that actually ships a CMS client to a browser — and that mistake is invisible to a
+     * file count: a `<script>` importing the client gets **inlined into the HTML**, so
+     * `dist` still has zero `.js` files. Three layers stand here, failing at different
+     * times: this one at `npm test` naming the component, `test/nojs.test.ts`'s `.js`
+     * file count on the built output, and `test/nojs.test.ts`'s CMS marker strings in the
+     * markup — which is the only one that catches the inlined case.
      */
     for (const file of sources().filter((f) => f.endsWith('.astro'))) {
-      expect(readFileSync(join(ROOT, file), 'utf8'), file).not.toContain('lib/sanity');
+      const source = readFileSync(join(ROOT, file), 'utf8');
+      const markup = markupHalf(source);
+      expect(markup, `${file} reaches the read path from its markup`).not.toContain(
+        'lib/sanity',
+      );
+      // And the guard must still be looking at something: a component whose fence this
+      // mis-parses would pass vacuously.
+      expect(markup.length, `${file} parsed to no markup at all`).toBeGreaterThan(0);
     }
+  });
+
+  it('lets a page import the read path, but not the modules inside it', () => {
+    /**
+     * The hole MUSE-19 wrote down and left open, closed here now that there is something
+     * to protect.
+     *
+     * `import { runQuery } from '../lib/sanity/client'` plus `import { FAQS_QUERY } from
+     * '../lib/sanity/queries'` is two ordinary imports of two sibling modules, and it
+     * yields raw rows with no decoding at all — so a renamed field arrives as `undefined`
+     * and renders as nothing, which is the exact failure the decoders exist to turn into
+     * a named build error. Nothing else notices: no GROQ text, no `@sanity/client`, and
+     * `astro check` is perfectly happy.
+     *
+     * So, as decided in `src/lib/sanity/index.ts`: from outside `src/lib/sanity/`, an
+     * import specifier ending in `lib/sanity` is allowed and one containing
+     * `lib/sanity/` is a failure. The modules inside the directory go on importing each
+     * other freely — the rule is about crossing the boundary, not about the modules.
+     */
+    const offenders: string[] = [];
+    for (const file of sources().filter((f) => !f.startsWith('src/lib/sanity/'))) {
+      const source = readFileSync(join(ROOT, file), 'utf8');
+      for (const [, specifier] of source.matchAll(/from\s+'([^']+)'/g)) {
+        if (/lib\/sanity\/./.test(specifier)) offenders.push(`${file} → ${specifier}`);
+      }
+    }
+    expect(
+      offenders,
+      'Import `../lib/sanity` and nothing deeper: the index is what decodes, and a ' +
+        'module from inside the read path hands back raw rows with silent nulls.',
+    ).toEqual([]);
   });
 
   it('reads its configuration in a way Vite cannot inline into a client bundle', () => {
@@ -651,8 +726,8 @@ describe('an empty dataset is distinguishable from a broken query', () => {
     const message = (thrown as Error).message;
     expect(message).toContain('`instructor`');
     expect(message).toContain('0');
-    // The sentence that stops the next reader guessing. The dataset is empty until
-    // MUSE-20, so "nothing on the page" will be true for a while for good reasons.
+    // The sentence that stops the next reader guessing: most of the dataset is still
+    // empty, so "nothing on the page" is true for good reasons.
     expect(message).toContain('The query ran');
   });
 

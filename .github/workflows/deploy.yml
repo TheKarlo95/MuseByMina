@@ -46,8 +46,14 @@ jobs:
           #   SANITY_PROJECT_ID = q6fk9usq
           #   SANITY_DATASET    = production
           # Both have defaults in `src/lib/sanity/client.ts`, so an unset variable builds
-          # against the live dataset rather than failing. No page reads Sanity yet —
-          # MUSE-20 is the migration — so today this changes nothing about the output.
+          # against the live dataset rather than failing. Since MUSE-20 the pages read
+          # their titles, descriptions and the studio's details from it, so pointing these
+          # at another dataset changes what gets published — which is the point.
+          #
+          # Nothing here sets `MUSE_CONTENT_FIXTURE`, and nothing here may: that variable
+          # makes the build read the committed seed instead of the dataset, and it exists
+          # for the test suite (`vitest.config.ts`). `test/content.test.ts` asserts this
+          # file never mentions it.
           SANITY_PROJECT_ID: ${{ vars.SANITY_PROJECT_ID }}
           SANITY_DATASET: ${{ vars.SANITY_DATASET }}
         run: npm run build

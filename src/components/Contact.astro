@@ -1,4 +1,22 @@
 ---
+// **This import's position is load-bearing for the bytes of `/contact`.** Measured:
+//
+//   this file as it is now ..................... <style>, TrialForm, BaseLayout
+//   any *new* module imported below TrialForm ... TrialForm, <style>, BaseLayout
+//   a module already in the graph, below it ..... unchanged
+//
+// Astro orders a page's stylesheets by the order it crawls the page's imports. This
+// component's own styles are inlined and `TrialForm`'s are an external `<link>`, so
+// introducing a module to the graph below the `TrialForm` import moves the inlined block
+// past that `<link>`. Both are scoped, so nothing renders differently — but MUSE-20 is a
+// migration whose acceptance test is a byte-for-byte `diff -r` against the previous
+// deploy, and a moved `<style>` is a byte.
+//
+// Which positions are safe is a property of the individual file, not a rule: `Home.astro`
+// has the same exposure and tolerates the import *nowhere* (three placements tried, three
+// identical diffs), which is why it takes the address as a prop instead. If you add an
+// import to a component that renders `TrialForm`, build and `diff -r`.
+import { getSiteSettings, socialUrl } from '../lib/sanity';
 import TrialForm from './TrialForm.astro';
 import { localeUrl, type Locale } from '../lib/i18n';
 import { STUDIO } from '../lib/nav';
@@ -14,6 +32,13 @@ interface Props {
   locale: Locale;
 }
 const { locale } = Astro.props;
+
+/**
+ * Contact details are content (MUSE-20), the address included — rendered whole here, and
+ * split into two lines in the footer. Only the maps link is still code; the schema has no
+ * field for it.
+ */
+const settings = await getSiteSettings();
 
 const t = {
   hr: {
@@ -59,13 +84,13 @@ const t = {
 <section class="section">
   <div class="wrap">
     <p class="eyebrow">{t.elseHeading}</p>
-    <h2 class="displayM">{STUDIO.street}, {STUDIO.city}</h2>
+    <h2 class="displayM">{settings.address}</h2>
     <p class="lede">{t.elseLede}</p>
 
     <ul class="links">
-      <li><a class="link" href={`mailto:${STUDIO.email}`}>{STUDIO.email}</a></li>
+      <li><a class="link" href={`mailto:${settings.email}`}>{settings.email}</a></li>
       <li>
-        <a class="link" href={STUDIO.instagram} target="_blank" rel="noopener noreferrer me">
+        <a class="link" href={socialUrl(settings, 'instagram')} target="_blank" rel="noopener noreferrer me">
           Instagram
         </a>
       </li>

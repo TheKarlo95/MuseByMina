@@ -7,12 +7,13 @@
  *   EMPTY   HTTP 200, zero documents. Printed separately from OK on purpose.
  *   BROKEN  a GROQ parse error, an HTTP error, or no answer at all.
  *
- * The distinction is the whole reason this script exists. The dataset is empty today
- * (MUSE-20 is what fills it), so *every* query legitimately returns nothing — which is
- * also exactly what a typo'd attribute name, a renamed field or an unreachable API look
- * like from a page template that just maps over an array. A silent empty result is how
- * this fails later, so "empty" is made loud here and, at build time, in
- * `requireDocuments` in `src/lib/sanity/decode.ts`.
+ * The distinction is the whole reason this script exists. Most of the dataset is still
+ * empty — MUSE-20 migrated the `siteSettings` singleton and the four `page` documents,
+ * and the schedule and instructors are MUSE-36 — so most queries legitimately return
+ * nothing, which is also exactly what a typo'd attribute name, a renamed field or an
+ * unreachable API look like from a page template that just maps over an array. A silent
+ * empty result is how this fails later, so "empty" is made loud here and, at build time,
+ * in `requireDocuments` in `src/lib/sanity/decode.ts`.
  *
  *   SANITY_PROJECT_ID=q6fk9usq SANITY_DATASET=production node scripts/sanity-read-check.mjs
  *
@@ -119,7 +120,9 @@ if (broken > 0) {
 
 if (empty === queries.length) {
   console.log(
-    'Every query parsed and answered. All of them answered with nothing, which is the\n' +
-      'correct answer from an empty dataset — MUSE-20 is what puts content in it.',
+    'Every query parsed and answered — and every one of them with nothing. For most of\n' +
+      'them that is the correct answer from an empty dataset, but MUSE-20 seeded the\n' +
+      '`siteSettings` singleton and the four `page` documents: if those two are EMPTY as\n' +
+      'well, the dataset has lost them. Run `npm run sanity:seed`.',
   );
 }

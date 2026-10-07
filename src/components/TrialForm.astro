@@ -7,7 +7,7 @@ import {
   requiredMessage,
 } from '../lib/forms';
 import { localeUrl, type Locale } from '../lib/i18n';
-import { STUDIO } from '../lib/nav';
+import { getSiteSettings } from '../lib/sanity';
 
 /**
  * The trial-class form — the site's one conversion path, rendered identically at
@@ -35,7 +35,13 @@ interface Props {
 const { locale } = Astro.props;
 const copy = FORM_COPY[locale];
 
-const mailto = `mailto:${STUDIO.email}`;
+/**
+ * The inbox a failed submission falls back to is content (MUSE-20), read here in
+ * frontmatter. The form *copy* is not: the browser needs the validation messages at
+ * runtime, handed over as `data-msg-*` attributes, so `FORM_COPY` stays in code.
+ */
+const settings = await getSiteSettings();
+const mailto = `mailto:${settings.email}`;
 const privacyHref = localeUrl('/privacy', locale);
 ---
 
@@ -208,7 +214,7 @@ const privacyHref = localeUrl('/privacy', locale);
         <p class="statusTitle" data-status-title></p>
         <p class="statusText" data-status-body hidden></p>
         <p class="statusMail" data-fail-mail hidden>
-          <a href={mailto}>{STUDIO.email}</a>
+          <a href={mailto}>{settings.email}</a>
         </p>
         {/* What actually failed. "Something went wrong" is not an explanation. */}
         <p class="statusDetail" data-fail-detail hidden></p>
@@ -241,7 +247,7 @@ const privacyHref = localeUrl('/privacy', locale);
   <noscript>
     <p class="noscript">
       {copy.noscript}{' '}
-      <a class="privacyLink" href={mailto}>{STUDIO.email}</a>
+      <a class="privacyLink" href={mailto}>{settings.email}</a>
     </p>
   </noscript>
 </div>

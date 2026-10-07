@@ -244,10 +244,11 @@ export function frame(doc: unknown, type: string): Where {
  * gets a build failure naming the type. A page that renders "no upcoming events" is a
  * correct page with zero events, so it passes `0` and gets an empty array.
  *
- * The empty-set message is deliberately explicit that the query *ran*. The dataset is
- * empty until MUSE-20, so the same symptom — nothing on the page — will be true for a
- * while for entirely legitimate reasons, and whoever reads this log in three weeks needs
- * to be told which of the two it is rather than guessing.
+ * The empty-set message is deliberately explicit that the query *ran*. Most of the
+ * dataset is still empty — MUSE-20 migrated the singleton and the four page documents and
+ * nothing else — so the same symptom, nothing on the page, is true for entirely
+ * legitimate reasons, and whoever reads this log needs to be told which of the two it is
+ * rather than guessing.
  */
 export function requireDocuments<T>(
   rows: unknown,
@@ -296,8 +297,15 @@ export interface SiteSettings {
   summary: Record<Locale, string>;
   address: string;
   email: string;
-  phone: string;
-  openingHours: Record<Locale, string>;
+  /**
+   * Optional as of MUSE-20, and the reason is a rule worth generalising: nothing on the
+   * site renders a phone number and no real one exists, so `required()` could only be
+   * satisfied by inventing one — which is exactly how the invented schedule (MUSE-36)
+   * reached production. Whichever page first displays it can require it then.
+   */
+  phone?: string;
+  /** Optional for the same reason as `phone`. The class schedule is a separate thing. */
+  openingHours?: Record<Locale, string>;
   social: { platform: string; url: string }[];
   shareImage?: ImageRef;
 }
@@ -312,8 +320,8 @@ export function decodeSiteSettings(row: unknown): SiteSettings {
     summary: localised(row, 'summary', where),
     address: text(row, 'address', where),
     email: text(row, 'email', where),
-    phone: text(row, 'phone', where),
-    openingHours: localised(row, 'openingHours', where),
+    phone: optionalText(row, 'phone', where),
+    openingHours: optionalLocalised(row, 'openingHours', where),
     social: (Array.isArray(social) ? social : []).map((entry, index) => {
       const here = at(where, `social[${index}]`);
       return { platform: text(entry, 'platform', here), url: text(entry, 'url', here) };
@@ -322,7 +330,63 @@ export function decodeSiteSettings(row: unknown): SiteSettings {
   };
 }
 
-/** Mirrors `PageMeta` in `src/lib/pages.ts`, so MUSE-20 is an assignment. */
+/**
+ * The address as the two lines an `<address>` element needs: street, then city.
+ *
+ * `siteSettings.address` is one field because an address is one thing Mina types, and
+ * the footer renders it as two lines with the country translated underneath (design
+ * system §7.1). Something has to bridge those, and the choice is between a second and
+ * third CMS field — more fields to fill in, and three ways to disagree with each other —
+ * or splitting the one field here.
+ *
+ * Splitting won, with the comma as the contract: it is how the address is written
+ * anyway, the Studio field says so, and a value that does not have exactly one comma
+ * fails the build naming the document instead of rendering half an address. The
+ * alternative failure — a silent `undefined` city — is the thing this whole module
+ * exists to prevent.
+ *
+ * `MUSE-20` rendered this on four surfaces (the footer, `/`, `/contact` and the privacy
+ * notice's controller line) precisely so the field is not write-only: a CMS field that
+ * changes nothing a visitor sees is worse than no field, because it looks like it works.
+ */
+export function addressLines(settings: SiteSettings): { street: string; city: string } {
+  const parts = settings.address.split(',').map((part) => part.trim());
+  if (parts.length !== 2 || parts.some((part) => part === '')) {
+    throw new SanityContentError(
+      `Sanity document "${settings.id}" (type \`siteSettings\`) has \`address\` = ` +
+        `${JSON.stringify(settings.address)}, which the footer cannot render as two ` +
+        `lines. It needs the street, one comma, then the city — „Ulica 1, Grad". The ` +
+        `country is not part of it; the site translates that itself.`,
+    );
+  }
+  return { street: parts[0]!, city: parts[1]! };
+}
+
+/**
+ * The URL of one social profile, or a build failure naming the document.
+ *
+ * The footer and `/contact` each link to a named network — the link text is markup, the
+ * address is content — so they ask for one by platform rather than rendering whatever
+ * order the array happens to be in. A platform that is not in `siteSettings` is a link
+ * with no href, which is worse than a build that stops: it looks fine and goes nowhere.
+ */
+export function socialUrl(settings: SiteSettings, platform: string): string {
+  const found = settings.social.find((entry) => entry.platform === platform);
+  if (!found) {
+    throw new SanityContentError(
+      `Sanity document "${settings.id}" (type \`siteSettings\`) has no \`${platform}\` ` +
+        `entry under \`social\`, and the site links to one. Add it in the Studio under ` +
+        `„Društvene mreže”. Present: ` +
+        `${settings.social.map((entry) => entry.platform).join(', ') || '(none)'}.`,
+    );
+  }
+  return found.url;
+}
+
+/**
+ * One route's words. The counterpart of `ROUTES` in `src/lib/pages.ts`, which keeps the
+ * other half — which routes exist — in code (MUSE-20).
+ */
 export interface PageMetaDoc {
   id: string;
   route: string;
@@ -345,9 +409,10 @@ export function decodePage(row: unknown): PageMetaDoc {
 /**
  * A schedule row, decoded straight into the existing `ClassEntry`.
  *
- * `satisfies ClassEntry` is not decoration: it is the compile-time half of the promise
- * that MUSE-20 is a prop change. `Schedule.astro` already takes `ClassEntry[]`, so if
- * this ever stops producing one, the type error arrives before the page does.
+ * The `ClassEntry` extension is not decoration: it is the compile-time half of the
+ * promise that moving the schedule into the CMS (MUSE-36) is a prop change.
+ * `Schedule.astro` already takes `ClassEntry[]`, so if this ever stops producing one,
+ * the type error arrives before the page does.
  */
 export interface ScheduleEntry extends ClassEntry {
   id: string;
@@ -520,7 +585,7 @@ export interface Post {
   excerpt: Record<Locale, string>;
   author?: string;
   coverImage: ImageRef;
-  /** Portable Text, per locale. Rendered by whatever MUSE-20 picks; opaque here. */
+  /** Portable Text, per locale. Rendered by whatever the blog ticket picks; opaque here. */
   body: Record<Locale, unknown[]>;
 }
 

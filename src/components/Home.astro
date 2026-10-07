@@ -16,8 +16,26 @@ import {
 
 interface Props {
   locale: Locale;
+  /**
+   * The studio's address, from Sanity — passed in rather than read here, and that is not
+   * a style preference.
+   *
+   * Astro orders a page's stylesheets by the order it crawls the page's imports, and this
+   * component's own `<style>` is inlined while `TrialForm`'s is an external `<link>`.
+   * Adding *any* import to this file — above `TrialForm`, below it, anywhere — moves the
+   * inlined block past both `<link>`s in `<head>` on `/` and `/en`. Nothing renders
+   * differently (both are scoped), but MUSE-20's acceptance test is a byte-for-byte
+   * `diff -r` of the built site against the previous deploy, and a moved `<style>` is a
+   * byte. Measured, not assumed: three placements, three identical diffs.
+   *
+   * `src/pages/index.astro` already reads the CMS for its `<title>`, so it hands the
+   * address down and this file's import list stays exactly as it was. `Contact.astro`
+   * reads directly because it has the same exposure but survives it at one specific
+   * import position — see the note there.
+   */
+  address: string;
 }
-const { locale } = Astro.props;
+const { locale, address } = Astro.props;
 
 const t = {
   hr: {
@@ -185,7 +203,7 @@ const flavours = STYLES.map((style) => ({
 <section class="section">
   <div class="wrap">
     <p class="eyebrow">{t.where}</p>
-    <h2 class="displayM">{STUDIO.street}, {STUDIO.city}</h2>
+    <h2 class="displayM">{address}</h2>
     <a class="btn btnSecondary" href={STUDIO.maps} target="_blank" rel="noopener noreferrer">
       {t.openMaps}
     </a>

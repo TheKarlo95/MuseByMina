@@ -6,7 +6,7 @@ import {
   WEEKDAYS,
   WEEKDAY_NAME,
 } from '../../src/lib/schedule';
-import { PAGES } from '../../src/lib/pages';
+import { ROUTES } from '../../src/lib/pages';
 
 /**
  * The closed sets, imported from the code that owns them rather than retyped here.
@@ -84,13 +84,15 @@ export const WEEKDAY_OPTIONS: readonly EnumOption[] = WEEKDAYS.map((day) => ({
 /**
  * The routes a `page` document may describe, read off `src/lib/pages.ts`.
  *
- * One source, so a `page` document can never claim a route the site does not serve —
- * and when MUSE-20 moves the strings into Sanity, the registry that `llms.txt` and
- * `test/seo.test.ts` are built around keeps owning *which* routes exist.
+ * One source, so a `page` document can never claim a route the site does not serve. The
+ * strings moved into Sanity in MUSE-20 and the registry kept owning *which* routes
+ * exist — which is why the label here is `studioLabel` and not the document's own
+ * `name`: the dropdown has to name a page Mina has not written a document for yet, so
+ * the label cannot come from the document.
  */
-export const ROUTE_OPTIONS: readonly EnumOption[] = PAGES.map((page) => ({
-  title: `${page.name.hr} — ${page.route}`,
-  value: page.route,
+export const ROUTE_OPTIONS: readonly EnumOption[] = ROUTES.map((entry) => ({
+  title: `${entry.studioLabel} — ${entry.route}`,
+  value: entry.route,
 }));
 
 /** Billing period for a pricing tier. The *wording* per locale belongs to the page. */
@@ -113,15 +115,44 @@ export const EVENT_TYPE_OPTIONS: readonly EnumOption[] = [
   { title: 'Social', value: 'social' },
 ];
 
-/** Where the footer's social icons can point (design system §7.1). */
-export const SOCIAL_PLATFORMS = ['instagram', 'facebook', 'tiktok', 'youtube'] as const;
+/**
+ * Where the footer's social links can point (design system §7.1).
+ *
+ * `linktree` is here because the studio has one and the footer links to it — MUSE-20
+ * moved the three real social URLs into `siteSettings`, and a platform the Studio cannot
+ * store is a link the site would have to keep hardcoded. The others are the networks a
+ * dance studio plausibly adds next; an unused option costs nothing, a missing one costs
+ * an edit nobody can make.
+ *
+ * **One list, and the names derived from it.** It was two — a tuple with no consumers and
+ * a hand-written option list — so adding `linktree` meant adding it twice in this file,
+ * in a file whose own opening rule is that an option list is `MAP`ped from the constant
+ * that owns it (`LEVEL_OPTIONS`, `STYLE_OPTIONS`, `WEEKDAY_OPTIONS`, `ROUTE_OPTIONS`).
+ * Adding it once and forgetting the other would have been a platform the Studio offers
+ * and nothing renders, or renders and nothing offers. `test/sanity.test.ts` pins the
+ * options to this tuple the same way it pins the levels.
+ *
+ * The names are proper nouns, so they are the same in both locales and are not content.
+ */
+export const SOCIAL_PLATFORMS = [
+  'instagram',
+  'facebook',
+  'linktree',
+  'tiktok',
+  'youtube',
+] as const;
 
-export const SOCIAL_PLATFORM_OPTIONS: readonly EnumOption[] = [
-  { title: 'Instagram', value: 'instagram' },
-  { title: 'Facebook', value: 'facebook' },
-  { title: 'TikTok', value: 'tiktok' },
-  { title: 'YouTube', value: 'youtube' },
-];
+export const SOCIAL_PLATFORM_NAME: Record<(typeof SOCIAL_PLATFORMS)[number], string> = {
+  instagram: 'Instagram',
+  facebook: 'Facebook',
+  linktree: 'Linktree',
+  tiktok: 'TikTok',
+  youtube: 'YouTube',
+};
+
+export const SOCIAL_PLATFORM_OPTIONS: readonly EnumOption[] = SOCIAL_PLATFORMS.map(
+  (platform) => ({ title: SOCIAL_PLATFORM_NAME[platform], value: platform }),
+);
 
 /**
  * Start time, 24-hour `HH:MM`.
@@ -132,3 +163,18 @@ export const SOCIAL_PLATFORM_OPTIONS: readonly EnumOption[] = [
  * a time of day and no date, and a `datetime` would drag a timezone into it.
  */
 export const HH_MM_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * Street, a comma, city — „Ilica 209, Zagreb".
+ *
+ * The footer renders the address as two lines with the country translated underneath
+ * (design system §7.1), so something has to split the one field Mina types.
+ * `addressLines` in `src/lib/sanity/decode.ts` splits it on the comma and fails the
+ * build naming the document if it cannot; this is the same rule, enforced in the Studio,
+ * so she finds out while she is typing rather than from a red deploy — the same reason
+ * `HH_MM_PATTERN` is here.
+ *
+ * The country is deliberately not part of it: it is a translated word, and it lives in
+ * `STUDIO` in `src/lib/nav.ts`.
+ */
+export const ADDRESS_PATTERN = /^[^,]+,[^,]+$/;

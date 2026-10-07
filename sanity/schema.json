@@ -106,7 +106,7 @@
         "value": {
           "type": "string"
         },
-        "optional": false
+        "optional": true
       },
       "openingHours": {
         "type": "objectAttribute",
@@ -114,7 +114,7 @@
           "type": "inline",
           "name": "localeText"
         },
-        "optional": false
+        "optional": true
       },
       "social": {
         "type": "objectAttribute",
@@ -135,6 +135,10 @@
                     {
                       "type": "string",
                       "value": "facebook"
+                    },
+                    {
+                      "type": "string",
+                      "value": "linktree"
                     },
                     {
                       "type": "string",

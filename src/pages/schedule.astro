@@ -1,9 +1,9 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import Schedule from '../components/Schedule.astro';
-import { pageMeta } from '../lib/pages';
+import { getPage } from '../lib/sanity';
 
-const meta = pageMeta('/schedule');
+const meta = await getPage('/schedule');
 ---
 
 <BaseLayout locale="hr" title={meta.title.hr} description={meta.description.hr}>
