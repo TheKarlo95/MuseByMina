@@ -176,14 +176,40 @@ const DEV_STOP_GRACE_MS = 5_000;
 /**
  * Every dev server this worker has started and not yet stopped.
  *
- * A leaked `astro dev` does not merely waste a port: it keeps the vitest worker's event
- * loop alive and the run hangs with no failing test to point at. `afterAll` covers the
- * ordinary path; this covers the one where the worker dies first.
+ * A leaked `astro dev` does not merely waste a port: it keeps a Vite server and a file
+ * watcher alive against this checkout for as long as the machine is up, and the next
+ * run inherits them. `afterAll` covers the ordinary path; this covers the one where the
+ * worker dies first.
  */
 const running = new Set<ChildProcess>();
 process.once('exit', () => {
-  for (const child of running) child.kill('SIGKILL');
+  for (const child of running) signalGroup(child, 'SIGKILL');
 });
+
+/**
+ * Signal a child **and everything it started**, not just the process we hold.
+ *
+ * `npx astro dev` is three processes — the `npx` shim, `npm exec`, and the Astro server
+ * that actually holds the port — and `child.kill()` signals only the first. npm does
+ * forward SIGTERM today, so the obvious version appears to work; it is a behaviour of
+ * the package manager, not a guarantee, and when it does not hold the symptom is an
+ * orphaned dev server nobody connects to this suite. `detached: true` makes the child a
+ * process-group leader, and signalling `-pid` reaches the whole group.
+ *
+ * ESRCH means the group is already gone, which is the outcome we wanted.
+ */
+function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (child.pid === undefined) return;
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      /* already dead */
+    }
+  }
+}
 
 /**
  * Start a real `astro dev` and resolve once it is answering, MUSE-35.
@@ -228,6 +254,9 @@ export async function astroDev(
       cwd: ROOT,
       env: { ...childEnv, ...env, BUILD_CACHE_DIR: `${cacheDir}.cache` },
       stdio: ['ignore', 'pipe', 'pipe'],
+      // Its own process group, so `stop()` can take the Astro server down with the
+      // `npx` shim that spawned it — see `signalGroup`.
+      detached: true,
     },
   );
   running.add(child);
@@ -243,12 +272,12 @@ export async function astroDev(
     running.delete(child);
     if (child.exitCode !== null || child.signalCode !== null) return;
     await new Promise<void>((resolve) => {
-      const kill = setTimeout(() => child.kill('SIGKILL'), DEV_STOP_GRACE_MS);
+      const kill = setTimeout(() => signalGroup(child, 'SIGKILL'), DEV_STOP_GRACE_MS);
       child.once('exit', () => {
         clearTimeout(kill);
         resolve();
       });
-      child.kill('SIGTERM');
+      signalGroup(child, 'SIGTERM');
     });
   };
 

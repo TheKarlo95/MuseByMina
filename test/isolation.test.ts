@@ -21,7 +21,14 @@ import { claimOutDir, SCRATCH } from './helpers/scratch';
  *   2. Nothing under `test/` can name a build directory; only the helper mints them.
  *   3. Nothing under `test/` deletes anything, except the one `globalSetup` that runs
  *      before any worker exists.
- *   4. Nothing under `test/` runs `astro build` except through that one helper.
+ *   4. Nothing under `test/` starts a child process except through that one helper.
+ *
+ * (4) is deliberately about *child processes*, not about `astro build`. MUSE-35 needed
+ * a real `astro dev` — the bug it fixes is invisible to anything that reads `dist` —
+ * and the tempting move was a second entry on the allow-list below. An allow-list with
+ * a new hole punched in it for each new need is the defect this file exists to stop, so
+ * `astroDev()` went into `test/helpers/scratch.ts` beside `astroBuild()` instead, and
+ * the list is still one file long. It should stay that way.
  *
  * (2)–(4) are read off the source of the test tree itself, so a new suite that reaches
  * past the helper fails this file rather than quietly reintroducing the race.
@@ -116,6 +123,9 @@ describe('the rules are enforced on the test tree, not remembered', () => {
     // A suite that started its own `astro build` would be free to choose an output
     // directory again, which is the hole all three earlier fixes left open. The module
     // itself is on the list, so an aliased import does not slip through either.
+    //
+    // One entry. A dev server is a child process too and goes in the same module
+    // (MUSE-35) — the answer to a new need is never a second name on this list.
     const starters = [
       `node:child_${'process'}`,
       `exec${'FileSync'}`,

@@ -64,6 +64,25 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   on `trailingSlash`, so `${BASE_URL}fonts/x` can silently yield `/MuseByMinafonts/x`. An
   apex build hides this; only the Pages sub-path 404s. `test/assets.test.ts` resolves every
   asset reference in the built HTML to a file in `dist`, under both deploy targets.
+- **CSS never names a root-absolute asset path, and the fonts live in `src/assets/`.**
+  Vite rewrites a root-absolute `url()` to include `base` **only at build time**, so a
+  `url('/fonts/x.woff2')` against a file in `public/` makes the deploy correct and
+  `astro dev` 404 — which is how all six faces fell back to Georgia for the life of the
+  project, and why MUSE-14's `II:OO` was invisible locally (MUSE-35). Use a relative
+  `url()` into `src/assets/`; Vite then resolves it in both environments. The preload in
+  `BaseLayout.astro` imports the *same file* with `?url`, because a preload href that is
+  not also a `@font-face` src is a second download of a face the page already fetches —
+  both URLs 200, nothing looks wrong. `test/assets.test.ts` resolves every `url()` in the
+  emitted CSS against `dist` and asserts the two agree; `test/fonts.test.ts` runs a real
+  `astro dev` and asserts six faces load and none fail.
+- **A test that can only see `dist` cannot see a dev-only bug.** `test/fonts.test.ts` is
+  the one suite that drives `astro dev`, through `astroDev()` in `test/helpers/scratch.ts`
+  — the same module that owns `astroBuild()`, so `test/isolation.test.ts`'s child-process
+  allow-list stays one entry long. Two things it has to do and you have to keep doing:
+  pass `--ignore-lock` (Astro 7 auto-backgrounds the dev server when it detects an agent,
+  and a daemon cannot be torn down), and strip `VITEST` from the child env — Astro's
+  dev-server plugin returns early when it is set, so the server starts, greets you, and
+  answers every route with `Cannot GET`.
 - **Page URLs end in a slash.** `trailingSlash: 'always'` + `build.format: 'directory'`,
   so `dist/en/index.html` is served at `/en/` and `/en` 301s to it. Build hrefs with
   `localeUrl()` (`src/lib/i18n.ts`) and nothing else — it is the single place the slash is
