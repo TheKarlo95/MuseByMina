@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 
 import { astroBuild } from './scratch';
-import { resolveRequest } from './serve';
+import { extensionOf, MIME, resolveRequest } from './serve';
 
 /**
  * A served build, for the browser suites.
@@ -39,21 +39,6 @@ export const PREVIEW_BASE = '/MuseByMina';
  */
 export const STUB_ENDPOINT = '/__form';
 
-const MIME: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.txt': 'text/plain; charset=utf-8',
-  '.xml': 'application/xml; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.woff2': 'font/woff2',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.webp': 'image/webp',
-  '.ico': 'image/x-icon',
-};
 
 /** One submission the stub endpoint received. */
 export interface StubRequest {
@@ -115,11 +100,6 @@ export function buildPreview(label?: string): string {
   );
 }
 
-function extensionOf(file: string): string {
-  const dot = file.lastIndexOf('.');
-  return dot === -1 ? '' : file.slice(dot).toLowerCase();
-}
-
 /**
  * Build the site with the stub endpoint configured, then serve it.
  *
@@ -175,8 +155,8 @@ export async function startPreview(label?: string): Promise<Preview> {
       res.end('<!doctype html><title>404</title>not found');
       return;
     }
-    // Content types matter here in a way they do not for `servePages`: this output is
-    // rendered, and HTML without a charset turns every `č` into a replacement character.
+    // The table lives in `./serve.ts` now — `servePages` renders to a browser too
+    // (MUSE-35), so it needs the same content types rather than a laxer set of its own.
     res.writeHead(200, {
       'content-type': MIME[extensionOf(served.file)] ?? 'application/octet-stream',
     });

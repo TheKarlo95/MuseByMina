@@ -172,6 +172,112 @@ export function assetRefs(html: string): AssetRef[] {
   return refs;
 }
 
+/**
+ * Every `url()` target in a chunk of CSS, quotes stripped, in source order.
+ *
+ * `assetRefs` above reads the *markup*, and for a long time that was the whole of what
+ * the suite resolved against `dist`. A stylesheet fetches subresources too — fonts,
+ * background images, `@import`s — and none of them were ever checked, which is the hole
+ * MUSE-35 came through: six `@font-face` URLs that Vite only rewrites at build time, so
+ * the deployed site was right, the dev server 404'd all six, and nothing noticed.
+ *
+ * Comments are stripped first. A commented-out `url()` is not a request, and the rule
+ * against root-absolute font paths is written out verbatim at the top of
+ * `src/styles/fonts.css` — so a checker that reads comments reports the explanation of
+ * the bug as the bug.
+ *
+ * `data:` URIs are dropped. They are not a request, and a base64 payload containing `)`
+ * is the one thing a regex this size cannot read.
+ */
+export function cssUrls(css: string): string[] {
+  const urls: string[] = [];
+  const code = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  for (const m of code.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"]*))\s*\)/g)) {
+    const url = (m[1] ?? m[2] ?? m[3] ?? '').trim();
+    if (!url || url.startsWith('data:')) continue;
+    urls.push(url);
+  }
+  return urls;
+}
+
+/**
+ * Every `url()` inside an `@font-face` block — the faces the page will actually fetch.
+ *
+ * Narrower than `cssUrls` on purpose: AC4 is about `@font-face` specifically, and a
+ * failure that names a font is worth more than one that names a URL.
+ */
+export function fontFaceUrls(css: string): string[] {
+  return [...css.matchAll(/@font-face\s*\{([^}]*)\}/g)].flatMap((m) => cssUrls(m[1]!));
+}
+
+/** The contents of every inline `<style>` block in a page, in document order. */
+export function styleBlocks(html: string): string[] {
+  return [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1]!);
+}
+
+/** A subresource a stylesheet fetches, and the URL the stylesheet itself is served at. */
+export interface CssRef {
+  /** Where it came from, for failure messages — e.g. `_astro/BaseLayout.abc.css`. */
+  source: string;
+  /** The `url()` target exactly as emitted. */
+  url: string;
+  /** Absolute URL of the stylesheet, so a relative `url()` resolves the way a browser's would. */
+  from: string;
+}
+
+/**
+ * Every `url()` in every stylesheet the build emits — files and inline blocks alike.
+ *
+ * Both, because which of the two a given stylesheet becomes is a size threshold:
+ * `build.inlineStylesheets: 'auto'` in `astro.config.mjs` inlines the small ones. A
+ * check that only read `.css` files would go quiet the day the font block drops under
+ * the limit, which is the kind of coverage that disappears without a test turning red.
+ *
+ * `extract` narrows what counts as a reference — pass `fontFaceUrls` for the `@font-face`
+ * sources alone.
+ */
+export function cssRefs(
+  build: Build,
+  extract: (css: string) => string[] = cssUrls,
+): CssRef[] {
+  const root = deployRoot(build);
+  const refs: CssRef[] = [];
+
+  const collect = (css: string, source: string, from: string): void => {
+    for (const url of extract(css)) refs.push({ source, url, from });
+  };
+
+  for (const file of build.allFiles()) {
+    if (!file.endsWith('.css')) continue;
+    collect(build.read(file), file, new URL(file, root).href);
+  }
+
+  for (const page of build.htmlFiles()) {
+    const pageUrl = new URL(page, root).href;
+    styleBlocks(build.read(page)).forEach((css, i) => {
+      collect(css, `${page} <style> #${i + 1}`, pageUrl);
+    });
+  }
+
+  return refs;
+}
+
+/**
+ * A CSS `url()` resolved to the absolute URL a browser would request.
+ *
+ * Against the **stylesheet's** own address, not the page's — that is the whole
+ * difference between a CSS reference and an HTML one, and the reason these cannot just
+ * be fed to `assetFile` the way `assetRefs` are. Once resolved they are ordinary
+ * absolute URLs, so `isOwnAsset` and `assetFile` answer the rest.
+ */
+export function cssRefUrl(ref: CssRef): string | undefined {
+  try {
+    return new URL(ref.url.trim(), ref.from).href;
+  } catch {
+    return undefined;
+  }
+}
+
 /** `href` of every `<link>` carrying exactly `rel`, in document order. */
 export function linkHrefs(html: string, rel: string): string[] {
   return assetRefs(html)

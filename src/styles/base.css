@@ -34,7 +34,7 @@ body {
 
 /* ---------- numerals — MUSE-14 ----------
    Cormorant Garamond's DEFAULT figures are old-style (text) figures. Measured in
-   the shipped subset (`public/fonts/cormorant-garamond-latin.woff2`, 1000 upem):
+   the shipped subset (`src/assets/fonts/cormorant-garamond-latin.woff2`, 1000 upem):
 
      glyph        ink top   advance     reads as
      one           386       332         a serifed capital I  ← x-height

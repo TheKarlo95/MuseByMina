@@ -77,6 +77,9 @@ a role rather than reaching for `--gold` directly.
 
 ```
 src/
+  assets/fonts/ 6 variable woff2, latin + latin-ext for Croatian. In `src/`, not
+                `public/`: both the `@font-face` src and the preload resolve through
+                Vite, so they are one URL in dev and in the build (MUSE-35)
   components/   UI, one file each, styles co-located
   data/         hardcoded content waiting on the CMS — schedule.ts today.
                 Marked as placeholder; components take it as a prop with this
@@ -89,7 +92,6 @@ src/
   pages/        thin wrappers over components, one per locale
                 robots.txt.ts + llms.txt.ts; generated, not static
   styles/       globals.css → fonts.css + tokens.css + base.css
-public/fonts/   6 variable woff2, latin + latin-ext for Croatian
 scripts/        a11y, design-system, screenshot and schedule-UX gates
 test/           vitest; builds the site and asserts on dist
 ```

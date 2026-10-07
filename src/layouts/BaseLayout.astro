@@ -9,7 +9,23 @@ import {
   routeKey,
   type Locale,
 } from '../lib/i18n';
-import { rootPath } from '../lib/site';
+/**
+ * The two faces the first paint needs, imported rather than named as a path.
+ *
+ * `?url` hands back whatever URL the build gives the file — base joined, content hash
+ * and all — which is the same URL Vite writes into the `@font-face` `src` in
+ * `src/styles/fonts.css`, because it is the same file going through the same resolver.
+ * That identity is the point (MUSE-35): a preload whose href is not also a `src` is a
+ * second download of a face the page was going to fetch anyway, and it looks exactly
+ * like a working preload from the outside. `test/assets.test.ts` holds the two
+ * together.
+ *
+ * This is also what replaced `rootPath()` here. `rootPath` joins the deploy base
+ * correctly (MUSE-8) but it can only join it to a path someone typed, and the path
+ * someone typed is the thing that went stale.
+ */
+import cormorantLatin from '../assets/fonts/cormorant-garamond-latin.woff2?url';
+import interLatin from '../assets/fonts/inter-400-600-latin.woff2?url';
 import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
 import '../styles/globals.css';
@@ -118,19 +134,19 @@ const skipLabel = locale === 'hr' ? 'Preskoči na sadržaj' : 'Skip to content';
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#420535" />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F7F2EE" />
 
-    {/* `rootPath` joins the deploy base; interpolating `BASE_URL` directly depends on
-        whether it happens to carry a trailing slash, and emits `/MuseByMinafonts/…` when
-        it does not — a preload that 404s on the sub-path deploy (MUSE-8). */}
+    {/* Both hrefs come from the `?url` imports above — see the note there. Never spell
+        one of these out: a hand-written path has to join the deploy base (MUSE-8) and
+        then has to keep agreeing with what `fonts.css` asks for (MUSE-35). */}
     <link
       rel="preload"
-      href={rootPath('fonts/cormorant-garamond-latin.woff2')}
+      href={cormorantLatin}
       as="font"
       type="font/woff2"
       crossorigin="anonymous"
     />
     <link
       rel="preload"
-      href={rootPath('fonts/inter-400-600-latin.woff2')}
+      href={interLatin}
       as="font"
       type="font/woff2"
       crossorigin="anonymous"
