@@ -1,6 +1,7 @@
 import { defineConfig } from 'sanity';
 import { structureTool } from 'sanity/structure';
 
+import { rebuildBadge } from './sanity/badges';
 import { schemaTypes } from './sanity/schemaTypes';
 import { singletonTypes, structure } from './sanity/structure';
 
@@ -61,6 +62,14 @@ export default defineConfig({
   },
 
   document: {
+    // Beside the Publish button, on every document type: when what you just published
+    // will actually be on the site. MUSE-21's AC2 — see `sanity/badges.ts` for why it is
+    // a badge, why it names a time, and why the promise is a duration.
+    //
+    // Appended to whatever Sanity already shows (the published/draft badges), never
+    // replacing it: those say what state the document is in, which is a different
+    // question and not ours to answer.
+    badges: (previous) => [...previous, rebuildBadge],
     // Same rule for the "+" menu and the global create shortcut.
     newDocumentOptions: (items) =>
       items.filter(({ templateId }) => !singletonTypes.has(templateId)),

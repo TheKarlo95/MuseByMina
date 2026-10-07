@@ -338,3 +338,47 @@ env in `.github/workflows/deploy.yml` to `SITE=https://muse.dance` and `BASE=/`,
 
 Pages caps a published site at **1 GB**; CI fails above 900 MB. Media belongs on the Sanity
 CDN and R2, never in the repo.
+
+### How an edit in the Studio reaches the site
+
+The site is static, so publishing in Sanity changes nothing until a build runs. **It runs
+on a schedule** — `20 1,7,13,19` UTC, four times a day, from the `schedule:` trigger on
+`deploy.yml`.
+
+Not a Sanity webhook, deliberately. The webhook route needs a GitHub token stored inside a
+third party, which is the specific property everything else here is arranged to avoid, and
+a studio site that changes a few times a week is not worth buying instant rebuilds with it.
+`workflow_dispatch` forces a rebuild for *us* with no credential at all; it is not a button
+for Mina, because that is the token again.
+
+The interval and what Mina is told are one decision, and `src/lib/rebuild.ts` is where both
+live. `REBUILD_HOURS_UTC` produces the cron, and `MAX_WAIT_HOURS` — six, computed from the
+largest gap between runs — is the ceiling the Studio promises her beside the Publish button
+(`sanity/badges.ts`). The badge offers the next rebuild as a local clock time, computed in
+her browser so it survives a daylight-saving change; the *promise* stays a duration,
+because cron is UTC and a sentence naming 15:20 would be wrong for half the year.
+`test/rebuild.test.ts` parses the workflow, re-derives the firing times independently over
+a year of instants, and fails if the schedule and the promise disagree.
+
+Two failure modes, handled differently:
+
+| What breaks | What happens |
+| --- | --- |
+| Sanity unreachable mid-build | The build retries three times over four minutes, and only for that failure — a missing document or a GROQ typo is not retried |
+| The deploy fails anyway | The `alert` job opens one issue, **assigned to the repository owner**, and comments on it rather than opening a second |
+| The schedule is auto-disabled after 60 days of repository inactivity | `ci.yml`'s `rebuildloop` job fails on the next pull request, naming the re-enable step |
+
+The alert is an assigned issue rather than GitHub's own notification because that
+notification is weaker than it looks: for a scheduled workflow it goes to whoever created
+it, moves to whoever last edited the cron syntax, moves again to whoever re-enabled it, and
+is gated on a per-account Actions preference that has no API and so cannot be checked or
+asserted. This repository's `subscribers_count` is 0 and `GET /subscription` 404s.
+Assignment notifications are "Participating", on by default, and independent of all of
+that.
+
+The 60-day rule is the one case no alert inside the deploy can reach — a disabled workflow
+does not fail, it does not run — and GitHub's documentation promises nothing about telling
+anyone. Keeping the clock alive with synthetic activity was rejected: it rests on an
+undocumented reading of "repository activity" and could not be tested. The workflow's
+`state` field *is* documented, so `ci.yml` reads it instead, from the one workflow here that
+is not scheduled and therefore cannot be disabled itself.

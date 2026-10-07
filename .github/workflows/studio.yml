@@ -40,6 +40,14 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/studio.yml'
+      #   `src/lib/rebuild.ts` is where the rebuild cadence is decided (MUSE-21), and
+      #   `sanity/badges.ts` quotes it to Mina beside the Publish button as a promise about
+      #   when her change appears. It is not schema — it changes no field and no generated
+      #   type, which is why it is here and not in the fingerprint — but a cadence changed
+      #   without the Studio following it leaves her reading last month's deadline, which
+      #   is worse than reading none. The cron in `deploy.yml` is held to the same file by
+      #   `test/rebuild.test.ts`, so the schedule, the promise and the copy move together.
+      - 'src/lib/rebuild.ts'
   # Also runnable by hand, for the first deploy and for recovering from a failed one.
   workflow_dispatch:
 
