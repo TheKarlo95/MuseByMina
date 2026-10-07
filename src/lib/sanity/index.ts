@@ -46,6 +46,36 @@ import {
  *
  * `test/sanity.test.ts` fails if any other file under `src/` imports `@sanity/client` or
  * contains a GROQ query, so "no ad-hoc GROQ in components" is a test, not a convention.
+ *
+ * ---
+ *
+ * **Known hole, decided here, closed by MUSE-20: "the only module a page may import" is
+ * still only a sentence.**
+ *
+ * The guards that exist are about GROQ text and about `@sanity/client`, and a page can
+ * evade both without writing either. `import { runQuery } from '../lib/sanity/client'`
+ * plus `import { FAQS_QUERY } from '../lib/sanity/queries'` is two ordinary imports of
+ * two sibling modules, and it yields raw rows with no decoding at all — so a renamed
+ * field arrives as `undefined` and renders as nothing, which is the exact failure the
+ * decoders exist to turn into a named build error. The build gate passes, the suite
+ * passes, `astro check` passes, because nothing about those two lines is unusual.
+ *
+ * It is not a hole worth closing with runtime machinery, and TypeScript has no
+ * package-private. The decision, so MUSE-20 does not have to re-take it:
+ *
+ *   **MUSE-20 adds a source-level depth check, in the same shape as the guards already
+ *   here: for every file under `src/` that is not itself under `src/lib/sanity/`, an
+ *   import specifier ending in `lib/sanity` is allowed and an import specifier containing
+ *   `lib/sanity/` is a failure.** One assertion, read off the source tree like the others,
+ *   and it names the file and the specifier. `client.ts`, `queries.ts`, `decode.ts` and
+ *   `shape.ts` go on importing each other freely, because the rule is about crossing the
+ *   directory boundary, not about the modules inside it.
+ *
+ * It is written down rather than shipped in MUSE-19 because there is nothing to protect
+ * yet — no page imports this module, so the check would assert over an empty set and the
+ * first real import would be its first exercise. MUSE-20 is where pages arrive, which is
+ * where the check belongs and where it can be proven by mutation. Until then this comment
+ * is the honest statement of what is and is not enforced.
  */
 
 export type {

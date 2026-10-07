@@ -90,6 +90,12 @@ export function sanitySource(): SanitySource {
  * The message names the project, the dataset and the query, because the most likely
  * cause is a build pointed at the wrong dataset, and the second most likely is a GROQ
  * parse error — and neither is identifiable from "fetch failed".
+ *
+ * **Returns undecoded rows, and nothing stops a page calling it.** This is exported for
+ * `./index.ts`, which decodes everything it gets back; importing it from outside
+ * `src/lib/sanity/` buys raw data with silent nulls and no named error. MUSE-20 makes
+ * that an assertion rather than a sentence — see the decision recorded in the header of
+ * `./index.ts`.
  */
 export async function runQuery<T>(
   query: string,

@@ -48,8 +48,14 @@ export default defineCliConfig({
    * here. What it does *not* cover is the schema: that is this repo's, and the workflow
    * is what pushes it. Keeping the two separate is the point — the Studio's framework
    * and the studio's content model have different release cadences.
+   *
+   * Nested under `deployment` because the top-level `autoUpdates` spelling is deprecated
+   * as of `sanity@6`: it still works, but every CLI invocation printed a migration
+   * warning, and a warning nobody can act on is a warning everybody learns to skip.
    */
-  autoUpdates: true,
+  deployment: {
+    autoUpdates: true,
+  },
 
   /**
    * `sanity build` defaults its output to `dist/`, which is Astro's.

@@ -31,6 +31,7 @@ npm run sanity:types   # re-extract the schema and regenerate types — commit t
 npm run sanity:check   # the fast gate `npm run build` runs first
 npm run sanity:read    # every query against the live dataset: OK / EMPTY / BROKEN
 npm run sanity:dev     # the Studio locally, on localhost:3333
+npm run sanity:build   # bundle the Studio into .sanity/studio — what CI runs
 npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
 ```
 
@@ -103,13 +104,28 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   16:9, 4:5, 3:4 and 1:1 (§9), so a hotspot is not a nicety. The shoot direction lives in
   the field *description*, because that is the only instruction Mina actually sees.
 - **A schema change must be regenerated and committed.** `npm run build` runs
-  `scripts/check-sanity.mjs` first, which hashes every schema source and fails if
-  `sanity/schema.json`, `src/lib/sanity/sanity.types.ts` or `sanity/schema.stamp.json` is
-  stale. This exists because **GROQ returns `null` for a field that does not exist rather
-  than erroring** — so a renamed field with stale artefacts type-checks, builds, exits 0
-  and publishes pages with the content silently gone. Four layers catch it: the build
-  gate, the gate's read-contract check, the compile-time assertions in
-  `src/lib/sanity/shape.ts`, and `test/sanity.test.ts`.
+  `scripts/check-sanity.mjs` first, which hashes **every file under `sanity/`** — no
+  extension filter, because an extension allow-list is what made `fields.tsx` invisible —
+  plus `sanity.config.ts`, `sanity.cli.ts`, `src/lib/schedule.ts`, `src/lib/pages.ts` and
+  `src/lib/sanity/queries.ts`. It fails if `sanity/schema.json`,
+  `src/lib/sanity/sanity.types.ts` or `sanity/schema.stamp.json` is stale. This exists
+  because **GROQ returns `null` for a field that does not exist rather than erroring** —
+  so a renamed field with stale artefacts type-checks, builds, exits 0 and publishes pages
+  with the content silently gone. Four layers catch it: the build gate, the gate's
+  read-contract check, the compile-time assertions in `src/lib/sanity/shape.ts`, and
+  `test/sanity.test.ts`. `.github/workflows/studio.yml`'s `paths:` filter has to be the
+  same list, and `test/sanity.test.ts` asserts that rather than a comment asking nicely.
+- **"Fails the build" means `npm run build`, which is three commands.**
+  `sanity:check` → `astro check` → `astro build`. `astro check` is *inside* the script,
+  not a step beside it in CI, because `deploy.yml` runs `npm run build` and nothing else
+  and does not depend on CI — and a field's *type* changing, or a typo in a GROQ
+  projection, is caught by `astro check` alone. README, "What 'a schema mismatch fails the
+  build' means", has the full table.
+- **CI bundles the Studio** (`npm run sanity:build`) on every pull request. `sanity schema
+  extract` and `sanity schema validate` evaluate the schema without bundling it, so both
+  stayed green while the Studio could not be built at all. `styled-components` is in
+  `devDependencies` for that reason — it is a peer dependency of `sanity` and so is
+  installed regardless, but `sanity build` preflights *declarations*, not resolution.
 - **A missing or malformed document fails the build naming itself** — `_id`, type and
   field path — through `src/lib/sanity/decode.ts`. "Unreachable", "empty" and "malformed"
   are three different error types on purpose: the dataset is empty until MUSE-20, so

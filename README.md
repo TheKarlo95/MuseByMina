@@ -37,6 +37,7 @@ npm run sanity:types   # re-extract the schema + regenerate types — commit the
 npm run sanity:check   # the fast staleness gate that `npm run build` runs first
 npm run sanity:read    # every query against the live dataset: OK / EMPTY / BROKEN
 npm run sanity:dev     # the Studio locally, http://localhost:3333
+npm run sanity:build   # bundle the Studio into .sanity/studio — what CI runs
 npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
 ```
 
@@ -219,6 +220,36 @@ generated artefacts:
 ```bash
 npm run sanity:types    # then commit sanity/schema.json, schema.stamp.json and sanity.types.ts
 ```
+
+### What "a schema mismatch fails the build" means
+
+`npm run build` is `sanity:check` → `astro check` → `astro build`, in that order, and all
+three are load-bearing. `.github/workflows/deploy.yml` runs `npm run build` and nothing
+else and does not depend on CI, so that script — not the CI workflow — is the definition
+of what cannot reach production.
+
+| what changed | what stops it |
+|---|---|
+| a schema source edited without regenerating | `sanity:check` — a fingerprint of every file under `sanity/` plus the four app modules the schema is built from |
+| a document type or projected field deleted | `sanity:check` — its read-contract pass over `sanity/schema.json` |
+| a field's *type* changed (`localeString` → `string`) | `astro check`, through `src/lib/sanity/shape.ts` |
+| a typo in a GROQ projection | `astro check`, through the regenerated query types |
+| a level added in `schedule.ts` only, or in the schema only | `astro check`, through `shape.ts`'s mutual-assignability assertions |
+| the Studio made unbuildable | CI's `npm run sanity:build` — see below |
+
+`astro check` is inside the build script for exactly the middle rows: they are invisible
+to the fingerprint, because the schema really was regenerated and the stamp really is
+current — the *shape* is what moved. It costs about nine seconds. CI no longer runs
+`astro check` as a separate step, because the build already has.
+
+The one check that is CI-only is the Studio bundle (`npm run sanity:build`), and that is
+deliberate: a Studio that will not build cannot take the public site down, so failing the
+site's deploy on it would be the wrong trade. It runs on every pull request, which is the
+thing that was missing — `sanity schema extract` and `sanity schema validate` evaluate the
+schema without ever bundling it, so both were green while the Studio could not be built at
+all. `styled-components` is declared in `devDependencies` for that reason: it is a peer
+dependency of `sanity` and therefore present in `node_modules` regardless, but
+`sanity build` preflights *declarations*, not resolution.
 
 ## Deploying
 

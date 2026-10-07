@@ -44,16 +44,55 @@ const GENERATED_TYPES = 'src/lib/sanity/sanity.types.ts';
  * content-versus-structure decision made mechanical: a fourth level added in
  * `schedule.ts` changes the Studio's dropdown and the generated string union, so it has
  * to invalidate the artefacts too.
+ *
+ * The first entry is the whole `sanity/` tree, deliberately coarse. It used to be
+ * `sanity/schemaTypes` walked with an `.endsWith('.ts')` filter, and both halves of that
+ * were holes:
+ *
+ *   - a schema helper at `sanity/schemaTypes/fields.tsx` was invisible to the gate, even
+ *     though it sat in the directory the gate claimed to cover. `.tsx` is an ordinary
+ *     extension for a Sanity schema with a custom input component. This is MUSE-17
+ *     recurring — a guard whose extension allow-list misses a file in its own
+ *     directory — so the allow-list is gone rather than extended;
+ *   - a helper at `sanity/fields.ts` was outside the walked directory entirely. That one
+ *     had teeth: `FAQS_QUERY` orders by `coalesce(order, 999)`, so renaming `order` in an
+ *     unfingerprinted helper silently reorders the whole FAQ page with every check green.
+ *
+ * So: every file under `sanity/`, whatever it is called. A file that is not schema source
+ * costs one spurious regeneration; a file the gate cannot see costs silent data loss.
+ *
+ * That sweep now also picks up `sanity/schema.json`, which is an artefact rather than a
+ * source. Kept deliberately: it means a hand-edited or truncated `schema.json` fails this
+ * gate — the one that `npm run build`, and therefore `deploy.yml`, actually runs — rather
+ * than waiting for CI's slower regenerate-and-diff, which `deploy.yml` does not depend on.
+ * `sanity/schema.stamp.json` is the single exclusion, because it is where the answer is
+ * written (see `STAMP_EXCLUDED`).
  */
 const SOURCES = [
-  { dir: 'sanity/schemaTypes' },
-  { file: 'sanity/structure.ts' },
+  { dir: 'sanity' },
   { file: 'sanity.config.ts' },
   { file: 'sanity.cli.ts' },
   { file: 'src/lib/schedule.ts' },
   { file: 'src/lib/pages.ts' },
   { file: 'src/lib/sanity/queries.ts' },
 ];
+
+/**
+ * The paths `SOURCES` covers, as the globs a GitHub Actions `paths:` filter speaks.
+ *
+ * `.github/workflows/studio.yml` has to list the same set — it redeploys Mina's Studio
+ * when a schema file lands on `main`, and a schema change that does not trigger it leaves
+ * her Studio a schema behind the dataset. The two lists had already drifted while a
+ * comment in each claimed they were the same list, so `test/sanity.test.ts` now asserts
+ * the workflow's filter equals this, plus the studio-only paths named there.
+ */
+export const SOURCE_GLOBS = SOURCES.map(({ dir, file }) => (dir ? `${dir}/**` : file));
+
+/**
+ * The one file under `sanity/` that cannot be fingerprinted: it is where the fingerprint
+ * is written, so hashing it would be hashing the previous run's answer.
+ */
+const STAMP_EXCLUDED = new Set([STAMP_JSON]);
 
 /** The document types and fields the read path cannot work without. */
 const READ_CONTRACT = {
@@ -99,11 +138,21 @@ const READ_CONTRACT = {
   faq: ['question', 'answer'],
 };
 
+/**
+ * Every file under `dir`, recursively, with no extension filter — see `SOURCES`.
+ *
+ * Dot-entries are skipped, and that is the only exclusion. It is a deny-list of OS and
+ * editor droppings (`.DS_Store`, `.vscode/`), not an allow-list of source extensions: the
+ * failure mode of a deny-list is a build that stops on a file it should have ignored,
+ * which is loud and takes a second to fix. The failure mode of an allow-list is a schema
+ * file nobody is watching, which is what put this comment here.
+ */
 function walk(dir) {
   return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => !entry.name.startsWith('.'))
     .flatMap((entry) => {
       const full = join(dir, entry.name);
-      return entry.isDirectory() ? walk(full) : full.endsWith('.ts') ? [full] : [];
+      return entry.isDirectory() ? walk(full) : [full];
     })
     .sort();
 }
@@ -119,6 +168,7 @@ export function fingerprint() {
   const hashes = {};
   for (const file of files) {
     const key = relative(ROOT, file).replace(/\\/g, '/');
+    if (STAMP_EXCLUDED.has(key)) continue;
     hashes[key] = createHash('sha256').update(readFileSync(file)).digest('hex').slice(0, 16);
   }
   return hashes;

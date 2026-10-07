@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "astro dev",
-    "build": "node scripts/check-sanity.mjs && astro build",
+    "build": "node scripts/check-sanity.mjs && astro check && astro build",
     "preview": "astro preview",
     "typecheck": "astro check",
     "test": "vitest run",
@@ -20,6 +20,7 @@
     "sanity:check": "node scripts/check-sanity.mjs",
     "sanity:read": "node scripts/sanity-read-check.mjs",
     "sanity:dev": "sanity dev",
+    "sanity:build": "sanity build .sanity/studio --yes",
     "sanity:deploy": "sanity deploy .sanity/studio --yes"
   },
   "dependencies": {
@@ -39,6 +40,7 @@
     "@types/node": "^26.6.4",
     "playwright": "^1.63.0",
     "sanity": "^6.18.0",
+    "styled-components": "^6.5.3",
     "typescript": "^6.0.3",
     "vitest": "^5.0.3",
     "wait-on": "^9.5.1"

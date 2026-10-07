@@ -18,13 +18,26 @@ on:
     paths:
       # Everything the Studio's schema is built from, including the two app modules the
       # schema imports its closed sets out of — levels, styles, weekdays, the route list.
-      # `scripts/check-sanity.mjs` hashes the same list; keep them together.
-      - 'sanity/schemaTypes/**'
-      - 'sanity/structure.ts'
+      #
+      # The first six entries are `SOURCE_GLOBS` in `scripts/check-sanity.mjs`, in order.
+      # A comment used to say "keep them together" and they had already drifted — the
+      # fingerprint covered `src/lib/sanity/queries.ts` and this filter did not, and this
+      # filter covered `sanity/structure.ts` as a single file while the fingerprint walked
+      # only `.ts` under `schemaTypes/`. So `test/sanity.test.ts` now parses this block and
+      # asserts it equals `SOURCE_GLOBS` plus the studio-only paths below. Adding a schema
+      # source in one place and not the other is a test failure, not a comment nobody read.
+      - 'sanity/**'
       - 'sanity.config.ts'
       - 'sanity.cli.ts'
       - 'src/lib/schedule.ts'
       - 'src/lib/pages.ts'
+      - 'src/lib/sanity/queries.ts'
+      # Studio-only, and not part of the schema fingerprint:
+      #   `package.json` / `package-lock.json` decide which `sanity` and which
+      #   `styled-components` the bundle is built from, and a *declaration* missing from
+      #   `package.json` is what made `sanity build` fail on this ticket's first pass;
+      #   this workflow file is itself the deploy.
+      - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/studio.yml'
   # Also runnable by hand, for the first deploy and for recovering from a failed one.

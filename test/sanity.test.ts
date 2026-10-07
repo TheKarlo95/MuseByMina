@@ -4,6 +4,9 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+// The build gate itself, so `npm test` asserts properties of the gate rather than
+// restating them. `SOURCE_GLOBS` is the list `.github/workflows/studio.yml` has to match.
+import { fingerprint, SOURCE_GLOBS } from '../scripts/check-sanity.mjs';
 import { schemaTypes, SINGLETON_TYPES } from '../sanity/schemaTypes';
 import {
   LEVELS,
@@ -52,6 +55,17 @@ import { SCHEMA_ASSERTIONS } from '../src/lib/sanity/shape';
  */
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+/** Every file under `dir`, recursively, with no extension filter. */
+function walkTree(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => !entry.name.startsWith('.'))
+    .flatMap((entry) => {
+      const full = join(dir, entry.name);
+      return entry.isDirectory() ? walkTree(full) : [full];
+    })
+    .sort();
+}
 
 /** Document types the ticket requires. Spelled out, so dropping one is a failure. */
 const REQUIRED_DOCUMENT_TYPES = [
@@ -350,10 +364,35 @@ describe('the closed sets stay in code, not in the CMS', () => {
      *     names), and a text field invites the first edit that breaks it;
      *   - the trial form's copy — the browser needs the validation messages at runtime;
      *   - time and currency formatting — a field for one is a way to publish `25:00`.
+     *
+     * Matched as **substrings of the field name**, not as whole names. It used to be
+     * `expect(fieldNames).not.toContain('prerequisite')`, which is an equality test
+     * dressed as a containment test: a field literally named `prerequisite` failed, and
+     * `levelPrerequisite` — the plain camelCase of `LEVEL_PREREQUISITE`, the constant this
+     * rule exists to protect — passed, as did `prerequisites`, `prerequisiteNote`,
+     * `formCopyText`, `currencyFormat` and `startTimeFormat`. Nobody would have been
+     * evading it; they would have named the field the obvious thing and the guard would
+     * have waved it through.
+     *
+     * Substring rather than regex-with-word-boundaries on purpose: these are forbidden
+     * *concepts*, and any field whose name contains one is a field that is about one.
+     * A false positive here is a conversation about whether the concept belongs in the
+     * CMS, which is exactly the conversation this test is for.
      */
-    const fieldNames = allFields().map(({ field }) => field.name.toLowerCase());
+    const fieldNames = allFields().map(({ path, field }) => ({
+      path,
+      lowered: field.name.toLowerCase(),
+    }));
     for (const forbidden of ['prerequisite', 'prereq', 'formcopy', 'timeformat', 'currency']) {
-      expect(fieldNames, forbidden).not.toContain(forbidden);
+      const offenders = fieldNames
+        .filter(({ lowered }) => lowered.includes(forbidden))
+        .map(({ path }) => path);
+      expect(
+        offenders,
+        `\`${forbidden}\` is a rule in code, not a CMS field — but ${offenders.join(', ')} ` +
+          `${offenders.length === 1 ? 'is' : 'are'} named after it. See the comment above ` +
+          `this assertion for why each of these stays out of Sanity.`,
+      ).toEqual([]);
     }
     // The price is a number; the `25 €` / `€25` split of design system §10 is the page's.
     const price = typeNamed('pricingTier').fields?.find((f) => f.name === 'priceEur');
@@ -411,7 +450,39 @@ describe('every query goes through one module', () => {
   });
 
   it('never puts the client where a browser could reach it', () => {
-    // A `<script>` in an Astro component is bundled and shipped. Frontmatter is not.
+    /**
+     * A `<script>` in an Astro component is bundled and shipped. Frontmatter is not.
+     *
+     * **This assertion is deliberately too strict, and MUSE-20 has to replace it rather
+     * than delete it.** As written it forbids the string `lib/sanity` anywhere in a
+     * `.astro` file, which is correct today only because no page reads Sanity yet. The
+     * moment a page does the intended thing — `import { getFaqs } from
+     * '../lib/sanity'` in frontmatter — this fails, while `test/nojs.test.ts` stays
+     * green. So the temptation will be to delete the line, and deleting it removes the
+     * only *source-level* guard against the one mistake that actually ships a CMS client
+     * to a browser.
+     *
+     * That mistake is not hypothetical and it is not caught by counting files: a
+     * `<script>` importing the Sanity client gets **inlined into the HTML** by Astro, so
+     * `dist` still has zero `.js` files and the only thing that notices is
+     * `test/nojs.test.ts`'s marker string in the markup. File-count guards are blind to
+     * it by construction.
+     *
+     * The decision, so MUSE-20 inherits it instead of re-litigating it:
+     *
+     *   **Split the file at the frontmatter fence and assert on the halves separately.**
+     *   Everything above the closing `---` is frontmatter, which Astro evaluates at build
+     *   time on the server and never ships — `lib/sanity` is allowed there, and that is
+     *   the intended MUSE-20 pattern. Everything below it is markup, and `lib/sanity` in
+     *   any `<script>` region there is a failure that names the file. A component with no
+     *   frontmatter fence is all markup, so the whole file is held to the strict rule.
+     *
+     * Three layers then stand where one stands now, and they fail at different times:
+     * this one at `npm test` naming the component, `test/nojs.test.ts`'s `.js` file count
+     * on the built output, and `test/nojs.test.ts`'s CMS marker string in the HTML — which
+     * is the only one that catches the inlined case, and is why none of the three is
+     * redundant.
+     */
     for (const file of sources().filter((f) => f.endsWith('.astro'))) {
       expect(readFileSync(join(ROOT, file), 'utf8'), file).not.toContain('lib/sanity');
     }
@@ -651,11 +722,105 @@ describe('the generated types cannot go stale unnoticed', () => {
     }
   });
 
+  it('fingerprints every file under `sanity/`, whatever it is called', () => {
+    /**
+     * The gate used to walk `sanity/schemaTypes` filtering `.endsWith('.ts')`, and both
+     * halves of that leaked: `sanity/schemaTypes/fields.tsx` sat in the covered directory
+     * and was invisible, and `sanity/fields.ts` was outside the covered directory and was
+     * invisible. The second one mattered — `FAQS_QUERY` orders by `coalesce(order, 999)`,
+     * so renaming `order` in an unfingerprinted helper reorders the FAQ page silently.
+     *
+     * Asserted as a property of the walk rather than by listing the two filenames: what
+     * is wrong with an extension allow-list is that it is a list, so the fix cannot be a
+     * longer list. Every file under `sanity/` is hashed except the stamp itself.
+     */
+    const hashed = new Set(Object.keys(fingerprint()));
+    const onDisk = walkTree(join(ROOT, 'sanity'))
+      .map((file) => relative(ROOT, file).replace(/\\/g, '/'))
+      .filter((file) => file !== 'sanity/schema.stamp.json');
+
+    expect(onDisk.length).toBeGreaterThan(5);
+    for (const file of onDisk) expect(hashed, file).toContain(file);
+
+    // And the extensions present are not all `.ts` — if they ever were, this test would
+    // be passing for the wrong reason and would stop proving anything.
+    expect(new Set(onDisk.map((file) => file.replace(/^.*\./, ''))).size).toBeGreaterThan(1);
+  });
+
   it('redeploys the Studio when the schema changes', () => {
     // A Studio one schema behind the dataset shows Mina fields that no longer exist and
     // hides ones that do, which is worse than a Studio that is briefly unavailable.
     const workflow = readFileSync(join(ROOT, '.github/workflows/studio.yml'), 'utf8');
-    expect(workflow).toContain('sanity/schemaTypes/**');
     expect(workflow).toContain('sanity:deploy');
+  });
+
+  it('triggers that redeploy on exactly the files the fingerprint covers', () => {
+    /**
+     * `studio.yml`'s `paths:` filter and the gate's `SOURCES` are meant to be the same
+     * list, and a comment in each said so while they had already drifted in both
+     * directions. Drift is the expensive kind of bug here: a schema source the workflow
+     * does not watch leaves Mina's Studio a schema behind the dataset, showing her fields
+     * that no longer exist and hiding ones that do, with nothing red anywhere.
+     *
+     * So the comment is replaced by this. `SOURCE_GLOBS` is derived from `SOURCES`, and
+     * the workflow may add paths that affect the *deploy* without affecting the schema
+     * fingerprint — the manifests that decide which `sanity` and which
+     * `styled-components` get bundled, and the workflow file itself — but nothing else,
+     * and it may not omit anything.
+     */
+    const STUDIO_ONLY = ['package.json', 'package-lock.json', '.github/workflows/studio.yml'];
+
+    const workflow = readFileSync(join(ROOT, '.github/workflows/studio.yml'), 'utf8');
+    const filter = workflow.slice(
+      workflow.indexOf('    paths:'),
+      workflow.indexOf('  workflow_dispatch:'),
+    );
+    const listed = [...filter.matchAll(/^\s+- '(.+)'$/gm)].map(([, path]) => path);
+
+    expect(listed).toEqual([...SOURCE_GLOBS, ...STUDIO_ONLY]);
+  });
+
+  it('runs the type checker inside the build, not only beside it in CI', () => {
+    /**
+     * A field *type* change (`localeString` → `string`) and a typo in a GROQ projection
+     * are both invisible to `scripts/check-sanity.mjs` — the schema still has the field,
+     * and the stamp is current because the source really was regenerated. `astro check`
+     * is the layer that sees them, through `src/lib/sanity/shape.ts`.
+     *
+     * It therefore has to be in `npm run build`, because `.github/workflows/deploy.yml`
+     * runs `npm run build` and nothing else and does not depend on CI. A check that lives
+     * only in CI is not on the path to production.
+     */
+    const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+    expect(pkg.scripts.build).toContain('astro check');
+
+    const deploy = readFileSync(join(ROOT, '.github/workflows/deploy.yml'), 'utf8');
+    expect(deploy).toContain('npm run build');
+  });
+
+  it('can actually bundle the Studio, and says so in CI', () => {
+    /**
+     * `styled-components` is a peer dependency of `sanity`, so it is in `node_modules`
+     * whether or not this project declares it — and `sanity build` preflights
+     * *declarations*, not resolution. Undeclared, the Studio could not be bundled at all
+     * while `sanity schema extract`, `sanity schema validate`, `astro check` and this
+     * whole suite stayed green, because none of them bundle it. Mina would have got no
+     * Studio and the only red would have been on `main`, after merge.
+     *
+     * Two assertions, because the declaration alone is a thing that can be dropped again:
+     * the dependency is declared, and CI runs a real `sanity build` on every pull request.
+     */
+    const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+    expect(
+      pkg.devDependencies['styled-components'],
+      '`sanity build` fails its declaration preflight without this, even though the ' +
+        'package is installed as a peer dependency of `sanity`.',
+    ).toBeTruthy();
+    expect(pkg.scripts['sanity:build']).toContain('.sanity/studio');
+
+    const ci = readFileSync(join(ROOT, '.github/workflows/ci.yml'), 'utf8');
+    expect(ci, 'CI must bundle the Studio, not just evaluate its schema.').toContain(
+      'npm run sanity:build',
+    );
   });
 });
