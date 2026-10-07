@@ -27,6 +27,11 @@ import { LEVELS, LEVEL_NAME, type Level } from './schedule';
  * validates and is still completable by keyboard; a submit reports that it could not
  * be delivered and points at the studio inbox. A form that silently swallowed a trial
  * request would be strictly worse than one that says it failed.
+ *
+ * It is **never** rendered as the `<form>`'s `action` (MUSE-15). The form submits by
+ * `fetch` only, so this value is configuration for a script rather than a declared
+ * navigation target, and the no-JavaScript path does not depend on it being set or on
+ * what the provider does with a non-AJAX POST. See `TrialForm.astro`.
  */
 export const FORM_ENDPOINT: string = (import.meta.env.PUBLIC_FORM_ENDPOINT ?? '').trim();
 
@@ -119,14 +124,49 @@ export interface FormCopy {
   sentTitle: string;
   sentBody: string;
   failTitle: string;
-  /** Ends in a colon: the studio email address follows it as a link. */
+  /**
+   * The one line every failure the visitor cannot act on gets — a misconfigured
+   * endpoint, a 500, a CORS rejection, a provider that has gone away (MUSE-15).
+   *
+   * Deliberately generic, and deliberately the *only* thing said about the cause. The
+   * block used to end with `Error.message`, so a Croatian visitor read three localised
+   * sentences and then `PUBLIC_FORM_ENDPOINT is not configured`. Enumerating statuses
+   * here would be the same mistake with better manners: "error 500" is not information
+   * a visitor can use, and it is not translatable prose either.
+   *
+   * Ends in a colon: the studio email address follows it as a link.
+   */
   failBody: string;
+  /**
+   * The one failure the visitor *can* do something about: their network is down.
+   *
+   * Split from `failBody` because the actions differ — "check your connection and send
+   * again" is useful advice exactly once, and useless noise for a 500. The signal is
+   * `navigator.onLine === false`, which is the only one that reliably means this; a
+   * fetch `TypeError` also covers CORS and a dead provider.
+   *
+   * Ends in a colon: the studio email address follows it as a link.
+   */
+  failOffline: string;
   /** What happens to the data — GDPR Art. 13, in one sentence, beside the fields. */
   privacy: string;
   privacyLink: string;
   honeypotLabel: string;
-  /** Ends in a colon: the studio email address follows it as a link. */
+  /**
+   * What a visitor without JavaScript is told, and the only thing they are offered.
+   *
+   * It used to say the confirmation would appear on the form service's own page, which
+   * was false as shipped: the form had no `action`, so the native POST went to the page
+   * itself and GitHub Pages answered `405 Not Allowed` with everything typed thrown away
+   * (MUSE-15). The form is now not shown at all without JavaScript — see the
+   * `scripting: none` rule in `TrialForm.astro` — so this copy has to be the whole
+   * alternative rather than a footnote to a form.
+   *
+   * Ends in a colon: the studio email address follows it as a link.
+   */
   noscript: string;
+  /** What to put in that email, so the first reply can already offer a time. */
+  noscriptAsk: string;
 }
 
 export const FORM_COPY: Record<Locale, FormCopy> = {
@@ -165,12 +205,16 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
     failTitle: 'Prijava nije poslana.',
     failBody:
       'Tvoji odgovori su ostali u obrascu, pa možeš pokušati ponovno. Ako i dalje ne ide, piši nam na:',
+    failOffline:
+      'Izgleda da trenutno nema internetske veze. Tvoji odgovori su ostali u obrascu — provjeri vezu i pošalji ponovno. Možeš nam i pisati na:',
     privacy:
       'Ime, e-mail i broj telefona koristimo samo da ti odgovorimo i dogovorimo termin. Ne šaljemo newsletter i ne dijelimo ih ni s kim osim s uslugom koja prenosi obrazac.',
     privacyLink: 'Izjava o privatnosti',
     honeypotLabel: 'Ostavi ovo polje prazno',
     noscript:
-      'Bez JavaScripta potvrda se prikazuje na stranici usluge koja prenosi obrazac, a ne ovdje. Možeš nam i pisati na:',
+      'Bez JavaScripta ovaj se obrazac ne može poslati, pa ga ovdje i ne prikazujemo. Prijavu nam pošalji e-mailom na:',
+    noscriptAsk:
+      'Napiši ime, razinu ako je već znaš i kad ti otprilike odgovara. Odgovaramo u roku od jednog radnog dana.',
   },
   en: {
     formLabel: 'Trial class request',
@@ -207,12 +251,16 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
     failTitle: 'That did not send.',
     failBody:
       'Your answers are still in the form, so you can try again. If it still will not go through, write to us at:',
+    failOffline:
+      'You appear to be offline. Your answers are still in the form — check your connection and send again. You can also write to us at:',
     privacy:
       'We use your name, email and phone only to reply and arrange a time. No newsletter, and no sharing with anyone beyond the service that delivers the form.',
     privacyLink: 'Privacy notice',
     honeypotLabel: 'Leave this field empty',
     noscript:
-      'Without JavaScript the confirmation appears on the form service’s own page rather than here. You can also write to us at:',
+      'Without JavaScript this form cannot be sent, so we do not show it here. Send your request by email instead, to:',
+    noscriptAsk:
+      'Tell us your name, your level if you already know it, and roughly when suits you. We reply within one working day.',
   },
 };
 
