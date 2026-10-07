@@ -639,11 +639,17 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
     try {
       expect(await storedLang(page)).toBe(null);
 
-      const opened = context.waitForEvent('page');
+      const opened = context.waitForEvent('page', { timeout: 15_000 });
       await page.locator(switchTo('hr')).click({ button: 'middle' });
       const tab = await opened;
       await tab.waitForLoadState('load');
-      await tab.waitForTimeout(200);
+      // Wait for the condition, not a duration. The destination runs a blocking inline
+      // script that may `location.replace` and then writes the choice; a fixed sleep is
+      // long enough on a quiet laptop and not on a loaded CI runner, which is exactly
+      // how this timed out at 30s in CI while passing in 1.2s locally.
+      await tab.waitForFunction(() => localStorage.getItem('muse-lang') !== null, null, {
+        timeout: 15_000,
+      });
 
       // Croatian, not bounced to `/en/` by the homepage redirect.
       expect(tab.url()).toBe(urlFor('/', `?${LANG_PARAM}=hr${TRIAL}`));
@@ -660,11 +666,17 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
       locale: CROATIAN_LOCALE,
     });
     try {
-      const opened = context.waitForEvent('page');
+      const opened = context.waitForEvent('page', { timeout: 15_000 });
       await page.locator(switchTo('en')).click({ button: 'middle' });
       const tab = await opened;
       await tab.waitForLoadState('load');
-      await tab.waitForTimeout(200);
+      // Wait for the condition, not a duration. The destination runs a blocking inline
+      // script that may `location.replace` and then writes the choice; a fixed sleep is
+      // long enough on a quiet laptop and not on a loaded CI runner, which is exactly
+      // how this timed out at 30s in CI while passing in 1.2s locally.
+      await tab.waitForFunction(() => localStorage.getItem('muse-lang') !== null, null, {
+        timeout: 15_000,
+      });
 
       expect(tab.url()).toBe(urlFor('/en', `?${LANG_PARAM}=en${TRIAL}`));
       expect(await tab.getAttribute('html', 'lang')).toBe('en');
