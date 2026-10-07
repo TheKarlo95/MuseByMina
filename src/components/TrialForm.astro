@@ -20,10 +20,31 @@ import { getSiteSettings } from '../lib/sanity';
  * the moment focus moves — none of which is acceptable on the page that decides whether
  * someone turns up to class.
  *
- * Progressive enhancement: the `<form>` has a real `action`/`method`, so with JavaScript
- * off it still posts and the provider shows its own confirmation. The in-page
- * confirmation, the inline errors and the honeypot short-circuit are all the enhanced
- * path. See the `<noscript>` note for what a visitor without JS is told.
+ * **Without JavaScript the form is not shown at all** (MUSE-15). It used to carry
+ * `method="post"` with an `action` that was empty whenever the endpoint was unset — which
+ * is how the site ships, MUSE-12 being parked — so a submit posted to the page itself and
+ * GitHub Pages answered `405 Not Allowed`: an unstyled server page, every answer thrown
+ * away, and the visitor off the site. The `<noscript>` text meanwhile promised a
+ * confirmation on the provider's own page, which never happened.
+ *
+ * Two things replace that, and both are deliberate:
+ *
+ *   - `method="dialog"`. A form whose method is `dialog` and which has no ancestor
+ *     `<dialog>` **aborts its own submission** per the HTML form-submission algorithm —
+ *     after firing `submit`, so the enhanced path below is untouched. So there is no
+ *     native navigation to abort, no POST for a static host to reject, and the 405 is
+ *     structurally unreachable rather than merely unlikely. It does not depend on the
+ *     stylesheet loading, on an endpoint being configured, or on what a provider does
+ *     with a non-AJAX POST — which is the one thing nobody can verify from here while
+ *     there is no provider configured.
+ *   - `@media (scripting: none)` hides the form and the `<noscript>` block offers the
+ *     studio inbox instead, because a form that cannot be sent should not be filled in.
+ *     If that media feature is unsupported the form stays visible and its submit button
+ *     does nothing — still no 405, still every answer on screen, and the `<noscript>`
+ *     text still says where to write.
+ *
+ * The in-page confirmation, the inline errors and the honeypot short-circuit are the
+ * enhanced path and always were.
  *
  * The copy lives in `src/lib/forms.ts` and reaches the browser as `data-msg-*`
  * attributes: that keeps the `<script>` locale-agnostic (so it stays bundled and
@@ -50,14 +71,14 @@ const privacyHref = localeUrl('/privacy', locale);
     class="form"
     data-trial-form
     aria-label={copy.formLabel}
-    method="post"
-    action={FORM_ENDPOINT || undefined}
+    method="dialog"
     data-endpoint={FORM_ENDPOINT}
     data-msg-invalid={copy.invalid}
     data-msg-sending={copy.sending}
     data-msg-submit={copy.submit}
     data-msg-fail-title={copy.failTitle}
     data-msg-fail-body={copy.failBody}
+    data-msg-fail-offline={copy.failOffline}
     novalidate
   >
     {/*
@@ -213,11 +234,16 @@ const privacyHref = localeUrl('/privacy', locale);
       <div>
         <p class="statusTitle" data-status-title></p>
         <p class="statusText" data-status-body hidden></p>
+        {/*
+          The way out that does not depend on the thing that just broke. It is the only
+          thing said about the cause beyond the localised line above: what *technically*
+          failed goes to the console (MUSE-15), because a variable name or an HTTP status
+          is not an explanation in any language — and it was rendered here in English on
+          the Croatian page, the one untranslated string on the site.
+        */}
         <p class="statusMail" data-fail-mail hidden>
           <a href={mailto}>{settings.email}</a>
         </p>
-        {/* What actually failed. "Something went wrong" is not an explanation. */}
-        <p class="statusDetail" data-fail-detail hidden></p>
       </div>
     </div>
   </form>
@@ -244,11 +270,17 @@ const privacyHref = localeUrl('/privacy', locale);
     <p class="sentBody">{copy.sentBody}</p>
   </div>
 
+  {/*
+    The whole alternative, not a footnote to a form — the form above is hidden when
+    scripting is off. It promises nothing that does not happen: an address that works,
+    and what to put in the message.
+  */}
   <noscript>
     <p class="noscript">
       {copy.noscript}{' '}
       <a class="privacyLink" href={mailto}>{settings.email}</a>
     </p>
+    <p class="noscript">{copy.noscriptAsk}</p>
   </noscript>
 </div>
 
@@ -274,7 +306,6 @@ const privacyHref = localeUrl('/privacy', locale);
     const status = form.querySelector<HTMLElement>('[data-form-status]');
     const statusTitle = form.querySelector<HTMLElement>('[data-status-title]');
     const statusBody = form.querySelector<HTMLElement>('[data-status-body]');
-    const statusDetail = form.querySelector<HTMLElement>('[data-fail-detail]');
     const statusMail = form.querySelector<HTMLElement>('[data-fail-mail]');
 
     if (!sent || !submit || !submitLabel || !status || !statusTitle) continue;
@@ -337,21 +368,12 @@ const privacyHref = localeUrl('/privacy', locale);
      * Hidden first, then shown: `role="alert"` only announces on a change, and a second
      * identical failure has to be announced too.
      */
-    const showStatus = (
-      title: string,
-      body?: string,
-      detail?: string,
-      offerEmail = false,
-    ): void => {
+    const showStatus = (title: string, body?: string, offerEmail = false): void => {
       status.hidden = true;
       statusTitle.textContent = title;
       if (statusBody) {
         statusBody.textContent = body ?? '';
         statusBody.hidden = !body;
-      }
-      if (statusDetail) {
-        statusDetail.textContent = detail ?? '';
-        statusDetail.hidden = !detail;
       }
       if (statusMail) statusMail.hidden = !offerEmail;
       status.hidden = false;
@@ -416,11 +438,34 @@ const privacyHref = localeUrl('/privacy', locale);
         }
         showSent();
       } catch (error) {
+        /**
+         * The diagnostic goes to the console and nowhere else (MUSE-15).
+         *
+         * Whatever is thrown above — a missing endpoint, a non-2xx status, a CORS
+         * rejection, a dropped socket — its message is an English string written for
+         * whoever is reading a stack trace. Rendering it appended `PUBLIC_FORM_ENDPOINT
+         * is not configured` to three localised sentences on the Croatian page. It is
+         * still logged, in full and unwrapped, so the browser keeps the stack with it.
+         */
+        console.error('[trial form] submission failed', error);
+
+        /**
+         * One thing the visitor can act on, everything else in one generic line.
+         *
+         * `navigator.onLine === false` is the only signal that reliably means "your
+         * network is down": a fetch `TypeError` is equally what a CORS rejection and a
+         * dead provider look like, and telling someone to check a connection that is
+         * fine is worse than saying nothing. `onLine === true` promises nothing, which
+         * is why it is only ever read in the negative.
+         */
+        const offline = navigator.onLine === false;
+
         // Nothing is cleared: every answer is still in the form, ready for a retry.
         showStatus(
           form.dataset.msgFailTitle ?? '',
-          form.dataset.msgFailBody ?? '',
-          error instanceof Error ? error.message : String(error),
+          offline
+            ? (form.dataset.msgFailOffline ?? '')
+            : (form.dataset.msgFailBody ?? ''),
           true,
         );
       } finally {
@@ -456,7 +501,6 @@ const privacyHref = localeUrl('/privacy', locale);
   .error[hidden],
   .sent[hidden],
   .statusText[hidden],
-  .statusDetail[hidden],
   .statusMail[hidden] {
     display: none;
   }
@@ -465,6 +509,7 @@ const privacyHref = localeUrl('/privacy', locale);
     margin-top: var(--space-7);
     max-width: 680px;
   }
+
 
   .form {
     display: grid;
@@ -673,15 +718,6 @@ const privacyHref = localeUrl('/privacy', locale);
   .statusMail a {
     color: var(--accent);
   }
-  .statusDetail {
-    margin-top: var(--space-3);
-    font-family: var(--font-label);
-    font-size: 0.6875rem;
-    letter-spacing: 0.12em;
-    line-height: 1.4;
-    color: var(--text-subtle);
-  }
-
   .sent {
     display: grid;
     justify-items: start;
@@ -705,10 +741,34 @@ const privacyHref = localeUrl('/privacy', locale);
     color: var(--text-muted);
   }
 
+  /* MUSE-15 — a form that cannot be sent is not offered.
+     `scripting: none` is the media query for "this document has no scripting", so the
+     fields are hidden and the `<noscript>` block is the whole alternative: an address
+     that works, rather than a submit button that cannot.
+
+     It has to sit *after* `.form { display: grid }` and not beside the `[hidden]` rules
+     at the top of this block. Both selectors end up at the same specificity once Astro
+     has added its scope attribute, so source order decides — and ordered the other way
+     this rule is overridden, the form stays on screen with JavaScript off, and the only
+     symptom is a test failure that reads like the media feature is unsupported.
+
+     Nothing else depends on it: `method="dialog"` is what makes the native POST, and
+     the 405 it used to produce, impossible. An engine without the feature therefore
+     degrades to a visible form whose submit does nothing — not to a lost submission. */
+  @media (scripting: none) {
+    .form {
+      display: none;
+    }
+  }
+
   .noscript {
     margin-top: var(--space-5);
     font-size: 0.875rem;
     line-height: 1.6;
     color: var(--text-muted);
+    max-width: 62ch;
+  }
+  .noscript + .noscript {
+    margin-top: var(--space-3);
   }
 </style>
