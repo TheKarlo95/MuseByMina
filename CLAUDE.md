@@ -32,7 +32,8 @@ Header and footer sit on a band that is plum-ink in *both* themes, so they use t
 ## Commands
 
 ```bash
-npm run dev        # localhost:4321/MuseByMina/
+npm run dev        # localhost:4321/MuseByMina/ — fetches content live
+MUSE_CONTENT_FIXTURE=content/seed.ndjson npm run dev   # …or from the seed, offline
 npm run build
 npm run preview    # dist, served the way Pages serves it — not `astro preview` (MUSE-52)
 npm run typecheck  # astro check
@@ -165,6 +166,35 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   and a daemon cannot be torn down), and strip `VITEST` from the child env — Astro's
   dev-server plugin returns early when it is set, so the server starts, greets you, and
   answers every route with `Cannot GET`.
+
+  **A green dev-server suite on your machine is not evidence about CI** (MUSE-47). The same
+  agent detection that auto-backgrounds the server also switches Astro to **JSON** log
+  lines; a runner has no agent markers in its environment and gets the ANSI banner written
+  for a human. So the output `astroDev()` reads is a *different format* locally and in CI —
+  deterministically, not as a race. MUSE-47 shipped a suite that was green here and failed
+  there because `DevServer.base` was `new URL(greeting).pathname` and the character after
+  the URL in the ANSI form is a colour reset, which a class excluding whitespace, quotes
+  and backslashes does not exclude: the base came out `/MuseByMina/%1B[31m/`, every page
+  404ed, and the dev server's own 404 line re-coloured the terminal while printing the
+  path, so the symptom read as `//schedule/`. The JSON form put a literal backslash there,
+  which the class already had — for an unrelated reason.
+  To reproduce CI locally, unset `CLAUDECODE`, `AI_AGENT` and `CLAUDE_CODE_*` for the run.
+
+  Two rules came out of it. **The base is configuration, never something to discover from
+  a server**: `astroDev()` takes it from `astro.config.mjs` and only *cross-checks* the
+  greeting against it, so a disagreement is one named error instead of every page 404ing.
+  The **origin** is the one thing only the server knows, because the port is negotiated —
+  and the `/` required after `\d+` in `DEV_ORIGIN` is load-bearing, since stdout is a pipe
+  and a chunk can split between two digits of a port number.
+
+  Note what MUSE-48's landing assertion cannot do for you here: it compares the pathname
+  it *asked for* against the one it landed on, so it catches a redirect and not a URL that
+  was wrong before it was requested. `astro dev` serves `404.astro` at the bad path with no
+  redirect, and that page carries the same six faces and two preloads — so
+  `test/fonts.test.ts` measured the error page in all three environments and stayed green.
+  A browser check needs something from the page's own markup saying which page it is;
+  `test/devcontent.test.ts` compares each response's `<link rel="canonical">` against the
+  path it requested, which the 404 page cannot satisfy because it declares none.
 - **Page URLs end in a slash.** `trailingSlash: 'always'` + `build.format: 'directory'`,
   so `dist/en/index.html` is served at `/en/` and `/en` 301s to it. Build hrefs with
   `localeUrl()` (`src/lib/i18n.ts`) and nothing else — it is the single place the slash is
@@ -196,7 +226,8 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   file writes an `application/ld+json` tag, because two emission sites are two answers to
   "does the markup agree with the page". It holds **no** studio details of its own — it
   takes the same memoised `getSiteSettings()` promise `Footer.astro` awaits, so the block
-  and the visible page cannot disagree by construction. The suite compares them field by
+  and the visible page cannot disagree by construction (in a build; under a dev server
+  that is two queries — MUSE-47). The suite compares them field by
   field anyway (street and city out of the `<address>`, the address out of the `mailto:`,
   `sameAs` against the `rel="me"` links — the same claim in two syntaxes) and then
   rebuilds the site from an edited dataset and demands both moved: that last assertion is
@@ -455,6 +486,51 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   drops `drafts.` documents, because `perspective: 'published'` does and a seed refreshed
   with `sanity dataset export` carries drafts — otherwise the fixture sees a page the
   deploy cannot.
+- **A dev server re-reads content per request; a build reads once per reader** (MUSE-47).
+  „Each reader is memoised for the life of the build" was read as a property of the
+  module, and a dev server is also one process that lives for days: measured, three
+  reloads of `/schedule/` issued `PAGES_QUERY` once, `SITE_SETTINGS_QUERY` once and
+  `SCHEDULE_QUERY` three times, so the timetable followed the Studio and the `<title>`,
+  the footer and the JSON-LD did not. *Partly* fresh is what reads as „my change didn't
+  save". Both caches are per-build now — `perBuild` in `src/lib/sanity/index.ts` and
+  `dataset()` in `fixture.ts`, which froze everything on its own — and the `[content]`
+  line names which regime is in force, which is how `test/devcontent.test.ts` asserts it
+  off a real `astro build` and a real `astro dev`. One dev-only cost, documented rather
+  than fixed: the footer and `structured-data.ts` are then two `SITE_SETTINGS_QUERY`
+  calls per render rather than one shared promise.
+
+  **Anything that logs from inside a memoised reader now needs to say which it meant.**
+  MUSE-46's inert-`page`-document warning sat in `pagesByRoute`, where "warn when it
+  happens" and "warn once" had been one sentence; per request they are two, and it would
+  otherwise repeat on every reload into the stream the `[content]` line is in. The guard is
+  the `inertWarned` comparison beside it, and it is keyed on **the message, not on a
+  count**: "once per process" is MUSE-47's own defect in miniature — a log still reporting a
+  condition that stopped holding the moment you fixed the document and reloaded. So a
+  *changed* warning prints, an identical one does not, and a fixed one goes quiet.
+  `test/devcontent.test.ts` drives two different inert documents through one dev session,
+  because de-duplicating on "have I ever warned" passes the repeat count and then goes
+  silent about the second one. A build is byte-identical to MUSE-46's, which is where
+  `test/routes.test.ts` asserts it.
+
+  **The gate is `import.meta.hot` (`src/lib/sanity/dev.ts`), and that is the whole
+  point.** `NODE_ENV`, `process.argv` and `npm_lifecycle_event` all tell `astro dev` from
+  `astro build` just as reliably — all three measured — and all three are settable by
+  whoever starts the build, which disqualifies them for a gate deciding whether content
+  may come from a file in the repository. Nothing in a workflow or a script can produce
+  an HMR handle. Write it as the literal `import.meta.hot`: Vite's dev transform rewrites
+  that exact member access, so `'hot' in import.meta` is **false** in dev. It is not what
+  `test/sanity.test.ts` forbids — that rule is about reading *configuration* off
+  `import.meta.env`, which Vite substitutes into client bundles.
+- **Offline dev is `MUSE_CONTENT_FIXTURE=content/seed.ndjson npm run dev`, and
+  MUSE-47 deliberately built no mechanism for it.** No fallback (a build that substituted
+  the seed for an unreachable dataset is the deploy MUSE-20's four barriers exist to
+  prevent), no `dev:offline` script (barrier 3 forbids a `package.json` script from
+  assigning the variable, correctly), and no second gated boolean — it would buy forty
+  characters of typing and cost a name every future guard has to remember. Discoverability
+  is carried by the error instead: `runQuery`'s unreachable-API message prints that command
+  **only under a dev server**, because a deploy log must never propose publishing the seed,
+  and `deploy.yml` greps that same error to retry. `test/devcontent.test.ts` asserts the
+  hint names a seed that is really there and the one `vitest.config.ts` reads.
 - **What the site published before the migration is frozen in `test/content.test.ts`.**
   `PUBLISHED_BEFORE_THE_MIGRATION` is the only remaining copy of those strings and it is
   what makes "renders byte-identically to the previous deploy" a test rather than a command
