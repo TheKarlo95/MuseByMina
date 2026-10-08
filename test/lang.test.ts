@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { launchChecks, openRedirectProbe } from '../scripts/browser-checks.mjs';
 import { LANG_STORAGE_KEY } from '../src/lib/lang';
+import { settleScroll } from './helpers/browser-settle';
 import { pagePath, startPreview, type Preview } from './helpers/preview';
 
 /**
@@ -86,23 +87,6 @@ async function visit(
   await page.evaluate(() => document.fonts.ready);
   await settleScroll(page);
   return { page, close };
-}
-
-/**
- * Wait for scrolling to stop, without assuming smooth scrolling is on.
- *
- * The initial pause matters: polling immediately reads the pre-scroll position twice and
- * concludes the page has settled at the top. Same helper shape as `test/contact.test.ts`.
- */
-async function settleScroll(page: Page): Promise<void> {
-  await page.waitForTimeout(150);
-  let last = Number.NaN;
-  for (let i = 0; i < 80; i += 1) {
-    const y = await page.evaluate(() => Math.round(window.scrollY));
-    if (y === last) return;
-    last = y;
-    await page.waitForTimeout(25);
-  }
 }
 
 /** The language this browser has stored, or `null`. */

@@ -31,6 +31,13 @@ import ts from 'typescript';
  * comments blanked out. It catches the shapes no rule here models — a deletion through
  * a package nobody has thought of yet, a shelled-out `rm -rf` — and it is deliberately
  * not the only line any more.
+ *
+ * MUSE-54 added `fixedSleeps` here rather than as a fourth scan beside this module,
+ * because that is the form the rule has to take: a *call* named `waitForTimeout`. The
+ * doc comment under that function mentions the name several times and does not trip it —
+ * which is the whole reason the rules read syntax, and is why the sentence explaining why
+ * a sleep was removed can stay in the file it was removed from. What the rule cannot
+ * reach is written out there too, under its own heading, rather than left implied.
  */
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
@@ -122,6 +129,20 @@ const BARE_STARTERS = new Set([
 const MEMBER_STARTERS = new Set(
   [...BARE_STARTERS].filter((name) => name !== frag('ex', 'ec')),
 );
+
+/**
+ * Playwright's fixed sleep, by the name it is called under.
+ *
+ * MUSE-54. Three suites flaked in one afternoon and three of the sleeps were in one file,
+ * which is MUSE-17's shape again: the instance was fixed under MUSE-33 and the pattern was
+ * left, so it came back. A sleep is the only one of these shapes a rule can state exactly
+ * — it has a name and it is always a call — so this is where the guard is sharpest and the
+ * honesty note below the rule is where it stops.
+ *
+ * Split with `frag` like everything else here: the joined form never appears in this file,
+ * so the textual tripwire that now carries it does not report its own definition.
+ */
+const SLEEP_NAMES = new Set([frag('waitFor', 'Timeout')]);
 
 // ---------------------------------------------------------------------------
 // The census: every file under `test/` is one of three kinds, and a fourth is an
@@ -520,6 +541,54 @@ export function processStarts(file: string, source?: string): Offence[] {
 }
 
 /**
+ * Fixed sleeps: a call to the thing that waits on the clock instead of on a condition.
+ *
+ * Stated as **a call whose callee is named `waitForTimeout`** — a member call, a bare one,
+ * or one reached through a string key. Not a substring scan, which is the distinction
+ * MUSE-34 established and left a note asking for: a comment explaining *why there is no
+ * sleep here any more* must not fail CI, because the cheapest way to make that message go
+ * away is to delete the comment, and then the reasoning is gone too.
+ *
+ * ---
+ *
+ * **What this rule cannot reach.** MUSE-54's three sightings were one sleep, one scroll
+ * assertion and one selector wait, and only the first has a name to match. So, plainly:
+ *
+ *   - **A measurement taken too early with no wait at all.** `test/contact.test.ts`'s CTA
+ *     flake was `getBoundingClientRect` read while the page was still scrolling. There is
+ *     no call to forbid — the defect is the *absence* of a wait — and nothing short of
+ *     knowing what each assertion depends on could see it.
+ *   - **A poll that samples on a fixed interval.** The old `settleScroll` slept 25 ms
+ *     between reads inside a loop, which is the same bet wearing a loop. This rule would
+ *     catch today's spelling because the sleep was still `waitForTimeout`; rewrite it as a
+ *     Node `setTimeout` and it would not. `setTimeout` is deliberately *not* on the list:
+ *     `test/helpers/scratch.ts` uses two for a process-kill grace period, which is a timer
+ *     doing a timer's job, and a rule that fires on it would be turned off rather than
+ *     obeyed.
+ *   - **A wait on the right condition with too small a budget.** `test/trialform.test.ts`
+ *     waited for exactly the right selector and gave it 15 s on a machine running ten
+ *     builds. A timeout argument is a number; no rule can tell a generous one from a tight
+ *     one.
+ *
+ * The first and third are covered by `test/helpers/browser-settle.ts` being the one place
+ * these suites wait, not by a rule here. That is a convention, and this file exists
+ * because conventions do not hold — which is the honest state of it rather than a gap
+ * being talked around.
+ */
+export function fixedSleeps(file: string, source?: string): Offence[] {
+  return facts(file, source)
+    .calls.filter((call) => SLEEP_NAMES.has(call.name))
+    .map((call) => ({
+      file,
+      line: call.line,
+      what:
+        `calls ${named(call)} — a fixed sleep is a bet that the machine is not busy ` +
+        `(MUSE-54). Wait for the condition it is approximating; ` +
+        `test/helpers/browser-settle.ts has the shapes.`,
+    }));
+}
+
+/**
  * Build directories named in code.
  *
  * A string literal, not the file's text: a comment that explains where builds go — and
@@ -557,6 +626,9 @@ export function copyPasteTripwire(file: string, source?: string): Offence[] {
     new RegExp(`\\b${frag('ex', 'ecSync')}\\b`),
     new RegExp(`\\b${frag('ex', 'ecFile')}`),
     new RegExp(NODE_MODULES),
+    // MUSE-54, as a second line behind the AST rule: the name assembled at runtime, or
+    // reached through a key the parser sees as a string rather than as a callee.
+    new RegExp(frag('waitFor', 'Timeout')),
   ];
 
   const found: Offence[] = [];

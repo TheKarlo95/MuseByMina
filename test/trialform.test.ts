@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { launchChecks, openCheckPage } from '../scripts/browser-checks.mjs';
 import { FORM_COPY, type FormCopy } from '../src/lib/forms';
 import type { Locale } from '../src/lib/i18n';
+import { settleInteraction } from './helpers/browser-settle';
 import { startPreview, type Preview, type StubReply } from './helpers/preview';
 
 /**
@@ -293,6 +294,93 @@ interface Failed {
   navigated: boolean;
 }
 
+/**
+ * How long the visitor's answer is allowed to take before this is called a failure.
+ *
+ * **The condition was never the problem; the budget was** (MUSE-54). `[data-form-status]`
+ * becoming visible is exactly the right thing to wait for — it is `showStatus()` having
+ * run, which is the whole of the behaviour under test — and there is no earlier signal
+ * that would be more precise. So nothing here was converted into a different wait.
+ *
+ * What is wrong with 15 s is that it is a wall clock on a machine this suite does not own.
+ * `npm test` runs ten real `astro build`s in parallel workers and several Chromium
+ * instances beside them, and several agents doing that at once in separate worktrees is
+ * normal here. Starve the renderer and two things slow down together: the click handler,
+ * the `fetch` and `showStatus()` on one side, and **Playwright's own polling of the
+ * selector on the other** — `waitForSelector` evaluates its predicate on the page's frame
+ * clock, so the condition can be satisfied for a while before anything is in a position to
+ * notice. That is how this timed out twice in eight runs on one branch while three
+ * baseline runs on `main` were clean.
+ *
+ * 40 s, inside the 60 s `testTimeout`: the rest of this test is one page load and five
+ * field fills, so the headroom is real. A budget that is wrong is better than one that is
+ * tight, because the cost of tight is not the re-run — it is that the next genuine failure
+ * gets re-run too.
+ */
+const STATUS_BUDGET = 40_000;
+
+/**
+ * Wait for the failure block, and if it never comes say what the page was actually doing.
+ *
+ * The other half of MUSE-54's complaint about this wait: the bare Playwright timeout named
+ * a selector and nothing else, so the two sightings were indistinguishable from a real
+ * regression without re-running them. Every observable that separates the candidates is
+ * read here instead — whether the stub was even reached, whether the submission is still
+ * in flight (`aria-busy`), whether the *success* block was shown by mistake, and what the
+ * page logged.
+ */
+async function awaitFailureBlock(
+  seen: Visit,
+  preview: Preview,
+  label: string,
+  /** Submissions the stub had already taken before this one — it is shared across tests. */
+  sent: number,
+): Promise<void> {
+  try {
+    await seen.page.waitForSelector('[data-form-status]:not([hidden])', {
+      timeout: STATUS_BUDGET,
+    });
+  } catch (cause) {
+    const state = await seen.page
+      .evaluate(() => {
+        const form = document.querySelector<HTMLFormElement>('[data-trial-form]');
+        const status = document.querySelector<HTMLElement>('[data-form-status]');
+        const sent = document.querySelector<HTMLElement>('[data-sent]');
+        const label_ = document.querySelector<HTMLElement>('[data-submit-label]');
+        return {
+          busy: form?.getAttribute('aria-busy') ?? '—',
+          statusHidden: status === null ? 'no such element' : String(status.hidden),
+          sentShown: sent === null ? 'no such element' : String(!sent.hidden),
+          submit: label_?.textContent?.trim() ?? '—',
+        };
+      })
+      .catch((problem: unknown) => ({
+        busy: `unreadable (${String(problem)})`,
+        statusHidden: '?',
+        sentShown: '?',
+        submit: '?',
+      }));
+
+    throw new Error(
+      [
+        `gave up waiting for the failure block after ${STATUS_BUDGET}ms (${label}).`,
+        `  stub endpoint reached   ${preview.requests.length - sent} time(s) by this submit`,
+        `  form aria-busy          ${state.busy}`,
+        `  [data-form-status]      hidden=${state.statusHidden}`,
+        `  [data-sent]             shown=${state.sentShown}`,
+        `  submit button says      ${state.submit}`,
+        `  page is on              ${seen.page.url()}`,
+        `  console                 ${seen.console.map((line) => `${line.type}: ${line.text}`).join(' | ') || '(nothing)'}`,
+        '',
+        'aria-busy=true means the submission is still in flight and the budget above was',
+        'too short for this machine. aria-busy=false with the status still hidden means',
+        'the handler finished and rendered nothing, which is a regression.',
+      ].join('\n'),
+      { cause },
+    );
+  }
+}
+
 async function failOnce(failure: Failure, target: Target): Promise<Failed> {
   const preview = failure.build === 'none' ? unconfigured : configured;
   if (failure.reply) preview.reply(failure.reply);
@@ -302,8 +390,9 @@ async function failOnce(failure: Failure, target: Target): Promise<Failed> {
     const mail = seen.page.locator('[data-form-wrap] a[href^="mailto:"]').first();
     const email = (await mail.getAttribute('href')) ?? '';
     if (failure.offline) await seen.offline(true);
+    const sent = preview.requests.length;
     await seen.page.click('[data-submit]');
-    await seen.page.waitForSelector('[data-form-status]:not([hidden])', { timeout: 15_000 });
+    await awaitFailureBlock(seen, preview, `${target.locale}: ${failure.label}`, sent);
     return {
       status: await seen.page.locator('[data-form-status]').innerText(),
       wrap: await seen.page.locator('[data-form-wrap]').innerText(),
@@ -504,7 +593,19 @@ describe('D2: without JavaScript, the form is replaced by something that works',
           );
           for (const control of await clickable.all()) {
             await control.click({ timeout: 4_000 }).catch(() => null);
-            await seen.page.waitForTimeout(500);
+            /**
+             * A quiet network, not half a second (MUSE-54).
+             *
+             * This is a negative claim — nothing may have navigated — and the only
+             * observable that can support one is that no document request is still in
+             * the air. `scripted: false` because JavaScript is genuinely disabled in this
+             * context, so there is no frame loop to run in the page; the network is all
+             * there is. Unlike a sleep, any activity restarts the quiet window, so this
+             * gets more patient as the machine gets busier rather than less.
+             */
+            await settleInteraction(seen.page, 'a native submission to land or not', {
+              scripted: false,
+            });
           }
           expect(
             seen.navigations.filter((status) => status === 405),
