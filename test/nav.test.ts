@@ -11,7 +11,7 @@ import {
   type PageRef,
 } from './helpers/build';
 import { resolveRequest, servePages, type Host } from './helpers/serve';
-import { LOCALES, type Locale } from '../src/lib/i18n';
+import { DEFAULT_LOCALE, LOCALES, type Locale } from '../src/lib/i18n';
 import { MORE_NAV, PRIMARY_NAV } from '../src/lib/nav';
 
 /**
@@ -161,6 +161,134 @@ function servedFile(request: string): string | undefined {
 /** The error page: the one built page that declares no canonical of its own. */
 function errorPages(): string[] {
   return build.htmlFiles().filter((page) => canonicalOf(build.read(page)) === undefined);
+}
+
+/**
+ * The locale a built file belongs to, read off its path: `en/schedule/index.html` → en.
+ *
+ * The same rule as `addressOf`, over an output path rather than a request, because a
+ * page's locale has to be known for pages that are never the target of a link — which is
+ * the whole subject below.
+ */
+function localeOfPage(page: string): Locale {
+  const first = page.split('/')[0];
+  return LOCALES.find((locale) => locale === first) ?? DEFAULT_LOCALE;
+}
+
+/** One page-to-page link in the built output, both ends as output paths. */
+interface PageLink {
+  /** The built page the href was written on. */
+  from: string;
+  /** The built page the host would serve that href from. */
+  to: string;
+  /** Where on `from` it was written, for the failure message. */
+  source: string;
+}
+
+/** A build reduced to the question "what links what": pages, and links between them. */
+interface LinkGraph {
+  /**
+   * Every built page a visitor can be sent to — error pages excluded, because GitHub
+   * Pages serves `404.html` for unknown paths and for no URL of its own.
+   */
+  pages: string[];
+  links: PageLink[];
+}
+
+/** A page nothing can reach, and the references that looked like they reached it. */
+interface Orphan {
+  page: string;
+  locale: Locale;
+  /** References to it that prove nothing: its own, its twin's, the error page's. */
+  discounted: PageLink[];
+}
+
+/**
+ * The pages in `graph` that no *other* page of their own locale links to.
+ *
+ * MUSE-37 — this is the rule the test below used to get wrong, and it is worth being
+ * precise about why. The old version collected link *targets* into a `reached` set and
+ * subtracted it from the page list. Every page is a link target of itself: the locale
+ * switcher always renders an own-locale `<a aria-current="true">` pointing at the current
+ * page, and the logo and the nav's `aria-current` entry do the same on the pages they
+ * name. So `reached` was the whole build by construction and the assertion could not
+ * fail — two unlinked pages were added to a copy of the repo and the suite stayed green.
+ *
+ * Three references are therefore discounted, and each has to be:
+ *
+ *   - **Its own.** A page is not evidence of its own reachability. This is the bug.
+ *   - **Its twin's in the other locale.** HR and EN share slugs and every page carries a
+ *     switcher, so `/en/x/` is always linked from `/x/` whether or not either is in a
+ *     menu. Counting that link would make one nav entry publish two reachable pages, and
+ *     a visitor reading English would have no way to arrive at the English one.
+ *   - **The error page's.** `404.html` is reachable by mistyping, not by navigating; a
+ *     page linked only from there is reached by nobody on purpose. It falls out of the
+ *     rule rather than being special-cased — only a page in `graph.pages` can make
+ *     another page reachable, and the error page is not one.
+ *
+ * Reachability is inbound-degree, not transitivity from the homepage: a cluster of pages
+ * that link each other and nothing else would pass here. That is deliberate — the failure
+ * this guards is a page that shipped without a menu entry, and the stronger property has
+ * no failure mode to point at yet.
+ */
+function orphansOf(graph: LinkGraph): Orphan[] {
+  const addressable = new Set(graph.pages);
+  const inbound = new Map(graph.pages.map((page) => [page, [] as PageLink[]]));
+  const discounted = new Map(graph.pages.map((page) => [page, [] as PageLink[]]));
+
+  for (const link of graph.links) {
+    if (!addressable.has(link.to)) continue;
+    const counts =
+      link.from !== link.to &&
+      addressable.has(link.from) &&
+      localeOfPage(link.from) === localeOfPage(link.to);
+    (counts ? inbound : discounted).get(link.to)!.push(link);
+  }
+
+  return [...graph.pages]
+    .sort()
+    .filter((page) => inbound.get(page)!.length === 0)
+    .map((page) => ({
+      page,
+      locale: localeOfPage(page),
+      discounted: discounted.get(page)!,
+    }));
+}
+
+/** The whole build as a link graph: anchors only, resolved through the host's rules. */
+function linkGraph(): LinkGraph {
+  const errors = new Set(errorPages());
+  const links: PageLink[] = [];
+
+  for (const ref of crawl(isAnchor)) {
+    const to = servedFile(ref.request);
+    // A link that resolves to nothing is AC1's business, not this one's.
+    if (to === undefined) continue;
+    links.push({ from: ref.page, to, source: ref.source });
+  }
+
+  return { pages: build.htmlFiles().filter((page) => !errors.has(page)), links };
+}
+
+/** An orphan as a sentence that says which page, which locale, and what to do. */
+function describeOrphan(orphan: Orphan): string {
+  const self = orphan.discounted.filter((link) => link.from === orphan.page);
+  const elsewhere = [
+    ...new Set(orphan.discounted.filter((link) => link.from !== orphan.page).map((l) => l.from)),
+  ];
+  return (
+    `${orphan.page} (${orphan.locale} ${routeOfPage(orphan.page)}) is linked from no other ` +
+    `${orphan.locale} page — ${self.length} self-reference(s)` +
+    (elsewhere.length > 0 ? `, ${elsewhere.length} from ${elsewhere.sort().join(', ')}` : '') +
+    '. Add it to src/lib/nav.ts, or link it from a page in the same locale.'
+  );
+}
+
+/** `en/schedule/index.html` → `/schedule`. For failure messages. */
+function routeOfPage(page: string): string {
+  const segments = page.replace(/(?:^|\/)index\.html$/, '').split('/').filter(Boolean);
+  if (LOCALES.some((locale) => locale === segments[0])) segments.shift();
+  return `/${segments.join('/')}`;
 }
 
 /**
@@ -348,21 +476,94 @@ describe('AC3: the guard keeps its teeth as the pages land one at a time', () =>
     for (const page of errorPages()) expect(crawled).toContain(page);
   });
 
-  it('leaves no built page unreachable from any other page', () => {
-    // Derived from the build in the other direction: every addressable page must be the
-    // target of some link. Catches the opposite mistake to the ticket's — a page shipped
-    // and then left out of the nav, which no route list can detect because the route is
-    // not in it.
-    const reached = new Set(
-      crawl(isAnchor)
-        .map((ref) => servedFile(ref.request))
-        .filter((file): file is string => file !== undefined),
-    );
-    const orphans = build
-      .htmlFiles()
-      .filter((page) => !errorPages().includes(page))
-      .filter((page) => !reached.has(page));
+});
+
+/**
+ * MUSE-37 — the opposite mistake to the ticket's, and the one about to matter.
+ *
+ * AC2 catches a route in `nav.ts` with no page behind it. This catches a page in the
+ * build with nothing pointing at it: shipped, served, and in no menu. No route list can
+ * detect that, because the route is not in the list — it has to come off the build.
+ *
+ * The test that used to live here could not fail; `orphansOf` above explains why and
+ * what replaced it. The two tests after the real-build assertion are what stop it
+ * decaying back: one injects an orphan into the real graph and requires the guard to name
+ * it, the other requires the self-references the rule discounts to actually be there, so
+ * the discount cannot become a no-op that nobody notices.
+ */
+describe('AC4: a page nothing links to is an orphan, whatever it links to itself', () => {
+  const hr = 'x/index.html';
+  const en = 'en/x/index.html';
+  const link = (from: string, to: string): PageLink => ({ from, to, source: '<a href>' });
+
+  it('names a page that only links to itself', () => {
+    const orphans = orphansOf({ pages: [hr], links: [link(hr, hr), link(hr, hr)] });
+    expect(orphans.map((o) => o.page)).toEqual([hr]);
+    expect(orphans[0]!.discounted.length).toBe(2);
+  });
+
+  it('accepts a page another page of the same locale links to', () => {
+    const home = 'index.html';
+    expect(
+      orphansOf({
+        pages: [home, hr],
+        links: [link(home, home), link(home, hr), link(hr, hr), link(hr, home)],
+      }),
+    ).toEqual([]);
+  });
+
+  it('counts each locale on its own, so a twin is not a referrer', () => {
+    // The language switcher links `/x/` ↔ `/en/x/` on every page that exists. If that
+    // counted, one HR menu entry would publish a reachable English page nobody can get
+    // to from English — so both halves are orphans here, and the test says both.
+    const orphans = orphansOf({
+      pages: [hr, en],
+      links: [link(hr, hr), link(hr, en), link(en, en), link(en, hr)],
+    });
+    expect(orphans.map((o) => o.page)).toEqual([en, hr]);
+  });
+
+  it('does not let a link on the error page rescue a page', () => {
+    // `404.html` is not in `pages` — it is served for no URL of its own. A page reachable
+    // only from it is reachable by mistyping, which is not navigation.
+    const orphans = orphansOf({ pages: [hr], links: [link('404.html', hr), link(hr, hr)] });
+    expect(orphans.map((o) => o.page)).toEqual([hr]);
+  });
+
+  it('leaves no built page reachable only from itself', () => {
+    const orphans = orphansOf(linkGraph()).map(describeOrphan);
     expect(orphans).toEqual([]);
+  });
+
+  it('names an orphan added to the real build, so the guard is not a tautology again', () => {
+    // The whole graph the real build produces, plus one page carrying exactly the
+    // self-reference every page carries. If this passes, the rule is back to counting a
+    // page as its own referrer and the assertion above means nothing.
+    const real = linkGraph();
+    const injected = 'unlinked/index.html';
+    const found = orphansOf({
+      pages: [...real.pages, injected],
+      links: [...real.links, link(injected, injected)],
+    });
+    // Stated as the *difference* the injection makes, so this still means "the guard
+    // reacts" on a build that has orphans of its own rather than piling on the failure
+    // above.
+    const baseline = orphansOf(real).map((orphan) => orphan.page);
+    const added = found.filter((orphan) => !baseline.includes(orphan.page));
+    expect(added.map((orphan) => orphan.page)).toEqual([injected]);
+    expect(describeOrphan(added[0]!)).toContain('1 self-reference(s)');
+  });
+
+  it('still finds the self-references it discounts, so the discount stays exercised', () => {
+    // Every addressable page links to itself today — locale switcher, logo, or the nav's
+    // own `aria-current` entry. The day that stops being true, the exclusion above is
+    // dead code and the next author deletes it in good faith; this is the test that
+    // argues with them.
+    const { pages, links } = linkGraph();
+    const selfless = pages.filter(
+      (page) => !links.some((ref) => ref.from === page && ref.to === page),
+    );
+    expect(selfless, 'no page self-links — the rule discounts nothing').toEqual([]);
   });
 });
 

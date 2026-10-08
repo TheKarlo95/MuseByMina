@@ -30,6 +30,14 @@ export interface NavItem {
  * 404 named, so the IA can grow back one page at a time without ever shipping a dead
  * link.
  *
+ * **And the reverse** (MUSE-37): a page added to `src/pages/` that nothing in its own
+ * locale links to — not this list, not the footer, not a link in a component — fails the
+ * same suite, named, per locale. `/privacy` is why the rule is "linked from somewhere"
+ * rather than "listed here": it is footer-only and deliberately not a menu entry. That
+ * half of the guard was a tautology until MUSE-37 — every page links to itself through
+ * the locale switcher, so every page counted as reached — which is why "each page ticket
+ * re-adds its own entry" is enforced rather than trusted.
+ *
  * `mobileOnly` is deliberately kept even though the bar is short enough not to need it
  * yet — `/` stays panel-only because the logo is the home link on desktop, which is
  * true at any list length. The twelve pages are coming back; the mechanism is not dead
