@@ -372,16 +372,35 @@ PONEDJELJAK   Beginner      19:30–21:00      Mina i Antonio
 The migration itself is a committed artefact, not a Studio session:
 
 ```bash
-npm run sanity:seed         # import sanity/seed/content.ndjson, replacing by _id
+npm run sanity:seed         # import content/seed.ndjson, replacing by _id
 npm run sanity:seed:check   # does the live dataset still say what the seed says?
 ```
 
 That one file is also **the test fixture**. `npm test` runs ten real `astro build`s in
 parallel workers, and ten HTTP round-trips per run would make the suite's result depend on
 whether anybody is mid-edit in the Studio — so `vitest.config.ts` sets
-`MUSE_CONTENT_FIXTURE=sanity/seed/content.ndjson` and `src/lib/sanity/fixture.ts`
+`MUSE_CONTENT_FIXTURE=content/seed.ndjson` and `src/lib/sanity/fixture.ts`
 evaluates the real queries against it with `groq-js`, Sanity's own GROQ engine. One file,
 so the migration and the fixture cannot drift apart.
+
+**It lives in `content/`, not in `sanity/`, and that is load-bearing** (MUSE-45). It sat at
+`sanity/seed/content.ndjson` from MUSE-20 until MUSE-45, which put it inside the schema
+fingerprint — `scripts/check-sanity.mjs` hashes every file under `sanity/` with no
+extension filter, deliberately (MUSE-19). The fingerprint means one thing, *"the generated
+artefacts still describe the schema"*, and three consumers read a content edit as a schema
+change: `npm run build` refused to run until the types were regenerated, CI's
+regenerate-and-diff told whoever reworded a page title to go and look at the schema, and
+`studio.yml` — whose `paths:` is derived from the same list — republished Mina's Studio
+with `SANITY_DEPLOY_TOKEN`, the one write credential this project has.
+
+The seed moved rather than being excluded from the walk, because the walk's value is that
+it has no exceptions: an exclusion list is the mistake MUSE-19's rule exists to prevent,
+and the next unwatched schema file is the one nobody thought to add to it. With the seed
+out, *"every file under `sanity/` is schema source"* is simply true. The cost is that the
+seed no longer sits beside the schema it instantiates, which is cheap — nothing found it by
+looking there; its consumers are `package.json`, `vitest.config.ts`,
+`scripts/sanity-seed-check.mjs` and two helpers under `test/`. `test/sanity.test.ts` holds
+the line, asserting the property against `MUSE_CONTENT_FIXTURE` rather than a path literal.
 
 ### A component whose page cannot be routed yet
 

@@ -50,7 +50,7 @@ import { TRANSIENT_BUILD_FAILURE } from '../src/lib/rebuild';
  * them would make the suite's result depend on whether anybody is mid-edit in the Studio,
  * which is not a property a test suite may have.
  *
- * So the builds read `sanity/seed/content.ndjson` — **the same file `npm run sanity:seed`
+ * So the builds read `content/seed.ndjson` — **the same file `npm run sanity:seed`
  * imports into the dataset** — selected by `MUSE_CONTENT_FIXTURE` in `vitest.config.ts`.
  * One file is both the migration artefact and the fixture, so there is no second copy of
  * the content to drift: changing what gets imported changes what these tests read.
@@ -61,7 +61,7 @@ import { TRANSIENT_BUILD_FAILURE } from '../src/lib/rebuild';
  */
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const SEED = 'sanity/seed/content.ndjson';
+const SEED = 'content/seed.ndjson';
 const FIXTURE_ENV = 'MUSE_CONTENT_FIXTURE';
 
 const LOCALES = ['hr', 'en'] as const;

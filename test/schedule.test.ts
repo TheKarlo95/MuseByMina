@@ -15,7 +15,7 @@ import { classCount } from '../src/lib/schedule';
  *
  * The one literal in this file that is content rather than vocabulary, and it is here
  * because it is the only thing in the repository that can disagree with the CMS. Every
- * other assertion below compares the page against `sanity/seed/content.ndjson`; this
+ * other assertion below compares the page against `content/seed.ndjson`; this
  * compares the seed against the studio. Without it the suite would be satisfied by a
  * page that renders the dataset perfectly, which is exactly what it was doing while
  * thirteen invented classes were live.
@@ -69,7 +69,7 @@ const REAL_TIMETABLE = [
  * Importing these maps from `src/lib/schedule.ts` would make the locale criteria
  * untestable — the test would agree with the implementation by construction.
  *
- * *Which* classes exist is read off `sanity/seed/content.ndjson` instead
+ * *Which* classes exist is read off `content/seed.ndjson` instead
  * (`./helpers/seed.ts`), because since MUSE-36 the rows are CMS content: the file the
  * suite builds against is the file `npm run sanity:seed` imports, so "the page renders
  * the dataset" and "the dataset is the real timetable" are two separate, checkable

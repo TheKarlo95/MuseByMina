@@ -9,7 +9,7 @@ const test: TestUserConfig = {
    * The suite runs ten real `astro build`s in parallel workers. Fetching from the
    * Sanity API in each of them would buy ten HTTP round-trips per run, a new flakiness
    * source, and a suite whose result depends on whether anybody is mid-edit in the
-   * Studio. So every build reads `sanity/seed/content.ndjson` instead — **the same
+   * Studio. So every build reads `content/seed.ndjson` instead — **the same
    * file `npm run sanity:seed` imports into the dataset**, evaluated by Sanity's own
    * GROQ engine against the real queries (`src/lib/sanity/fixture.ts`).
    *
@@ -26,7 +26,7 @@ const test: TestUserConfig = {
    * the same way — `src/lib/sanity/fixture.ts` resolves `process.env` per query — so
    * `test/pricing.test.ts` points it at a dataset of its own and nothing here changes.
    */
-  env: { MUSE_CONTENT_FIXTURE: 'sanity/seed/content.ndjson' },
+  env: { MUSE_CONTENT_FIXTURE: 'content/seed.ndjson' },
   // Housekeeping only: prunes stale directories from the build scratch root once, before
   // the parallel workers start. Isolation itself comes from `test/helpers/scratch.ts`,
   // which hands every build a directory no other suite can name and a cache root of its

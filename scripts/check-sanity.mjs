@@ -67,6 +67,29 @@ const GENERATED_TYPES = 'src/lib/sanity/sanity.types.ts';
  * than waiting for CI's slower regenerate-and-diff, which `deploy.yml` does not depend on.
  * `sanity/schema.stamp.json` is the single exclusion, because it is where the answer is
  * written (see `STAMP_EXCLUDED`).
+ *
+ * **The content seed is not in here, and `sanity/` is why** (MUSE-45). The seed lived at
+ * `sanity/seed/content.ndjson` from MUSE-20 until MUSE-45, so the coarse sweep hashed it
+ * and three consumers of this fingerprint read a content edit as a schema change:
+ * rewording a page title failed the build until the types were regenerated, CI's
+ * regenerate-and-diff printed "The Sanity schema changed" at somebody who had not been
+ * near the schema, and `studio.yml` — which takes its `paths:` from `SOURCE_GLOBS` —
+ * republished Mina's Studio using `SANITY_DEPLOY_TOKEN`, the project's only write
+ * credential.
+ *
+ * The seed moved to `content/seed.ndjson` rather than being excluded here, because an
+ * exclusion is the MUSE-19 mistake pointed the other way: the sweep's whole value is that
+ * it has no exceptions, and anything "the walk knows to skip" is a list that the next file
+ * is missing from. Moving the file instead makes the sentence *"every file under `sanity/`
+ * is schema source"* true rather than nearly true, and leaves nothing for a future reader
+ * to get wrong. The cost — the seed no longer sits beside the schema it instantiates — is
+ * paid in these two paragraphs, and it is cheap: the seed's consumers were already
+ * `package.json`, `vitest.config.ts`, `scripts/sanity-seed-check.mjs` and two test
+ * helpers, so nothing ever found it by looking next to the schema.
+ *
+ * `test/sanity.test.ts`, "keeps the content seed outside the schema fingerprint", asserts
+ * it — against `MUSE_CONTENT_FIXTURE`, the path the suite is actually reading, so moving
+ * the seed back under `sanity/` is red however it is spelled.
  */
 const SOURCES = [
   { dir: 'sanity' },

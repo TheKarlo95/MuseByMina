@@ -173,7 +173,7 @@ jobs:
         continue-on-error: true
         run: npm run sanity:read
 
-      # Does the live dataset still say what `sanity/seed/content.ndjson` says? The seed
+      # Does the live dataset still say what `content/seed.ndjson` says? The seed
       # is the test fixture, so when Mina edits in the Studio the suite starts asserting
       # against content that is no longer what the site publishes. Nothing is broken when
       # that happens — the deploy fetches live — but the fixture ages, and this repo's own

@@ -16,7 +16,7 @@ import { requireQueryParameters } from './params';
  * page expects — is worse in a different way: it is a second copy, and it drifts until
  * the tests are passing against content that no longer exists anywhere.
  *
- * So there is exactly one copy. `sanity/seed/content.ndjson` is **both** the migration
+ * So there is exactly one copy. `content/seed.ndjson` is **both** the migration
  * artefact `npm run sanity:seed` imports into the dataset **and** the fixture the suite
  * builds against. Changing what gets imported changes what the tests read; they cannot
  * disagree, because they are the same file.
