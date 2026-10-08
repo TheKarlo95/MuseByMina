@@ -44,7 +44,7 @@ npm run shots      # screenshots of all theme states to /tmp/muse-shots
 npm run sanity:types   # re-extract the schema and regenerate types — commit the result
 npm run sanity:check   # the fast gate `npm run build` runs first
 npm run sanity:read    # every query against the live dataset: OK / EMPTY / BROKEN
-npm run sanity:seed    # import sanity/seed/content.ndjson into the dataset (by _id)
+npm run sanity:seed    # import content/seed.ndjson into the dataset (by _id)
 npm run sanity:seed:check  # does the live dataset still say what the seed says?
 npm run sanity:dev     # the Studio locally, on localhost:3333
 npm run sanity:build   # bundle the Studio into .sanity/studio — what CI runs
@@ -370,7 +370,23 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   alternative is publishing pages with empty titles, which `src/lib/sanity/decode.ts`
   exists to refuse — but it is a real availability dependency, and the `continue-on-error`
   probe step in `ci.yml` no longer protects anything from it.
-- **The seed is both the migration and the test fixture.** `sanity/seed/content.ndjson`
+- **The seed lives in `content/`, not in `sanity/`, and that is load-bearing** (MUSE-45).
+  `scripts/check-sanity.mjs` hashes every file under `sanity/` with **no extension
+  filter** — the MUSE-19 rule — and the fingerprint it produces means one thing: *the
+  generated artefacts still describe the schema*. Every consumer was written for that one
+  meaning, so while the seed sat at `sanity/seed/content.ndjson` a reworded page title
+  failed the build until the types were regenerated, made CI print „The Sanity schema
+  changed" at somebody who had not been near the schema, and triggered `studio.yml` —
+  **the one job that uses `SANITY_DEPLOY_TOKEN`, a write credential** — republishing the
+  Studio Mina may have had open. **Do not fix the next instance of this by teaching the
+  walk to skip something:** the sweep's whole value is that it has no exceptions, and a
+  skip list is MUSE-19's allow-list wearing the other hat. Move the file instead, so
+  *"every file under `sanity/` is schema source"* stays true. `test/sanity.test.ts`, "keeps
+  the content seed outside the schema fingerprint", states it against
+  `MUSE_CONTENT_FIXTURE` rather than a path literal — the file the run actually reads and
+  the file `npm run sanity:seed` imports — and checks all four surfaces: `fingerprint()`,
+  the committed stamp, `SOURCE_GLOBS` and `studio.yml`'s `paths:`.
+- **The seed is both the migration and the test fixture.** `content/seed.ndjson`
   holds the five documents that exist — the `siteSettings` singleton and four `page`
   documents — and `npm run sanity:seed` imports it, replacing by `_id`, so the migration is
   reviewable and re-runnable. `vitest.config.ts` points every test build at that same file
@@ -501,7 +517,7 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   already **post**-projection, so the test and the query cannot disagree; and `sanity
   typegen` derives result types from the query *text*, so a typo yields a *consistent*
   wrong type. So that suite calls the real readers against structural fixtures in
-  `test/helpers/structural-content.ts` — **not** `sanity/seed/content.ndjson`, which
+  `test/helpers/structural-content.ts` — **not** `content/seed.ndjson`, which
   `npm run sanity:seed` imports into the live dataset. A new query needs a case there, and
   the bar is the ticket's: rename one projected field and the suite must go red. Watch out
   for the fields with a silent fallback — `featured` decodes to `false`, `lineup` to `[]`,
