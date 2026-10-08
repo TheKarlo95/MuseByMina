@@ -1,0 +1,415 @@
+---
+import {
+  ENROL_ANCHOR,
+  PRICING_COPY,
+  formatPrice,
+  packageValue,
+  periodName,
+  resolveFeatured,
+} from '../lib/pricing';
+import type { Locale } from '../lib/i18n';
+import { getPricingTiers } from '../lib/sanity';
+import TrialForm from './TrialForm.astro';
+
+/**
+ * **The price list and the enrolment form, on one page.**
+ *
+ * The decision and the action sit together, which is the ticket's reading of the two
+ * reference sites: Faith Connect publishes no prices at all, so every pricing question
+ * becomes a DM; axcentdance.com fuses the prices and the sign-up. So the tiers are the
+ * page and the form is the bottom of it, and a tier's button is a link into that form
+ * with the package already chosen.
+ *
+ * ---------------------------------------------------------------------------
+ * **There is no `/pricing` route, and this component is not reachable yet.**
+ *
+ * Deliberate, and the reason is not caution. The dataset holds no `pricingTier`
+ * document, because **there are no agreed prices** — and `getPricingTiers()` defaults to
+ * `minimum: 1`, so a route pointing here would fail every build on `main`: the pull
+ * request checks, the deploy, and the scheduled rebuild MUSE-21 added. A wrong price is
+ * also the worst thing this site could invent. MUSE-36 is open right now because
+ * plausible placeholder content — a timetable naming instructors who do not teach here —
+ * escaped a data file and is live; a price is the same failure plus a commercial claim
+ * somebody budgets around.
+ *
+ * So the plumbing lands here, tested, and the follow-up adds three things together:
+ * `src/pages/pricing.astro` and `src/pages/en/pricing.astro`, `/pricing` in `ROUTES` and
+ * in `PRIMARY_NAV`, and the real `pricingTier` and `page` documents in the Studio. The
+ * route and the content have to arrive in one commit or the build breaks; see the pull
+ * request.
+ *
+ * `test/pricing.test.ts` renders this component directly through Astro's container API
+ * for the same reason, and says so.
+ * ---------------------------------------------------------------------------
+ *
+ * Shape is design system §7.2, *Pricing tier*: cards on `--surface-raised`; the featured
+ * one gets `1px solid var(--accent)` and an overlapping eyebrow tab and **never an
+ * accent fill**, which would overpower the row in either theme; anatomy is tier name →
+ * price (`display-m`) → period → rule → feature list with `✦` markers → button.
+ *
+ * Every price, package name and feature line comes from Sanity. `src/lib/pricing.ts`
+ * holds the four words that do not, and the formatting rules that are code by
+ * instruction (CLAUDE.md: time and currency formatting are never CMS fields).
+ */
+interface Props {
+  locale: Locale;
+}
+const { locale } = Astro.props;
+const copy = PRICING_COPY[locale];
+
+/**
+ * `minimum` is left at its default of 1: a pricing page with no tiers on it is the state
+ * this page exists to end, and publishing it empty would be worse than not publishing
+ * it. The build fails naming `pricingTier`.
+ */
+const { tiers, warning } = resolveFeatured(await getPricingTiers());
+
+/**
+ * "Exactly one tier is featured" is a constraint across documents that the schema cannot
+ * express, so `resolveFeatured` picks deterministically and never throws — the full
+ * argument is in `src/lib/pricing.ts`. What it cannot do is tell anybody, so that
+ * happens here, once, in the build log, naming the documents. The place it also belongs
+ * is the Studio, as an async `Rule.custom` on `pricingTier.featured`; that is a schema
+ * change and belongs with the commit that ships the page.
+ */
+if (warning !== undefined) console.warn(`[pricing] ${warning}`);
+
+/** The form's package `<select>`: one option per tier, in the order the page shows them. */
+const packages = tiers.map((tier) => ({
+  value: packageValue(tier),
+  label: tier.name[locale],
+}));
+---
+
+<section class="hero">
+  <h1 class="display">{copy.title}</h1>
+</section>
+
+<section class="section">
+  <ul class="tiers">
+    {
+      tiers.map((tier) => (
+        <li class="cell">
+          <article
+            class:list={['card', tier.featured && 'featured']}
+            data-tier={tier.id}
+            data-featured={tier.featured ? 'true' : undefined}
+          >
+            {/*
+              The overlapping eyebrow tab (§7.2). It is inside the card and pulled up
+              over its own top border, so the hairline reads as a tab cut into it
+              rather than as a badge floating above a box.
+            */}
+            {tier.featured && (
+              <p class="tab" data-tab>
+                {copy.featuredTab}
+              </p>
+            )}
+
+            <h3 class="name">{tier.name[locale]}</h3>
+
+            {/*
+              The price. `--font-display` at `display-m`, which bottoms out at 2.125rem —
+              well above Cormorant's 26px floor, below which the `đ` crossbar vanishes.
+              Numerals are NOT set here: `font-variant-numeric: lining-nums tabular-nums`
+              is declared once on the document in `src/styles/base.css`, and because the
+              property is a single inherited value a declaration here would *replace* it
+              and bring back MUSE-14 — `42 €` reading as a superscript — with the column
+              still neatly aligned. `npm run ds` fails the build if anyone tries.
+
+              `data-price` is read by `test/pricing.test.ts`, which asserts this element's
+              text is exactly what `priceEur` formats to. It is the one number on the
+              page a visitor may act on.
+            */}
+            <p class="price" data-price>{formatPrice(tier.priceEur, locale)}</p>
+            <p class="period">{periodName(tier.period, locale)}</p>
+
+            <ul class="features">
+              {tier.features.map((feature) => (
+                <li class="feature">
+                  <span class="mark" aria-hidden="true">
+                    ✦
+                  </span>
+                  <span>{feature[locale]}</span>
+                </li>
+              ))}
+            </ul>
+
+            {/*
+              The action, on the same page. An `<a>` rather than a `<button>` because
+              without JavaScript it still does the useful half — it lands on the
+              enrolment block, where `TrialForm`'s `<noscript>` offers the studio inbox
+              (the form itself is hidden when scripting is off, MUSE-15). With
+              JavaScript the script below also sets the package and moves focus there.
+
+              `aria-label` adds the package name so a screen-reader user does not hear
+              "Choose" three times with nothing to tell them apart; it starts with the
+              visible label, which is WCAG 2.5.3.
+            */}
+            <a
+              class="btn"
+              href={`#${ENROL_ANCHOR}`}
+              data-choose={packageValue(tier)}
+              aria-label={`${copy.choose}: ${tier.name[locale]}`}
+            >
+              {copy.choose}
+            </a>
+          </article>
+        </li>
+      ))
+    }
+  </ul>
+</section>
+
+<section class="section sunken" id={ENROL_ANCHOR}>
+  <div class="wrap">
+    <h2 class="displayM">{copy.enrolHeading}</h2>
+    <TrialForm locale={locale} packages={packages} />
+  </div>
+</section>
+
+<script>
+  /**
+   * Carry the chosen package into the form, and put the keyboard there.
+   *
+   * Progressive, not required: the `href` is a real fragment, so with scripting off the
+   * link still lands on the enrolment block — which is the only honest destination there
+   * is, since the form is hidden without JavaScript and its `<noscript>` offers the
+   * studio inbox instead. Nothing here is the difference between enrolling and not.
+   *
+   * Focus moves to the select rather than being left on the card, because a keyboard
+   * user who followed a fragment link is otherwise still three sections up; and because
+   * focusing it is what makes a screen reader announce the value that was just set.
+   */
+  const select = document.querySelector<HTMLSelectElement>('select[name="package"]');
+
+  for (const link of document.querySelectorAll<HTMLAnchorElement>('[data-choose]')) {
+    link.addEventListener('click', () => {
+      if (!select) return;
+      const wanted = link.dataset.choose ?? '';
+      // Only if the option is really there: the list is built from the same tiers, so a
+      // mismatch means the page was rebuilt around the script and silently selecting
+      // nothing beats selecting the wrong package.
+      if (![...select.options].some((option) => option.value === wanted)) return;
+      select.value = wanted;
+
+      /**
+       * **Focused in a later task, not in this one.** Measured: focusing it here does
+       * nothing. The click event is dispatched *before* the link's default action, and
+       * that action — navigating to `#enrol` — resets focus, so `document.activeElement`
+       * ends up `<body>`. Deferring puts the focus call after the navigation.
+       */
+      setTimeout(() => select.focus({ preventScroll: true }), 0);
+    });
+  }
+</script>
+
+<style>
+  .hero {
+    max-width: 1280px;
+    margin-inline: auto;
+    padding: var(--space-8) var(--space-5) var(--space-7);
+  }
+  @media (min-width: 768px) {
+    .hero {
+      padding: var(--space-10) var(--space-7) var(--space-8);
+    }
+  }
+
+  .section {
+    padding: var(--space-8) var(--space-5);
+  }
+  @media (min-width: 768px) {
+    .section {
+      padding: var(--space-10) var(--space-7);
+    }
+  }
+  .sunken {
+    background: var(--surface-sunken);
+  }
+  .wrap {
+    max-width: 1280px;
+    margin-inline: auto;
+  }
+
+  .display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.75rem, 9vw, 6rem);
+    line-height: 0.95;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+  .displayM {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.125rem, 5vw, 3.75rem);
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+
+  /* §5: gap between cards is 16 on mobile, 32 on desktop. The extra top padding is the
+     room the featured card's tab occupies above its own edge — without it the tab is
+     clipped by the section, and giving the card itself the padding would make one card
+     taller than the others. */
+  .tiers {
+    max-width: 1280px;
+    margin-inline: auto;
+    padding-top: var(--space-4);
+    list-style: none;
+    display: grid;
+    gap: var(--space-4);
+  }
+  @media (min-width: 768px) {
+    .tiers {
+      /* `auto-fit` with a floor rather than three fixed columns: Croatian runs 20–25%
+         longer than English (§10), so the cards size to their content and a fourth tier
+         wraps instead of squeezing the other three. */
+      grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+      gap: var(--space-6);
+    }
+  }
+  .cell {
+    display: grid;
+  }
+
+  /* §7.2: cards on --surface-raised. On cream that fill is a 1.11:1 step, so the card is
+     defined by its hairline and not by its background — and §5 is explicit that a shadow
+     must not be added to compensate, in either theme. */
+  /* Flex column rather than grid, for one reason: `margin-top: auto` on the button.
+     Three tiers with one, two and three features each are three different heights, and
+     with the buttons at the end of the content they sit at three different heights too —
+     which reads as unfinished and makes the row harder to compare. The column stretches
+     to the tallest card and the button is pushed to the bottom of each. */
+  .card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-6) var(--space-5);
+    background: var(--surface-raised);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+  }
+  @media (min-width: 768px) {
+    .card {
+      padding: var(--space-7) var(--space-6);
+    }
+  }
+
+  /* The featured treatment, in full: one hairline in the accent role, and the tab below.
+     Never a fill — "which would overpower the row in either theme" (§7.2). Because it is
+     a role token rather than a brand colour it is gold on plum in dark and gold-deep on
+     white in light, with no per-theme override here (§2). */
+  .featured {
+    border: 1px solid var(--accent);
+  }
+
+  /* Pulled up over the card's own top border, so it reads as a tab in the hairline. */
+  .tab {
+    position: absolute;
+    top: 0;
+    left: var(--space-5);
+    transform: translateY(-50%);
+    padding: var(--space-1) var(--space-4);
+    max-width: calc(100% - 2 * var(--space-5));
+    background: var(--surface-raised);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-full);
+    color: var(--accent);
+    font-family: var(--font-label);
+    font-weight: 300;
+    font-size: 0.75rem;
+    letter-spacing: 0.32em;
+    /* Č Ć Ž Š carry marks above the cap line — 1.4 is the floor in Croatian (§4.6) */
+    line-height: 1.4;
+    text-transform: uppercase;
+  }
+
+  .name {
+    font-family: var(--font-label);
+    font-size: 0.8125rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  /* `display-m` (§4). The clamp is the specification, not a suggestion: its floor of
+     2.125rem is above Cormorant's 26px display floor, below which `đ` loses its
+     crossbar. No `font-variant-numeric` here — see the note in the markup. */
+  .price {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.125rem, 5vw, 3.75rem);
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+
+  .period {
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--text-subtle);
+  }
+
+  /* The rule in §7.2's anatomy: price → period → rule → features. */
+  .features {
+    list-style: none;
+    display: grid;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+    padding-top: var(--space-5);
+    /* §5: body → CTA is 32 on desktop; the card's own 12px gap makes up the rest. */
+    margin-bottom: var(--space-5);
+    border-top: 1px solid var(--line);
+  }
+  .feature {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+  }
+  .mark {
+    flex: none;
+    color: var(--accent);
+    font-size: 0.75rem;
+  }
+
+  /* §7.5 primary. No width and no `white-space: nowrap`: the label decides the size, in
+     both languages and in both directions (§10). `margin-top: auto` is what pushes it to
+     the bottom of a card that is shorter than its neighbours. */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+    margin-top: auto;
+    padding-inline: var(--space-6);
+    border: 1px solid transparent;
+    border-radius: var(--radius-full);
+    background: var(--btn-bg);
+    color: var(--btn-fg);
+    font-family: var(--font-label);
+    font-size: 0.8125rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    text-decoration: none;
+    transition:
+      transform var(--dur-fast) var(--ease),
+      filter var(--dur-fast) var(--ease);
+  }
+  @media (min-width: 768px) {
+    .btn {
+      min-height: 56px;
+    }
+  }
+  .btn:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+  }
+</style>

@@ -757,3 +757,99 @@ export const SLOT_WITH_DANGLING_TEACHER: FixtureDoc = {
   start: '11:00',
   active: true,
 };
+
+/* -------------------------------------------------------------- pricing (MUSE-22) */
+
+/**
+ * **Tiers for `test/pricing.test.ts`, which renders the real component against them.**
+ *
+ * `TIER_ONE` and `TIER_TWO` above are shaped for `test/projections.test.ts` — they prove
+ * the GROQ projection and the `coalesce` ordering, and their names come out of
+ * `localeString()` as `HR tier one`. These are shaped for the other question: *is the
+ * number on the card the number in the CMS?* So every value here is one a human can
+ * check by eye in a failure message, every one is different from every other, and the
+ * HR and EN halves differ — a card that rendered the wrong locale, the wrong tier or the
+ * wrong field says so rather than coincidentally matching.
+ *
+ * **Nothing here may read as a price Mina might charge.** MUSE-36 is live right now
+ * because invented-but-plausible placeholder content escaped a fixture, and a *price* is
+ * worse than a timetable: somebody budgets around it, and it is a commercial claim. So
+ * the amounts are `42`, `7` and `1234` — arithmetic, not a price list — and the packages
+ * are `Tier A`, `Tier B`, `Tier C`. If any of these strings ever appears in `dist`, that
+ * is the bug, and it should be obvious at a glance that it is.
+ *
+ * The three amounts also cover the three shapes `formatPrice` has to get right: two
+ * digits, one digit, and four digits with a thousands separator that differs by language.
+ */
+function tierDoc(
+  tag: string,
+  priceEur: number,
+  period: string,
+  featured: boolean,
+  order: number,
+  features: readonly string[],
+): FixtureDoc {
+  return {
+    _id: `pricing-tier-${tag.toLowerCase()}`,
+    _type: 'pricingTier',
+    name: { _type: 'localeString', hr: `Tier ${tag} HR`, en: `Tier ${tag} EN` },
+    priceEur,
+    period,
+    features: features.map((feature) => ({
+      _type: 'localeString',
+      hr: `${feature} HR`,
+      en: `${feature} EN`,
+    })),
+    featured,
+    order,
+  };
+}
+
+/** The featured one, when there is one. Two features, so the list is a list. */
+export const PRICING_TIER_A: FixtureDoc = tierDoc('A', 42, 'class', true, 0, [
+  'Feature A1',
+  'Feature A2',
+]);
+
+export const PRICING_TIER_B: FixtureDoc = tierDoc('B', 7, 'month', false, 1, [
+  'Feature B1',
+]);
+
+/** Four digits, so the thousands separator is exercised: `1.234 €` vs `€1,234`. */
+export const PRICING_TIER_C: FixtureDoc = tierDoc('C', 1234, 'package', false, 2, [
+  'Feature C1',
+]);
+
+/**
+ * Each dataset carries the singleton (the form reads the studio inbox from it) and the
+ * draft tier from {@link DRAFTS}, so every assertion about the rendered page also runs
+ * against a dataset holding a tier nobody published — the unfinished price
+ * `src/lib/sanity/client.ts` names as the reason `perspective: 'published'` exists.
+ * `DRAFT_TIER` carries `order: -1`, so a leak is the *first* card on the page.
+ */
+const withFixtures = (...tiers: FixtureDoc[]): FixtureDoc[] => [
+  SITE_SETTINGS_DOC,
+  DRAFT_TIER,
+  ...tiers,
+];
+
+/** One tier ticked as featured: the state the acceptance criterion describes. */
+export const PRICING_ONE_FEATURED: FixtureDoc[] = withFixtures(
+  PRICING_TIER_A,
+  PRICING_TIER_B,
+  PRICING_TIER_C,
+);
+
+/** Two ticked. Nothing in the schema stops this; the page has to decide. */
+export const PRICING_TWO_FEATURED: FixtureDoc[] = withFixtures(
+  PRICING_TIER_A,
+  { ...PRICING_TIER_B, featured: true },
+  PRICING_TIER_C,
+);
+
+/** None ticked. A price list with nothing singled out is still a price list. */
+export const PRICING_NONE_FEATURED: FixtureDoc[] = withFixtures(
+  { ...PRICING_TIER_A, featured: false },
+  PRICING_TIER_B,
+  PRICING_TIER_C,
+);

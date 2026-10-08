@@ -1,9 +1,17 @@
 ---
+// Nothing new is imported here, and that is deliberate (MUSE-43). `/contact`'s own
+// header note measures it: introducing a module to this graph *below* the `TrialForm`
+// import on that page reorders the built `<head>`. `PACKAGE_FIELD` therefore joins the
+// `../lib/forms` import that is already in the graph rather than arriving as a new
+// specifier. Verified by `diff -r` of two builds — see the pull request.
 import {
   FORM_COPY,
   FORM_ENDPOINT,
   FORM_FIELDS,
   HONEYPOT_FIELD,
+  PACKAGE_FIELD,
+  type FieldDef,
+  type LevelOption,
   requiredMessage,
 } from '../lib/forms';
 import { localeUrl, type Locale } from '../lib/i18n';
@@ -52,9 +60,38 @@ import { getSiteSettings } from '../lib/sanity';
  */
 interface Props {
   locale: Locale;
+  /**
+   * The packages a visitor may be enrolling in, if the page has any (MUSE-22).
+   *
+   * Given a non-empty list the form grows one extra `<select name="package">`, ahead of
+   * the other fields, offering "no package chosen" plus these. Given nothing — which is
+   * `/` and `/contact` — the form is exactly what it was: same fields, same order, same
+   * bytes. That is the whole of the extension, and it is an extension rather than a
+   * second form because the validation, the honeypot, the single `role="alert"`, the
+   * `method="dialog"` that makes the no-JavaScript 405 unreachable and the failure copy
+   * that carries no diagnostics are all one implementation (MUSE-15) and a fork would be
+   * a second copy of every one of them.
+   *
+   * `value` is what the studio inbox receives and `label` is what the visitor reads —
+   * the same split `copy.levels` makes, for the same reason. `src/lib/pricing.ts`
+   * decides what a package's value is.
+   */
+  packages?: readonly LevelOption[];
 }
-const { locale } = Astro.props;
+const { locale, packages } = Astro.props;
 const copy = FORM_COPY[locale];
+
+/** The package field exists only where there is something to choose. */
+const fields: readonly FieldDef[] =
+  packages !== undefined && packages.length > 0
+    ? [PACKAGE_FIELD, ...FORM_FIELDS]
+    : FORM_FIELDS;
+
+/** A `<select>`'s options: the packages for `package`, the levels for `level`. */
+const optionsFor = (field: FieldDef): readonly LevelOption[] =>
+  field.name === 'package'
+    ? [{ value: '', label: copy.packageAny }, ...(packages ?? [])]
+    : copy.levels;
 
 /**
  * The inbox a failed submission falls back to is content (MUSE-20), read here in
@@ -102,7 +139,7 @@ const privacyHref = localeUrl('/privacy', locale);
 
     <div class="grid">
       {
-        FORM_FIELDS.map((field) => {
+        fields.map((field) => {
           const id = `trial-${field.name}`;
           const hint = copy.hints[field.name];
           return (
@@ -129,7 +166,7 @@ const privacyHref = localeUrl('/privacy', locale);
                     data-msg-required={requiredMessage(copy, field.name)}
                     data-msg-toolong={copy.tooLong}
                   >
-                    {copy.levels.map((option) => (
+                    {optionsFor(field).map((option) => (
                       <option value={option.value}>{option.label}</option>
                     ))}
                   </select>
