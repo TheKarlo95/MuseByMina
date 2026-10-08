@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdirSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -9,9 +10,20 @@ const ROOT = fileURLToPath(new URL('../..', import.meta.url));
  * The one directory anything under `test/` builds into, and the only path anything under
  * `test/` deletes.
  *
- * Inside the repo rather than `os.tmpdir()` on purpose: Astro moves files out of its
- * build staging area with `fs.rename`, which fails with EXDEV when the output directory
- * is on a different filesystem.
+ * **Inside the repository, and that is a requirement rather than a preference**
+ * (MUSE-41). Astro stages a build's prerendered output in `<outDir>/.prerender/` only
+ * while `outDir` sits under the working directory, and otherwise in `<cwd>/.astro/`,
+ * renaming every emitted asset out of there — which is `EXDEV` across a filesystem
+ * boundary, and one directory shared by every concurrent build when it is not. So moving
+ * this to `os.tmpdir()` does not merely risk a cross-device build: it puts all ten of
+ * them back on a single staging path, which is MUSE-17 with the names taken away.
+ *
+ * This used to be the paragraph above as a comment that happened to be true — it was
+ * written before MUSE-35 emitted any assets, so there was nothing to move and nothing
+ * would have broken. It is now checked: `astro.config.mjs` refuses a build that would
+ * stage outside its own output, and `test/isolation.test.ts` asserts both that this path
+ * is under the project root and that two builds the helper hands out get two staging
+ * directories.
  *
  * `test/helpers/clean-scratch.ts` prunes it once per run as a `globalSetup`, before any
  * worker exists, and prunes **by age** — it is the last shared mutable path in a design
@@ -163,6 +175,50 @@ export function astroBuild(env: NodeJS.ProcessEnv, hint?: string): string {
 
   BUILD_LOGS.set(outDir, said);
   return outDir;
+}
+
+/**
+ * Run `astro build` into a directory **outside** the project root, and hand back what it
+ * said. **This is expected to fail**, and the failure is the subject (MUSE-41).
+ *
+ * Every other caller here gets a directory under `SCRATCH`, because that is the only
+ * place a build can stage safely. This one deliberately asks for the opposite, so that
+ * "the build refuses it, naming the cause" is a claim about a real `astro build` rather
+ * than about a function called in isolation — the acceptance criterion is phrased against
+ * `astro build --outDir`, and before the guard this exited non-zero from inside
+ * `ssrMoveAssets` with an `EXDEV` stack.
+ *
+ * `os.tmpdir()` for the same reason: on the machine this was found on it is a tmpfs, so
+ * it is the cross-device case as well as the outside-the-root one. The guard fires on the
+ * second, which makes the test deterministic wherever `/tmp` happens to live.
+ *
+ * It lives here rather than in the suite because this module is the single entry on
+ * `test/isolation.test.ts`'s child-process allow-list, and a new name on that list per
+ * new need is the defect that file exists to stop. Nothing is written to the directory —
+ * the guard runs in `astro:config:setup` — and nothing deletes it, like everywhere else
+ * here; it is an empty `mkdtemp` directory under the system temp root.
+ */
+export function astroBuildOutside(hint?: string): {
+  outDir: string;
+  status: number | null;
+  output: string;
+} {
+  const outDir = mkdtempSync(join(tmpdir(), `muse-outside-${label(hint) || 'suite'}-`));
+
+  const childEnv: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of VITEST_LEAKS) delete childEnv[key];
+
+  const child = spawnSync('npx', ['astro', 'build', '--outDir', outDir], {
+    cwd: ROOT,
+    env: { ...childEnv, BUILD_CACHE_DIR: cacheDirFor(claimOutDir(hint)) },
+    stdio: 'pipe',
+  });
+
+  return {
+    outDir,
+    status: child.status,
+    output: `${String(child.stdout ?? '')}\n${String(child.stderr ?? '')}`,
+  };
 }
 
 /** What each successful build printed, keyed by the directory it built into. */

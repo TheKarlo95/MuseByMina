@@ -8,15 +8,23 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, extname, join, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { dirname, extname, isAbsolute, join, relative } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import type { TestCase, TestModule } from 'vitest/node';
 import { describe, expect, it, vi } from 'vitest';
 
 import pruneScratch from './helpers/clean-scratch';
 import HookFailureReporter from './helpers/hook-failure-reporter';
-import { astroBuild, cacheDirFor, claimOutDir, SCRATCH } from './helpers/scratch';
+import {
+  astroBuild,
+  astroBuildOutside,
+  cacheDirFor,
+  claimOutDir,
+  SCRATCH,
+} from './helpers/scratch';
 import {
   buildDirectoryNames,
   copyPasteTripwire,
@@ -53,6 +61,9 @@ import {
  *   7. Nothing under `test/` waits on the clock instead of on a condition (MUSE-54).
  *      That rule reaches the fixed sleep and not the other two shapes MUSE-54 found; what
  *      it cannot see is written out at `fixedSleeps` and asserted below.
+ *   8. Every build **stages** inside its own output directory (MUSE-41) — the third
+ *      directory a build writes, after the output and the caches, and the one that is
+ *      invisible to (3) because Astro derives it rather than us naming it.
  *
  * (5) is deliberately about *child processes*, not about `astro build`. MUSE-35 needed
  * a real `astro dev` — the bug it fixes is invisible to anything that reads `dist` —
@@ -239,6 +250,164 @@ describe('the one wipe in the tree cannot reach a live build', () => {
 
     expect(existsSync(stale)).toBe(false);
   });
+});
+
+describe('a build stages its prerendered output where it writes it', () => {
+  /**
+   * MUSE-41 — the third directory a build writes, and the one no suite names.
+   *
+   * `BUILD_CACHE_DIR` above fixed the second. The third is Astro's prerender staging
+   * area, and nothing chose it: `getOutDirWithinCwd` stages in `<outDir>/.prerender/`
+   * **only when `outDir` starts with `process.cwd()`**, and otherwise falls back to
+   * `<cwd>/.astro/` and renames every emitted asset out of it. Both failures were
+   * measured on this tree before the guard went in:
+   *
+   *   - a build into `/tmp` (a tmpfs here) died in `ssrMoveAssets` with
+   *     `EXDEV: cross-device link not permitted` and an Astro stack that never mentions
+   *     `outDir`;
+   *   - two concurrent builds outside the root both exited 0 and printed
+   *     `9 page(s) built` … `Complete!`, and the second had **no `_astro/` directory at
+   *     all** while its HTML still linked the stylesheet and all six fonts. The first
+   *     build had renamed them out of the shared staging directory.
+   *
+   * `test/isolation.test.ts`'s other rules cannot see this: they are about the
+   * directories *we* name, and this is a directory Astro derives. So the invariant is
+   * stated positively instead — **a build's staging directory is inside its own output
+   * directory** — which makes it per-build (the output is minted with `mkdtemp`) and
+   * on the output's own filesystem, both by construction.
+   *
+   * None of this leans on `SCRATCH` happening to sit inside the repository. That is the
+   * property the ticket asked for and the reason the second test below is the one with
+   * teeth: move `SCRATCH` to `os.tmpdir()` and every build's staging directory collapses
+   * onto the one shared path, which it reports.
+   */
+
+  it("models Astro's staging directory, pinned to Astro's own resolver", async () => {
+    // The model is ours — Astro exposes no setting and no supported export for this
+    // (checked: `getPrerenderOutputDirectory` is the only caller and it takes nothing
+    // but `config.outDir`). So it is pinned to the real function, the way
+    // `queryParameters` is pinned to the real GROQ parser: a model nothing compares to
+    // the thing it models is a second opinion, not a guard.
+    const { prerenderStagingDir } = await loadStagingRules();
+    const astroSays = await astroStagingResolver();
+
+    const cwd = process.cwd();
+    for (const outDir of [
+      join(cwd, 'dist'),
+      claimOutDir('staging'),
+      join(tmpdir(), 'elsewhere'),
+      join(dirname(cwd), 'sibling', 'dist'),
+      // The quirk worth modelling faithfully rather than tidying: Astro's test is a raw
+      // string prefix with no separator, so a *sibling* whose name extends the root's
+      // counts as inside it and stages locally. That build is safe, and a stricter model
+      // would reject it for no reason.
+      `${cwd}-other/dist`,
+      cwd,
+    ]) {
+      expect(prerenderStagingDir(outDir, cwd), outDir).toBe(astroSays(outDir, cwd));
+    }
+  });
+
+  it('stages two concurrent builds in two different directories', async () => {
+    // The acceptance criterion, against the directories the helper really hands out.
+    // Two builds in flight at once is the ordinary state of this suite — there are ten.
+    const { prerenderStagingDir } = await loadStagingRules();
+
+    const [first, second] = [claimOutDir('staging'), claimOutDir('staging')];
+    const staging = [prerenderStagingDir(first), prerenderStagingDir(second)];
+
+    expect(staging[0]).not.toBe(staging[1]);
+    expect(within(staging[0]!, first)).toBe(true);
+    expect(within(staging[1]!, second)).toBe(true);
+    expect(staging[0]).not.toBe(SHARED_STAGING);
+    expect(staging[1]).not.toBe(SHARED_STAGING);
+  });
+
+  it('would share one directory if the scratch root left the project', async () => {
+    // The inverse, written out so the test above is known to have teeth rather than
+    // assumed to. `SCRATCH` under `os.tmpdir()` was a legal edit before MUSE-35 and is
+    // the first thing a reader is tempted to do; it collapses every build onto one
+    // staging path, which is MUSE-17 with the names taken away.
+    const { prerenderStagingDir } = await loadStagingRules();
+
+    const elsewhere = [join(tmpdir(), 'muse-builds', 'a'), join(tmpdir(), 'muse-builds', 'b')];
+    const staging = elsewhere.map((dir) => prerenderStagingDir(dir));
+
+    expect(staging[0]).toBe(staging[1]);
+    expect(staging[0]).toBe(SHARED_STAGING);
+  });
+
+  it('keeps the scratch root inside the project root', () => {
+    // Criterion four: the constraint was a comment in `test/helpers/scratch.ts` that
+    // happened to be true. Now it is read off the value.
+    expect(within(SCRATCH, ROOT), `${SCRATCH} is not under ${ROOT}`).toBe(true);
+  });
+
+  it('refuses an outDir that would stage anywhere else, naming the cause', async () => {
+    const { stagingFault } = await loadStagingRules();
+    const cwd = process.cwd();
+
+    expect(stagingFault(join(cwd, 'dist'), cwd)).toBeNull();
+    expect(stagingFault(claimOutDir('staging'), cwd)).toBeNull();
+
+    const fault = stagingFault(join(tmpdir(), 'muse-dist'), cwd);
+    expect(fault).not.toBeNull();
+    // Named: the output it was given, the directory it would have staged in, and the
+    // two things that go wrong there. An EXDEV stack out of `ssrMoveAssets` names none
+    // of them, which is why this is a message rather than a `try`/`catch`.
+    expect(fault).toContain(join(tmpdir(), 'muse-dist'));
+    expect(fault).toContain(SHARED_STAGING);
+    expect(fault).toContain('EXDEV');
+    expect(fault).toContain('MUSE-41');
+  });
+
+  it('refuses it in a real build, before anything is staged', () => {
+    // The whole point of the ticket, end to end: `npx astro build --outDir` at another
+    // filesystem. `/tmp` is a tmpfs on the machine this was found on, so before the
+    // guard this exited non-zero from `ssrMoveAssets`; the failure is now the config's
+    // and it arrives before a single file is written.
+    const { status, output, outDir } = astroBuildOutside('staging');
+
+    expect(status, output).not.toBe(0);
+    expect(output).toContain('MUSE-41');
+    expect(output).toContain(outDir);
+    expect(output).not.toContain('EXDEV:');
+    expect(output).not.toContain('ssrMoveAssets');
+
+    // And nothing was staged, so there is no 233KB of orphaned entry chunk to find
+    // later: the build never got as far as emitting one.
+    expect(existsSync(join(outDir, '_astro'))).toBe(false);
+  }, 120_000);
+
+  it('leaves the directory every build would have shared alone', () => {
+    // The same claim as a side effect of a real build rather than as arithmetic over
+    // paths. Astro removes its staging directory when it is done with it (`fs.rm`, at
+    // the end of `viteBuild`), so a witness placed in the shared one is deleted by any
+    // build that stages there — including one in another worker, which is the concurrent
+    // case. A build that stages under its own output cannot reach it.
+    mkdirSync(SHARED_STAGING, { recursive: true });
+    const witness = join(SHARED_STAGING, 'MUSE-41-witness.txt');
+    writeFileSync(
+      witness,
+      'Placed by test/isolation.test.ts. If a build stages here it deletes this file.\n',
+    );
+
+    astroBuild({}, 'staging');
+
+    expect(
+      existsSync(witness),
+      `${witness} was deleted, so a build staged in the directory every build shares`,
+    ).toBe(true);
+  }, 180_000);
+
+  /** Where every build would stage if `outDir` left the project root. */
+  const SHARED_STAGING = join(process.cwd(), '.astro', '.prerender');
+
+  /** Is `child` inside `parent`? */
+  function within(child: string, parent: string): boolean {
+    const step = relative(parent, child);
+    return step !== '' && !step.startsWith('..') && !isAbsolute(step);
+  }
 });
 
 describe('the rules are enforced on the test tree, not remembered', () => {
@@ -551,6 +720,75 @@ describe('the run reports a dead hook rather than swallowing it', () => {
     expect(reportOn([passedModule('test/contact.test.ts', [ranTest('passed')])])).toBe('');
   });
 });
+
+/**
+ * The two staging rules out of `astro.config.mjs` (MUSE-41).
+ *
+ * The config is the one place the rule is written — it is in front of every build there
+ * is, including a hand-typed `npx astro build` — so the test reads it from there rather
+ * than keeping a copy.
+ */
+async function loadStagingRules(): Promise<StagingRules> {
+  vi.resetModules();
+  return (await import('../astro.config.mjs')) as unknown as StagingRules;
+}
+
+/** The named exports of `astro.config.mjs` this file has an opinion about. */
+interface StagingRules {
+  prerenderStagingDir(outDir: string, cwd?: string): string;
+  stagingFault(outDir: string, cwd?: string): string | null;
+}
+
+/**
+ * Astro's *own* answer to "where will this build stage its prerendered output", as a
+ * function of `outDir` and `cwd`.
+ *
+ * `getPrerenderOutputDirectory` is not on Astro's `exports` map, so it is reached through
+ * the package's resolved entry point rather than by spelling a path — which also keeps
+ * this file clear of `test/isolation.test.ts`'s own rule about naming build directories.
+ *
+ * If a future Astro moves or renames it this throws at import, and that is the intended
+ * outcome: the model in `astro.config.mjs` is a model of this function, and an Astro
+ * upgrade is exactly when somebody needs to look at it again. The message says so.
+ */
+async function astroStagingResolver(): Promise<
+  (outDir: string, cwd: string) => string
+> {
+  const entry = createRequire(import.meta.url).resolve('astro');
+  const utils = new URL('./prerender/utils.js', pathToFileURL(entry));
+
+  let resolve: (settings: unknown) => URL;
+  try {
+    const loaded = (await import(utils.href)) as {
+      getPrerenderOutputDirectory?: (settings: unknown) => URL;
+    };
+    if (loaded.getPrerenderOutputDirectory === undefined) throw new Error('not exported');
+    resolve = loaded.getPrerenderOutputDirectory;
+  } catch (cause) {
+    throw new Error(
+      `Could not read Astro's own staging-directory resolver at ${utils.pathname}. ` +
+        `prerenderStagingDir() in astro.config.mjs models that function (MUSE-41); if ` +
+        `Astro has moved it, re-derive the model against the new one rather than ` +
+        `deleting this test.`,
+      { cause },
+    );
+  }
+
+  return (outDir, cwd) => {
+    const was = process.cwd();
+    try {
+      process.chdir(cwd);
+      const url = resolve({
+        buildOutput: 'static',
+        adapter: undefined,
+        config: { outDir: pathToFileURL(`${outDir}/`) },
+      });
+      return fileURLToPath(url).replace(/[/\\]$/, '');
+    } finally {
+      process.chdir(was);
+    }
+  };
+}
 
 /**
  * `astro.config.mjs`, evaluated with `BUILD_CACHE_DIR` set to `cacheRoot`.
