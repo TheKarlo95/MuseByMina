@@ -253,6 +253,22 @@ describe('the locale it pins is the site’s own', () => {
     }
   });
 
+  it('cannot have the pin overridden by a raw context option', async () => {
+    // `context` is a passthrough to Playwright, so `locale` is reachable from there. If a
+    // caller could set it, the bug would be back with the door's name on it — the one
+    // option the passthrough does not carry.
+    const open = await openCheckPage(browser, preview, '/', {
+      context: { locale: 'en-US' } as { locale: string },
+    });
+    try {
+      const page = await served(open.page);
+      expect(page.navigator).toBe('hr-HR');
+      expect(page.pathname).toBe('/MuseByMina/');
+    } finally {
+      await open.close();
+    }
+  });
+
   it('refuses a locale it has no browser language for', async () => {
     await expect(
       openCheckPage(browser, preview, '/', { locale: 'de' }),

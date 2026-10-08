@@ -242,8 +242,11 @@ export async function openCheckPage(browser, site, route, options = {}) {
 
   const url = site.url(route);
   const context = await browser.newContext({
-    locale: navigatorLocaleFor(locale),
     ...contextOptions,
+    // After the spread, not before: the pin is the one option a caller may not quietly
+    // override with a raw `context: { locale }`, because that would be this bug with the
+    // door's name on it.
+    locale: navigatorLocaleFor(locale),
   });
 
   try {
@@ -346,8 +349,10 @@ export async function openRedirectProbe(
   }
 
   const context = await browser.newContext({
-    locale: navigatorLocale,
     ...contextOptions,
+    // Last, as in `openCheckPage`: the browser language this probe was handed is the
+    // whole point of it and is not a default to be overridden from the side.
+    locale: navigatorLocale,
   });
 
   try {
