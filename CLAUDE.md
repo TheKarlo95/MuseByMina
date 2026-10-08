@@ -954,6 +954,20 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   read-contract check, the compile-time assertions in `src/lib/sanity/shape.ts`, and
   `test/sanity.test.ts`. `.github/workflows/studio.yml`'s `paths:` filter has to be the
   same list, and `test/sanity.test.ts` asserts that rather than a comment asking nicely.
+
+  **The read-contract list is hand-written and is asserted complete** (MUSE-66), because it
+  used to be only the first: `studioStory` had never been a key, so the whole body of
+  `/aboutus` was outside layer two from MUSE-23 that built it to MUSE-60 that published it. It stays hand-written — what it
+  holds per type is the *projected subset* of that type's fields, which the schema cannot
+  supply without being asserted against itself — and is pinned from both sides instead. The
+  gate fails on a document type in `sanity/schema.json` that is neither covered nor named
+  in `NOT_READ` with the reason nothing reads it, so a new type forces the decision; each
+  exemption (Sanity's two asset types, and nothing else) is asserted to still name a type
+  that exists. `test/sanity.test.ts` holds the other side with `groq-js`: the contract is
+  exactly the types the queries select on, field for field. **A field that is only sorted
+  by belongs on the list too** — `order`, on five types. It is projected by nothing, so it
+  is absent from the generated types and `astro check` cannot see it move; renaming it
+  reorders a published page with no slot left blank and every other gate green.
 - **"Fails the build" means `npm run build`, which is three commands.**
   `sanity:check` → `astro check` → `astro build`. `astro check` is *inside* the script,
   not a step beside it in CI, because `deploy.yml` runs `npm run build` and nothing else
