@@ -44,10 +44,17 @@ describe('the built site ships no JavaScript files and no CMS client', () => {
   it('emits only the file types a static content site needs', () => {
     // An allow-list rather than a deny-list: a format nobody chose is exactly what
     // arriving unnoticed looks like.
+    //
+    // `webp` joined the list in MUSE-64, with the brand lockup — the first image the
+    // site has ever shipped. One entry and one file: `test/lockup.test.ts` holds the
+    // count, and `scripts/budget.mjs` holds what it may weigh. Note what this list
+    // deliberately does *not* say: there is no `png`, `jpg` or `svg` here, so the source
+    // raster reaching `dist` by being pointed at in `public/` is a failure of this line
+    // as well as of that suite.
     const extensions = [
       ...new Set(build.allFiles().map((file) => file.replace(/^.*\./, ''))),
     ].sort();
-    expect(extensions).toEqual(['css', 'html', 'txt', 'woff2', 'xml']);
+    expect(extensions).toEqual(['css', 'html', 'txt', 'webp', 'woff2', 'xml']);
   });
 
   it('mentions no Sanity client, query or configuration anywhere in the output', () => {
