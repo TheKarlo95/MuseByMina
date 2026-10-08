@@ -1,4 +1,31 @@
 ---
+/**
+ * **First, and it has to stay first (MUSE-43).**
+ *
+ * `globals.css` is `@font-face`, the `:root` tokens, the reset and the element
+ * defaults — the layer everything else overrides. Astro orders the stylesheets it emits
+ * by *import-crawl order*, so the position of this line is what decides whether the
+ * globals land before or after every scoped stylesheet in the built `<head>`, and
+ * whether they land before or after the header's and footer's scoped rules inside the
+ * one chunk they share. Below the component imports, as it was, the globals came
+ * **last** on all nine pages, so the foundation won every tie instead of losing it.
+ *
+ * Nothing renders differently today — twelve full-page screenshots, six routes, both
+ * themes, byte-identical across the move — because Astro's scoping means no global rule
+ * currently *ties* with a component rule. That is a property of today's CSS, not an
+ * invariant: one `:global()` escape hatch creates a tie, and `font-variant-numeric` is
+ * single-valued, so a global `:root` winning one is how MUSE-14's `II:OO` comes back
+ * with the column still neatly aligned.
+ *
+ * This is Astro's own documented advice, one level in: *import the layout component
+ * before other imports so that it has the lowest precedence.* There is no config for
+ * it — stylesheet order is not configurable in Astro, the import position is the only
+ * lever — so `test/cascade.test.ts` asserts the resulting order against `dist` rather
+ * than this comment asking nicely. MUSE-35 and MUSE-20 both moved the cascade by
+ * adding an ordinary import, and a comment beside an import is not a guard.
+ */
+import '../styles/globals.css';
+
 import { THEME_INIT_SCRIPT } from '../lib/theme';
 import { langInitScript } from '../lib/lang';
 import {
@@ -28,7 +55,6 @@ import cormorantLatin from '../assets/fonts/cormorant-garamond-latin.woff2?url';
 import interLatin from '../assets/fonts/inter-400-600-latin.woff2?url';
 import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
-import '../styles/globals.css';
 
 interface Props {
   locale: Locale;
