@@ -35,16 +35,34 @@ import { LEVELS, LEVEL_NAME, type Level } from './schedule';
  */
 export const FORM_ENDPOINT: string = (import.meta.env.PUBLIC_FORM_ENDPOINT ?? '').trim();
 
-export type FieldName = 'name' | 'email' | 'phone' | 'level' | 'message' | 'package';
+/**
+ * The fields every page's form has, and the keys into `labels`, `hints`, `required`
+ * and `format`.
+ *
+ * `'package'` is deliberately **not** one of them (MUSE-53). Those four maps are keyed
+ * by this type, so `copy.labels['package']` does not type-check and the package field
+ * cannot be rendered by dropping it into `FORM_FIELDS` — its copy lives in a group of
+ * its own, `FormCopy['package']`, reachable only from the one branch of `formFields()`
+ * that requires the `packages` argument. Placement is carried by the type here and by
+ * `GATED_COPY` below in the one place the type cannot reach.
+ */
+export type CoreFieldName = 'name' | 'email' | 'phone' | 'level' | 'message';
+
+export type FieldName = CoreFieldName | 'package';
 
 export interface FieldDef {
-  /** Submitted name, element id suffix, and the key into every copy map below. */
+  /** Submitted name and element id suffix. */
   name: FieldName;
   kind: 'text' | 'email' | 'tel' | 'select' | 'textarea';
   required: boolean;
   /** Omitted for `level`, which no browser can autofill. */
   autocomplete?: string;
   maxlength?: number;
+}
+
+/** A field whose copy is in the `CoreFieldName`-keyed maps — i.e. every field but one. */
+export interface CoreFieldDef extends FieldDef {
+  name: CoreFieldName;
 }
 
 /**
@@ -55,7 +73,7 @@ export interface FieldDef {
  * that defaults to "not sure" — asking a beginner to self-assess is the fastest way
  * to lose them.
  */
-export const FORM_FIELDS: readonly FieldDef[] = [
+export const FORM_FIELDS: readonly CoreFieldDef[] = [
   { name: 'name', kind: 'text', required: true, autocomplete: 'name', maxlength: 120 },
   { name: 'email', kind: 'email', required: true, autocomplete: 'email', maxlength: 160 },
   { name: 'phone', kind: 'tel', required: false, autocomplete: 'tel', maxlength: 40 },
@@ -67,14 +85,27 @@ export const FORM_FIELDS: readonly FieldDef[] = [
  * **"Which package?" — the one field `/pricing` needs and the other two pages must not
  * grow** (MUSE-22).
  *
- * Deliberately *not* in `FORM_FIELDS`. `TrialForm.astro` renders it only when it is
- * handed a non-empty `packages` list, which is only on the pricing page: on `/` and
- * `/contact` there is nothing to choose from, and a `<select>` with one blank option is
- * a question the visitor cannot answer. `test/pricing.test.ts` renders the form with no
- * packages and asserts the field is absent, and it is the only thing that would catch
- * the mistake: `test/trialform.test.ts` subtracts every string in this table from what
- * `/contact` renders, so `packageAny` leaking onto that page is subtracted away and its
- * suite stays green. Measured, not assumed.
+ * Deliberately *not* in `FORM_FIELDS` — and no longer *able* to be in it (MUSE-53).
+ * `FORM_FIELDS` is `CoreFieldDef[]`, whose `name` excludes `'package'`, because the
+ * copy maps keyed by that type have no `package` entry: the field's three strings are
+ * `FormCopy['package']`, and the only code that reads them is the branch of
+ * `formFields()` below that takes the `packages` argument. So "this field exists where
+ * there are packages" is a fact about which values are reachable rather than a rule
+ * somebody has to remember.
+ *
+ * It is rendered only when the form is handed a non-empty `packages` list, which is
+ * only the pricing page: on `/` and `/contact` there is nothing to choose from, and a
+ * `<select>` with one blank option is a question the visitor cannot answer.
+ *
+ * **What guards it, and why it took two mechanisms.** `test/pricing.test.ts` asserts
+ * the field is absent from a form rendered with no packages — correct, and for a long
+ * time the only thing that would have caught the mistake, because the residue guard in
+ * `test/trialform.test.ts` subtracts every string in this table from what `/contact`
+ * renders and so subtracts a leaked `package.any` away. That guard answers
+ * *provenance*, not *placement* (MUSE-53). Placement is now `GATED_COPY` plus the
+ * suite in `test/formcopy.test.ts` that renders this component under every prop shape:
+ * it covers this field, and it covers the next gated string without its author having
+ * to know any of this.
  *
  * **Extending the existing form rather than forking it** is the ticket's instruction and
  * the right call anyway: the validation, the honeypot, the single `role="alert"`, the
@@ -87,7 +118,11 @@ export const FORM_FIELDS: readonly FieldDef[] = [
  * just clicked, and a form that opens by confirming the choice reads as continuing an
  * action rather than starting a new one.
  */
-export const PACKAGE_FIELD: FieldDef = { name: 'package', kind: 'select', required: false };
+export const PACKAGE_FIELD: FieldDef & { name: 'package' } = {
+  name: 'package',
+  kind: 'select',
+  required: false,
+};
 
 /**
  * Formspark drops any submission whose `_gotcha` is non-empty, and the component
@@ -163,14 +198,25 @@ function levelOptions(locale: Locale, notSure: string): readonly LevelOption[] {
   ];
 }
 
-export interface FormCopy {
-  /** Accessible name for the `<form>` itself. */
-  formLabel: string;
-  labels: Record<FieldName, string>;
-  /** Appended to the label of a field that may be left blank. */
-  optional: string;
-  hints: Partial<Record<FieldName, string>>;
-  levels: readonly LevelOption[];
+/**
+ * **The one group of strings this form says only on some of the pages that render it.**
+ *
+ * A group rather than three fields beside `submit` and `optional`, and that is the
+ * whole of MUSE-53's structural half. `labels` and `hints` are keyed by
+ * `CoreFieldName`, so these three cannot be reached by the loop that renders every
+ * other field; `formFields()` reads them in exactly one branch, the one that takes a
+ * `packages` argument. A string put in here is gated by construction, and
+ * `GATED_COPY` tells the suite that it is, so `test/formcopy.test.ts` checks it on
+ * every prop shape the component is rendered under.
+ *
+ * Put a fourth package string in here rather than at the top level, and nothing else
+ * has to be done for it to be covered.
+ */
+export interface PackageCopy {
+  /** The field's visible label. */
+  label: string;
+  /** The line under it. */
+  hint: string;
   /**
    * The blank first option of the package `<select>` — "no package chosen".
    *
@@ -179,15 +225,27 @@ export interface FormCopy {
    * option that is not one of the things being offered, so it is the one with prose of
    * its own.
    */
-  packageAny: string;
+  any: string;
+}
+
+export interface FormCopy {
+  /** Accessible name for the `<form>` itself. */
+  formLabel: string;
+  labels: Record<CoreFieldName, string>;
+  /** Appended to the label of a field that may be left blank. */
+  optional: string;
+  hints: Partial<Record<CoreFieldName, string>>;
+  levels: readonly LevelOption[];
+  /** Everything the package field says — and nothing any other page says (MUSE-53). */
+  package: PackageCopy;
   submit: string;
   sending: string;
   /** The single alert raised when validation stopped a submit. */
   invalid: string;
   /** Used when a field has no message of its own. */
   requiredAny: string;
-  required: Partial<Record<FieldName, string>>;
-  format: Partial<Record<FieldName, string>>;
+  required: Partial<Record<CoreFieldName, string>>;
+  format: Partial<Record<CoreFieldName, string>>;
   tooLong: string;
   sentTitle: string;
   sentBody: string;
@@ -246,17 +304,19 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
       phone: 'Broj telefona',
       level: 'Razina',
       message: 'Poruka',
-      package: 'Paket',
     },
     optional: 'neobavezno',
     hints: {
       phone: 'Ako ti je draže da te nazovemo.',
       level: 'Ne znaš? Ostavi kako je i predložit ćemo ti.',
       message: 'Dolaziš s nekim? Imaš pitanje? Napiši nam.',
-      package: 'Možeš promijeniti ili ostaviti neodabrano.',
     },
     levels: levelOptions('hr', 'Još ne znam'),
-    packageAny: 'Bez odabranog paketa',
+    package: {
+      label: 'Paket',
+      hint: 'Možeš promijeniti ili ostaviti neodabrano.',
+      any: 'Bez odabranog paketa',
+    },
     submit: 'Pošalji prijavu',
     sending: 'Šaljem…',
     invalid: 'Provjeri označena polja i pošalji ponovno.',
@@ -295,17 +355,19 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
       phone: 'Phone number',
       level: 'Level',
       message: 'Message',
-      package: 'Package',
     },
     optional: 'optional',
     hints: {
       phone: 'If you would rather we called you.',
       level: 'Not sure? Leave it as it is and we will suggest one.',
       message: 'Coming with someone? Got a question? Tell us.',
-      package: 'You can change this, or leave it unset.',
     },
     levels: levelOptions('en', 'Not sure yet'),
-    packageAny: 'No package chosen',
+    package: {
+      label: 'Package',
+      hint: 'You can change this, or leave it unset.',
+      any: 'No package chosen',
+    },
     submit: 'Send my request',
     sending: 'Sending…',
     invalid: 'Check the marked fields and send again.',
@@ -339,6 +401,121 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
 };
 
 /** The message shown when `field` is left blank. */
-export function requiredMessage(copy: FormCopy, field: FieldName): string {
+export function requiredMessage(copy: FormCopy, field: CoreFieldName): string {
   return copy.required[field] ?? copy.requiredAny;
 }
+
+/**
+ * One field, with every string it renders already attached.
+ *
+ * The component maps over these and reads nothing else — no `copy.labels[field.name]`,
+ * no `copy.hints[field.name]`, no `optionsFor(field)` (MUSE-53). That indirection was
+ * where placement went to hide: a loop that looks a field's copy up by name renders
+ * whatever field it is given, so adding the package field to the list it iterates was
+ * a one-token edit with no type error and no failing test outside
+ * `test/pricing.test.ts`. With the copy handed over per field instead, a field that
+ * exists has copy that was chosen for it, by name, in `formFields` below.
+ *
+ * Every property is present and nullable rather than optional, so `undefined` is a
+ * value the component passes straight to an attribute (Astro omits it) rather than a
+ * key it has to test for.
+ */
+export interface RenderField {
+  name: FieldName;
+  kind: FieldDef['kind'];
+  required: boolean;
+  autocomplete: string | undefined;
+  maxlength: number | undefined;
+  /** The visible label, above the control (§7.2). */
+  label: string;
+  /** The line between label and control, for the fields that have one. */
+  hint: string | undefined;
+  /** `data-msg-required`. */
+  requiredMessage: string;
+  /** `data-msg-format` — only the two fields whose format is validated have one. */
+  formatMessage: string | undefined;
+  /** A `<select>`'s options in document order; `undefined` for every other kind. */
+  options: readonly LevelOption[] | undefined;
+}
+
+/**
+ * **The fields the form renders, and the only way to get a string onto one of them.**
+ *
+ * Handed no packages this is `FORM_FIELDS` with its copy attached. Handed a non-empty
+ * list it grows one `<select>` in front, and that is the sole reader of
+ * `copy.package` — the three strings no other page may say.
+ *
+ * Both the component and `test/formcopy.test.ts` go through here, which is the point:
+ * the suite renders the component under each prop shape and asks which of the copy
+ * table's strings moved, so the gate is checked against behaviour rather than against
+ * a second description of it.
+ */
+export function formFields(
+  copy: FormCopy,
+  packages?: readonly LevelOption[],
+): readonly RenderField[] {
+  const core: readonly RenderField[] = FORM_FIELDS.map((def) => ({
+    name: def.name,
+    kind: def.kind,
+    required: def.required,
+    autocomplete: def.autocomplete,
+    maxlength: def.maxlength,
+    label: copy.labels[def.name],
+    hint: copy.hints[def.name],
+    requiredMessage: requiredMessage(copy, def.name),
+    formatMessage: copy.format[def.name],
+    options: def.kind === 'select' ? copy.levels : undefined,
+  }));
+
+  if (packages === undefined || packages.length === 0) return core;
+
+  return [
+    {
+      name: PACKAGE_FIELD.name,
+      kind: PACKAGE_FIELD.kind,
+      required: PACKAGE_FIELD.required,
+      autocomplete: PACKAGE_FIELD.autocomplete,
+      maxlength: PACKAGE_FIELD.maxlength,
+      label: copy.package.label,
+      hint: copy.package.hint,
+      // No `required` entry of its own, and it is optional anyway: a visitor who has
+      // not settled on a package should not be stopped.
+      requiredMessage: copy.requiredAny,
+      formatMessage: undefined,
+      options: [{ value: '', label: copy.package.any }, ...packages],
+    },
+    ...core,
+  ];
+}
+
+/**
+ * **Which strings in this table are gated, and on which prop (MUSE-53).**
+ *
+ * The residue guards elsewhere in the suite subtract every string this module declares
+ * from what a page renders and fail on the remainder. That answers *provenance* — did
+ * we write this? — and answers it well. It cannot answer *placement* — should this be
+ * here? — because a gated string is, by definition, something we wrote, so it is
+ * subtracted on the pages it must never appear on. Measured: ungating the package
+ * field left `test/trialform.test.ts` at 38 passed.
+ *
+ * This is the missing statement, written per *group* rather than per string and kept
+ * beside the strings it is about:
+ *
+ *   - the key is the component prop that unlocks the group;
+ *   - the value returns every string in it, read off the copy table, so a string added
+ *     to the group is covered the moment it exists;
+ *   - `test/formcopy.test.ts` renders the form under every prop shape and asserts a
+ *     gated string appears only where its gate is on.
+ *
+ * And the part that does not need anybody to come back here: that suite also asserts
+ * that **any** string whose presence varies between prop shapes is declared here. So a
+ * future gated string added at the top level of `FormCopy` — the ordinary edit that
+ * made this ticket — fails by name, with the shapes it appeared in, rather than
+ * quietly widening what the residue guards subtract.
+ */
+export const GATED_COPY = {
+  packages: (copy: FormCopy) => Object.values(copy.package),
+} satisfies Record<string, (copy: FormCopy) => readonly string[]>;
+
+/** The props of `TrialForm.astro` that unlock copy — i.e. the keys of `GATED_COPY`. */
+export type CopyGate = keyof typeof GATED_COPY;
