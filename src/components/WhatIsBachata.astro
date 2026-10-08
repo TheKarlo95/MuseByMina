@@ -1,0 +1,347 @@
+---
+import { localeUrl, type Locale } from '../lib/i18n';
+import {
+  LEVELS,
+  LEVEL_NAME,
+  WEEKDAY_NAME,
+  formatNames,
+  groupByDay,
+  minutesPhrase,
+  uniformDuration,
+} from '../lib/schedule';
+import { getProsePage, getSchedule } from '../lib/sanity';
+
+/**
+ * `/whatisbachata` — what the dance is, for somebody who has not done it (MUSE-65).
+ *
+ * The best organic entry point on the site: somebody searching "what is bachata" in
+ * Zagreb is exactly the reader the studio wants, and until this page existed the nav
+ * entry 404ed (MUSE-13). It is carved out of MUSE-27's four trust pages because it is the
+ * only one of the four whose content is **general knowledge rather than studio fact** —
+ * `/faq`, `/firstclass` and `/etiquette` all need things only Mina can tell us.
+ *
+ * ---------------------------------------------------------------------------------
+ * **The content rule, which is the whole risk of the page.**
+ *
+ * Every sentence a visitor reads here is one of two things:
+ *
+ *   1. **a fact about the dance**, verifiable and owned by nobody — where bachata comes
+ *      from, how it is counted, that it is led and followed rather than choreographed,
+ *      that the traditional Dominican, modern and sensual styles exist and differ, that
+ *      it is danced socially with strangers and that this is ordinary; or
+ *   2. **a fact already published from the dataset** — which levels run, on which
+ *      evenings, for how long, taught by whom — and then it is *read* from
+ *      `getSchedule()` rather than retyped.
+ *
+ * Nothing else. In particular **this file does not say which style the studio teaches**,
+ * and must not start. MUSE-36 deleted a `STYLES` enum — `['traditional','moderna',
+ * 'sensual']` — because those three were invented alongside a fabricated schedule and had
+ * shaped a filter, three homepage cards and a required `class.style` field;
+ * `test/sanity.test.ts` asserts that no field anywhere in the schema is named after a
+ * style, so the decision has to be made again rather than drifting back in. Saying the
+ * styles exist is allowed, because that is (1). Saying which is taught is not, and a
+ * section per style is not either — three headings in the shape of a course outline reads
+ * as a curriculum whatever the words say, which is why the styles are one paragraph of
+ * the CMS body and the facts block below links to `/schedule` instead of explaining it.
+ *
+ * **So there is no prose in this file.** The heading, the lede, every subheading and
+ * every paragraph is a `prosePage` document in Sanity. What is written here is interface
+ * chrome — an eyebrow, four labels, the words either side of a link — and none of it
+ * describes the dance or the studio. A paragraph of "somebody will replace this" prose in
+ * a component is one deploy away from being the next MUSE-36, because it looks finished.
+ *
+ * **And no founding date, student count, award or claim about anybody's training**, here
+ * or in the dataset. A fabricated `foundedOn: "2025-01-01"` sat in the live dataset for
+ * most of one day because a `required()` field could only be satisfied by inventing one
+ * (MUSE-60). The facts block is derived, which is the structural version of that rule:
+ * there is no field for it to be wrong in.
+ * ---------------------------------------------------------------------------------
+ */
+interface Props {
+  locale: Locale;
+}
+const { locale } = Astro.props;
+
+/**
+ * The prose, and the timetable the facts block is derived from.
+ *
+ * `getSchedule()` takes the strict default `minimum: 1`: a page claiming the studio
+ * teaches four levels on two evenings is a page making that claim up if the dataset holds
+ * no rows, so it fails the build naming the type rather than publishing a list of
+ * nothing. The summer-pause case is `active: false` on a slot, which drops one class and
+ * leaves the others (MUSE-36) — so the levels and the days below shrink with the
+ * timetable instead of outliving it.
+ */
+const prose = await getProsePage('/whatisbachata');
+const rows = await getSchedule();
+
+/**
+ * The four published facts, each one derived rather than written.
+ *
+ * `LEVELS` is the order a dancer moves through — beginner → improver → intermediate →
+ * advanced — and it is filtered by what the timetable actually has, so a level Mina
+ * pauses stops being advertised here without anybody editing this file. `groupByDay`
+ * gives the evenings in week order, `uniformDuration` the one length every class shares
+ * (and `undefined` the moment they differ, in which case the line is dropped rather than
+ * guessed), and the teachers are the distinct names across the rows, joined by
+ * `formatNames` — „Mina i Antonio" / "Mina and Antonio", which is how the rest of the
+ * site joins two names.
+ */
+const levels = LEVELS.filter((level) => rows.some((row) => row.level === level));
+const days = groupByDay(rows).map((group) => group.day);
+const teachers = [...new Set(rows.flatMap((row) => row.instructors))];
+const minutes = uniformDuration(rows);
+
+/**
+ * Interface chrome only. Nothing here describes the dance, the studio or anybody in it —
+ * see the note above. Croatian first, because Croatian sets the layout (§10).
+ */
+const t = {
+  hr: {
+    eyebrow: 'Prije prvog sata',
+    facts: 'U rasporedu',
+    levels: 'Razine',
+    days: 'Dani',
+    length: 'Trajanje sata',
+    teachers: 'Predaju',
+    schedule: 'Cijeli raspored',
+  },
+  en: {
+    eyebrow: 'Before a first class',
+    facts: 'On the schedule',
+    levels: 'Levels',
+    days: 'Days',
+    length: 'Class length',
+    teachers: 'Taught by',
+    schedule: 'The full schedule',
+  },
+}[locale];
+
+/** The facts block, as label/value pairs, with a line omitted rather than invented. */
+const facts: { label: string; value: string }[] = [
+  { label: t.levels, value: levels.map((level) => LEVEL_NAME[locale][level]).join(' · ') },
+  { label: t.days, value: formatNames(days.map((day) => WEEKDAY_NAME[locale][day]), locale) },
+  ...(minutes === undefined ? [] : [{ label: t.length, value: minutesPhrase(minutes, locale) }]),
+  { label: t.teachers, value: formatNames(teachers, locale) },
+].filter((fact) => fact.value !== '');
+---
+
+<section class="hero">
+  <p class="eyebrow">{t.eyebrow}</p>
+  <h1 class="display">{prose.heading[locale]}</h1>
+  <p class="lede">{prose.lede[locale]}</p>
+</section>
+
+<section class="body">
+  <div class="wrap">
+    {
+      prose.sections.map((section) => (
+        <div class="block">
+          <h2 class="h">{section.heading[locale]}</h2>
+          {section.body.map((paragraph) => (
+            <p class="p">{paragraph[locale]}</p>
+          ))}
+        </div>
+      ))
+    }
+  </div>
+</section>
+
+{/*
+  The published facts, and the only place this page says anything about the studio.
+
+  A definition list rather than a paragraph, because every value is a *derived* string:
+  composing them into a sentence would need declensions the data cannot supply („s Minom
+  i Antoniom"), and a sentence is also where a claim nobody checked gets smuggled in
+  beside one that was. The heading is „U rasporedu" / "On the schedule" rather than
+  anything about a programme, and the link is what a reader checks it against.
+*/}
+<section class="facts">
+  <div class="wrap">
+    <h2 class="factsH">{t.facts}</h2>
+    <dl class="list">
+      {
+        facts.map((fact) => (
+          <div class="fact">
+            <dt class="label">{fact.label}</dt>
+            <dd class="value">{fact.value}</dd>
+          </div>
+        ))
+      }
+    </dl>
+    <a class="more" href={localeUrl('/schedule', locale)}>{t.schedule}</a>
+  </div>
+</section>
+
+<style>
+  /* ---------------------------------------------------------------- sections */
+  /* §3 section rhythm: canvas, then one contrasting surface. Not alternating — that
+     produces stripes. */
+  .hero {
+    max-width: 1280px;
+    margin-inline: auto;
+    padding: var(--space-8) var(--space-5) var(--space-6);
+  }
+  .body {
+    padding: 0 var(--space-5) var(--space-8);
+  }
+  .facts {
+    padding: var(--space-8) var(--space-5);
+    background: var(--surface-sunken);
+  }
+  @media (min-width: 768px) {
+    .hero {
+      padding: var(--space-10) var(--space-7) var(--space-7);
+    }
+    .body {
+      padding: 0 var(--space-7) var(--space-10);
+    }
+    .facts {
+      padding: var(--space-10) var(--space-7);
+    }
+  }
+  .wrap {
+    max-width: 1280px;
+    margin-inline: auto;
+  }
+
+  /* -------------------------------------------------------------- typography */
+  .eyebrow {
+    font-family: var(--font-label);
+    font-weight: 300;
+    font-size: 0.75rem;
+    letter-spacing: 0.32em;
+    /* Č Ć Ž Š carry marks above the cap line — 1.4 is the floor in Croatian (§4.6) */
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+  }
+
+  /*
+    Cormorant's floor is 26px = 1.625rem: below it the `đ` crossbar stops rendering and
+    *Dođi* reads as "Dodi" (§4). Both display sizes here clamp above it, and the h1 is
+    the one place on this page a Croatian question mark and a `š` sit side by side.
+  */
+  .display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.5rem, 7vw, 4.5rem);
+    line-height: 1;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: var(--space-4) 0 0;
+  }
+
+  .lede {
+    font-size: 1.125rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+    margin-top: var(--space-5);
+    /* §5: prose measures around 68ch. A `max-width` rather than a width, so Croatian —
+       20–25% longer than English (§10) — reflows instead of being clipped. */
+    max-width: 62ch;
+  }
+
+  /* ------------------------------------------------------------ the sections */
+  .block {
+    padding-top: var(--space-6);
+    margin-top: var(--space-6);
+    border-top: 1px solid var(--line);
+  }
+  /*
+    An `<h2>` set in the label face rather than the display one. Two reasons, and the
+    first is the §4 floor: a subheading wants to be smaller than the h1 by some margin,
+    and Cormorant cannot go below 26px — so a display-face h2 on a page with six of them
+    either crowds the h1 or loses the `đ` crossbar. The second is that this reads as a
+    document rather than as six more hero headings, which is what a page of prose is.
+  */
+  .h {
+    font-family: var(--font-label);
+    font-weight: 400;
+    font-size: 0.75rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+  }
+  .p {
+    margin-top: var(--space-4);
+    font-size: 1.0625rem;
+    line-height: 1.7;
+    color: var(--text-muted);
+    max-width: 68ch;
+  }
+
+  /* -------------------------------------------------------------- the facts */
+  .factsH {
+    font-family: var(--font-display);
+    font-weight: 400;
+    /* display-s, clamped at Cormorant's 26px floor — the smallest display size here. */
+    font-size: clamp(1.625rem, 3vw, 2.125rem);
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+
+  /*
+    One column until there is room for more. The narrow case is the *absence* of a
+    multi-column rule rather than a breakpoint somebody has to pick correctly, which is
+    what keeps 390px free of horizontal overflow whatever the Croatian strings do.
+  */
+  .list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-5);
+    margin: var(--space-6) 0 0;
+  }
+  @media (min-width: 768px) {
+    .list {
+      grid-template-columns: repeat(2, 1fr);
+      gap: var(--space-6);
+    }
+  }
+  @media (min-width: 1280px) {
+    .list {
+      grid-template-columns: repeat(4, 1fr);
+    }
+  }
+
+  .fact {
+    /* No min-width: a grid track already bounds this, and a pixel floor is what clips a
+       long Croatian label. */
+    min-width: 0;
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--line);
+  }
+  .label {
+    font-family: var(--font-label);
+    font-weight: 400;
+    font-size: 0.75rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .value {
+    margin: var(--space-2) 0 0;
+    font-size: 1.0625rem;
+    line-height: 1.5;
+    color: var(--text);
+  }
+
+  .more {
+    display: inline-flex;
+    align-items: center;
+    /* 44px is the §8 touch target, and this is the one affordance on the page. */
+    min-height: 44px;
+    margin-top: var(--space-7);
+    font-family: var(--font-label);
+    font-size: 0.8125rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent);
+    text-underline-offset: 4px;
+  }
+</style>

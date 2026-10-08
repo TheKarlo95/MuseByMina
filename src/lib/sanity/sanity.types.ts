@@ -79,13 +79,48 @@ export type LocaleText = {
   en: string;
 };
 
+export type ProsePage = {
+  _id: string;
+  _type: "prosePage";
+  _createdAt: string;
+  _updatedAt: string;
+  _rev: string;
+  route:
+    | "/"
+    | "/whatisbachata"
+    | "/schedule"
+    | "/pricing"
+    | "/aboutus"
+    | "/contact"
+    | "/privacy";
+  heading: LocaleString;
+  lede: LocaleText;
+  sections: Array<{
+    heading: LocaleString;
+    body: Array<
+      {
+        _key: string;
+      } & LocaleText
+    >;
+    _type: "prosePageSection";
+    _key: string;
+  }>;
+};
+
 export type Page = {
   _id: string;
   _type: "page";
   _createdAt: string;
   _updatedAt: string;
   _rev: string;
-  route: "/" | "/schedule" | "/pricing" | "/aboutus" | "/contact" | "/privacy";
+  route:
+    | "/"
+    | "/whatisbachata"
+    | "/schedule"
+    | "/pricing"
+    | "/aboutus"
+    | "/contact"
+    | "/privacy";
   name: LocaleString;
   title: LocaleString;
   description: LocaleString;
@@ -431,6 +466,7 @@ export type AllSanitySchemaTypes =
   | SanityImageCrop
   | SanityImageHotspot
   | LocaleText
+  | ProsePage
   | Page
   | Faq
   | InstructorReference
@@ -495,7 +531,14 @@ export type SITE_SETTINGS_QUERY_RESULT = {
 // Query: *[_type == "page"] | order(route asc){    _id,    route,    name{ hr, en },    title{ hr, en },    description{ hr, en }  }
 export type PAGES_QUERY_RESULT = Array<{
   _id: string;
-  route: "/" | "/aboutus" | "/contact" | "/pricing" | "/privacy" | "/schedule";
+  route:
+    | "/"
+    | "/aboutus"
+    | "/contact"
+    | "/pricing"
+    | "/privacy"
+    | "/schedule"
+    | "/whatisbachata";
   name: {
     hr: string;
     en: string;
@@ -508,6 +551,39 @@ export type PAGES_QUERY_RESULT = Array<{
     hr: string;
     en: string;
   };
+}>;
+
+// Source: src/lib/sanity/queries.ts
+// Variable: PROSE_PAGES_QUERY
+// Query: *[_type == "prosePage"] | order(route asc){    _id,    route,    heading{ hr, en },    lede{ hr, en },    "sections": sections[]{      heading{ hr, en },      "body": body[]{ hr, en }    }  }
+export type PROSE_PAGES_QUERY_RESULT = Array<{
+  _id: string;
+  route:
+    | "/"
+    | "/aboutus"
+    | "/contact"
+    | "/pricing"
+    | "/privacy"
+    | "/schedule"
+    | "/whatisbachata";
+  heading: {
+    hr: string;
+    en: string;
+  };
+  lede: {
+    hr: string;
+    en: string;
+  };
+  sections: Array<{
+    heading: {
+      hr: string;
+      en: string;
+    };
+    body: Array<{
+      hr: string;
+      en: string;
+    }>;
+  }>;
 }>;
 
 // Source: src/lib/sanity/queries.ts
@@ -754,11 +830,12 @@ export type FAQS_QUERY_RESULT = Array<{
 
 // Source: src/lib/sanity/queries.ts
 // Variable: DOCUMENT_COUNTS_QUERY
-// Query: {    "siteSettings": count(*[_type == "siteSettings"]),    "studioStory": count(*[_type == "studioStory"]),    "page": count(*[_type == "page"]),    "class": count(*[_type == "class"]),    "scheduleSlot": count(*[_type == "scheduleSlot"]),    "instructor": count(*[_type == "instructor"]),    "pricingTier": count(*[_type == "pricingTier"]),    "event": count(*[_type == "event"]),    "galleryImage": count(*[_type == "galleryImage"]),    "post": count(*[_type == "post"]),    "faq": count(*[_type == "faq"])  }
+// Query: {    "siteSettings": count(*[_type == "siteSettings"]),    "studioStory": count(*[_type == "studioStory"]),    "page": count(*[_type == "page"]),    "prosePage": count(*[_type == "prosePage"]),    "class": count(*[_type == "class"]),    "scheduleSlot": count(*[_type == "scheduleSlot"]),    "instructor": count(*[_type == "instructor"]),    "pricingTier": count(*[_type == "pricingTier"]),    "event": count(*[_type == "event"]),    "galleryImage": count(*[_type == "galleryImage"]),    "post": count(*[_type == "post"]),    "faq": count(*[_type == "faq"])  }
 export type DOCUMENT_COUNTS_QUERY_RESULT = {
   siteSettings: number;
   studioStory: number;
   page: number;
+  prosePage: number;
   class: number;
   scheduleSlot: number;
   instructor: number;

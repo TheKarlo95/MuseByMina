@@ -8,6 +8,7 @@ import type {
   PAGES_QUERY_RESULT,
   POSTS_QUERY_RESULT,
   PRICING_QUERY_RESULT,
+  PROSE_PAGES_QUERY_RESULT,
   SCHEDULE_QUERY_RESULT,
   SITE_SETTINGS_QUERY_RESULT,
   STUDIO_STORY_QUERY_RESULT,
@@ -325,6 +326,37 @@ export type AssertStoryIsParagraphs = Same<
 >;
 const _storyParagraphs: AssertStoryIsParagraphs = true;
 
+/**
+ * A prose page's fields: the three `/whatisbachata` cannot render without, plus the shape
+ * of the body (MUSE-65).
+ *
+ * `Guaranteed` on `sections` is not enough on its own, and the reason is the one
+ * `AssertScheduleInstructorsAreAList` exists for: a projection that resolved to a single
+ * object, or to a flat list of paragraphs, would satisfy it — and the page would render
+ * the first section and silently drop the rest, or render the wrapper. So the nesting is
+ * pinned both levels down, against the shape the decoder hands the component.
+ *
+ * There is deliberately no `OptionalIn` line here: every field on `prosePage` is
+ * required, because a prose page with no heading, no lede or no sections is a page with
+ * nothing on it. The optional-field argument (an optional field is a decision, not
+ * laziness) cuts the other way for this type — there is no field on it whose real value
+ * does not exist.
+ */
+type ProseRow = PROSE_PAGES_QUERY_RESULT[number];
+const _proseFields: [
+  Guaranteed<ProseRow, '_id'>,
+  Guaranteed<ProseRow, 'route'>,
+  Guaranteed<ProseRow, 'heading'>,
+  Guaranteed<ProseRow, 'lede'>,
+  Guaranteed<ProseRow, 'sections'>,
+] = [true, true, true, true, true];
+
+export type AssertProseSectionsAreAList = Same<
+  ProseRow['sections'],
+  { heading: Record<Locale, string>; body: Record<Locale, string>[] }[]
+>;
+const _proseSections: AssertProseSectionsAreAList = true;
+
 type TierRow = PRICING_QUERY_RESULT[number];
 const _tierFields: [
   Guaranteed<TierRow, '_id'>,
@@ -414,6 +446,7 @@ export const SCHEMA_ASSERTIONS = Object.freeze({
   portraitOptional: _portraitOptional,
   instagramOptional: _instagramOptional,
   storyParagraphs: _storyParagraphs,
+  proseSectionsAreAList: _proseSections,
   // Every dereference is projected beside its `_ref` (MUSE-49). Without the `_ref` the
   // decoder cannot tell a deleted target from an empty optional field.
   slotClassRef: _classRef,
@@ -431,5 +464,6 @@ export const SCHEMA_ASSERTIONS = Object.freeze({
     page: _pageFields,
     siteSettings: _settingsFields,
     studioStory: _storyFields,
+    prosePage: _proseFields,
   }),
 });

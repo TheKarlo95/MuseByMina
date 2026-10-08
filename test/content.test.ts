@@ -215,6 +215,17 @@ const ADDED_AFTER_THE_MIGRATION: { route: string; ticket: string; because: strin
       'after this receipt was written. Its copy is asserted in `test/pricing.test.ts`.',
   },
   {
+    route: '/whatisbachata',
+    ticket: 'MUSE-65',
+    because:
+      'The one trust page of MUSE-27 whose content is general knowledge rather than ' +
+      'studio fact — what bachata is, where it comes from, how it is counted. The site ' +
+      'never had it: the nav entry was one of MUSE-13\'s dead links, and it arrived with ' +
+      'its `prosePage` document long after this receipt was written. Its words are ' +
+      'asserted in `test/whatisbachata.test.ts`, including that every sentence is either ' +
+      'about the dance or read off the timetable.',
+  },
+  {
     route: '/aboutus',
     ticket: 'MUSE-60',
     because:
@@ -465,6 +476,11 @@ describe('the migration is a committed artefact, not a Studio session', () => {
      * here is a price nobody agreed to, which is MUSE-36 on the one field where it is also
      * a commercial claim; `test/pricing.test.ts` holds the amounts themselves.
      *
+     * MUSE-65 added the seventh `page` document and the **one** `prosePage` document:
+     * `/whatisbachata` is the only page whose body is prose from the CMS today, and the
+     * type was designed for MUSE-27's other three. A second `prosePage` appearing here
+     * before one of those ships is a page nobody routed.
+     *
      * MUSE-60 added the sixth `page` document and the `studioStory` singleton. The
      * instructor count staying at **two** is the load-bearing half of that one: the page
      * it routes is the roster, and a third instructor appearing here is a person who does
@@ -476,8 +492,9 @@ describe('the migration is a committed artefact, not a Studio session', () => {
     expect([...byType.entries()].sort()).toEqual([
       ['class', 4],
       ['instructor', 2],
-      ['page', 6],
+      ['page', 7],
       ['pricingTier', 2],
+      ['prosePage', 1],
       ['scheduleSlot', 4],
       ['siteSettings', 1],
       ['studioStory', 1],

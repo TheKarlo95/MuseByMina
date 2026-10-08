@@ -131,6 +131,7 @@ const READ_CONTRACT = {
     'shareImage',
   ],
   page: ['route', 'name', 'title', 'description'],
+  prosePage: ['route', 'heading', 'lede', 'sections'],
   class: ['name', 'slug', 'level', 'description', 'durationMin', 'instructors', 'image'],
   scheduleSlot: ['class', 'day', 'start', 'instructors', 'active'],
   instructor: ['name', 'slug', 'role', 'bio', 'portrait'],

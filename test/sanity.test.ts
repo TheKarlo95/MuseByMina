@@ -87,6 +87,9 @@ const REQUIRED_DOCUMENT_TYPES = [
   'post',
   'faq',
   'page',
+  // The body of a page that is only prose — `/whatisbachata` today, and the shape
+  // MUSE-27's other three trust pages are built for (MUSE-65).
+  'prosePage',
   'siteSettings',
   'studioStory',
 ] as const;
@@ -1003,6 +1006,11 @@ describe('the generated types cannot go stale unnoticed', () => {
       // layer was looking at the one optional *dereference* on the site.
       'post',
       'pricingTier',
+      // `prosePage` joined in MUSE-65, with the type. Its `sections` assertion is a `Same<>`
+      // rather than a `Guaranteed<>`, for `AssertScheduleInstructorsAreAList`'s reason: the
+      // failure aimed at is a *shape* change — a projection resolving to one section, or to
+      // a flat list of paragraphs, which `Guaranteed` would accept.
+      'prosePage',
       'scheduleSlot',
       'siteSettings',
       'studioStory',

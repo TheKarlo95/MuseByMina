@@ -61,14 +61,28 @@ export const PRIMARY_NAV: NavItem[] = [
 /**
  * The single "More" disclosure. Trust content first, then services.
  *
- * Empty until the content pages land — `/firstclass`, `/whatisbachata`, `/etiquette`,
- * `/faq`, `/gallery`, `/blog`, `/privatelessons`, `/weddingdance` and `/roomrental` all
- * lived here with nothing behind them (MUSE-13). The header renders no disclosure at all
- * while this is empty: an empty "More" button is a worse affordance than no button, and
- * an `aria-expanded` control that reveals an empty list is a dead end for a screen
- * reader rather than merely a disappointment.
+ * It was empty from MUSE-13 until MUSE-65 — `/firstclass`, `/whatisbachata`,
+ * `/etiquette`, `/faq`, `/gallery`, `/blog`, `/privatelessons`, `/weddingdance` and
+ * `/roomrental` all lived here with nothing behind them. The header renders no disclosure
+ * at all while this is empty: an empty "More" button is a worse affordance than no
+ * button, and an `aria-expanded` control that reveals an empty list is a dead end for a
+ * screen reader rather than merely a disappointment. `test/nav.test.ts` states that as a
+ * conditional on this array rather than as "there is no More button", so the disclosure
+ * comes back with its first entry and is held to its own criteria the same day.
+ *
+ * **`/whatisbachata` is that first entry, and it is here rather than in `PRIMARY_NAV` for
+ * the reason the disclosure exists** (MUSE-65). The desktop bar is the decision path —
+ * what is on, what it costs, who teaches, how to come — and it is budgeted at four links
+ * plus this disclosure (`test/nav.test.ts`, "leaves the desktop bar neither empty nor
+ * long"); a fifth uppercase link at 0.18em tracking is what makes that bar wrap. A trust
+ * explainer is also not where a returning visitor is going, and its traffic arrives from
+ * a search engine rather than from the masthead. It is still a complete entry in the
+ * mobile panel and in the footer's quick list, which is what `MORE_NAV.slice(0, 4)` in
+ * `Footer.astro` is for.
  */
-export const MORE_NAV: NavItem[] = [];
+export const MORE_NAV: NavItem[] = [
+  { route: '/whatisbachata', label: { hr: 'Što je bachata', en: 'What is bachata' } },
+];
 
 export const CTA = {
   route: '/#trial',

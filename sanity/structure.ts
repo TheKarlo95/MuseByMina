@@ -50,6 +50,12 @@ export const structure: StructureResolver = (S) =>
       S.divider(),
       S.documentTypeListItem('page').title('Naslovi i opisi stranica'),
 
+      // The prose of a page that is only prose (MUSE-65). Beside „Naslovi i opisi
+      // stranica" rather than under it, because the two answer different questions about
+      // one page: that one is the browser tab and the search result, this one is the text
+      // on the page. Both are keyed by route, so Mina picks the same entry in both.
+      S.documentTypeListItem('prosePage').title('Tekst stranica'),
+
       // The singleton: one document, a fixed id, and no list in front of it. Without
       // this it is a document *type* with a "create new" button, and a second
       // "Postavke stranice" is a change that silently never reaches the site.

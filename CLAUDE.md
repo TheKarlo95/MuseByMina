@@ -746,6 +746,65 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   authoritative at build time, and a document nobody reviewed is a page nobody
   reviewed.** `npm run sanity:seed:check` is how you find that out before merging, and
   it is worth reading rather than glancing at.
+- **`/whatisbachata` says what the dance is, and nothing about the curriculum**
+  (MUSE-65). It is the one of MUSE-27's four trust pages that could be written without
+  Mina, because its subject is general knowledge; the other three are studio facts and
+  stay in that ticket. Every sentence on it is either **a fact about the dance** or **a
+  fact already published from the dataset**, and the second kind is *read* — the levels
+  present in the timetable in `LEVELS` order, the evenings from `groupByDay`, the length
+  from `uniformDuration`, the teachers joined by `formatNames`. A literal that happens to
+  match today's seed passes every equality test there is; `test/whatisbachata.test.ts`
+  rebuilds from an edited dataset and demands the seeded words appear in no byte of
+  `dist` (MUSE-50).
+
+  **The styles are allowed as a sentence and forbidden as structure.** The page may say
+  that traditional Dominican, modern and sensual exist and differ — that is true of the
+  dance. It may not say which is taught here, and MUSE-36's `STYLES` may not come back:
+  no schema field named after a style (`test/sanity.test.ts`), no route, no filter, and
+  **no section per style**, because three headings in the shape of a course outline read
+  as a curriculum whatever the words say. So the three names live in **one** paragraph of
+  the CMS body, that is asserted, and the page links to `/schedule` rather than
+  explaining the programme. Note the needle: „Dominikanska Republika" is also where the
+  dance comes from, so the guard keys on `sensual` and `moderna`, the two words that can
+  only be style names here.
+
+  **`prosePage` is one document type designed for four pages and used for one.** Keyed by
+  `route` exactly as `page` is, so the Studio dropdown is `ROUTES` and a document cannot
+  describe a page the site does not serve; `getProsePage(route)` indexes all of them and
+  fails naming the route when there is none **or two**, with `minimum: 0` for
+  `pagesByRoute`'s reason. Its body is an array of bilingual paragraphs and **not
+  `localeRichText`**: Portable Text is already in this schema and nothing renders it —
+  `post.body` is deliberately opaque `unknown[]` until a blog ticket picks a renderer — so
+  the first consumer would have to write one, and Mina would get headings, bold and links
+  inside a paragraph whose type scale the design system fixes anyway. `studioStory.story`
+  took the same decision and argues it at length. There is no image field, for the
+  optional-field reason: no photography of this studio exists.
+
+  One limit, stated rather than discovered: a `prosePage` for a route the site *does*
+  serve but whose page renders no prose publishes nothing and nothing says so — MUSE-46's
+  inert document minus the half that is detectable. `getProsePage` is asked about one
+  route at a time and "which routes have prose" is written down nowhere, deliberately,
+  because a fourth list of pages is what MUSE-46 argues against. The dropdown is the
+  instrument that reaches Mina. `test/helpers/structural-content.ts` keeps the fixture's
+  own list in `PROSE_ROUTES`, and forgetting to extend it is loud: every suite that
+  builds the site against `FULL` goes red naming the route.
+
+  **The `<h1>` and the nav label are deliberately different strings** — „Što je bachata?"
+  against „Što je bachata" — and `prosePage.heading` is in `test/contentdrift.test.ts`'s
+  `CMS_OWNS` while the label is code. The seeded `<title>` *does* repeat the heading,
+  which is a copy in the dataset and allowed; the edited-dataset build therefore moves the
+  `page` document too, so "the seeded prose appears nowhere in the output" stays a flat
+  claim rather than one with a carve-out a real literal could hide inside — the move
+  `test/contentdrift.test.ts` makes with `siteSettings.summary`, with a test beside it
+  asserting the reason is still true.
+
+  `MORE_NAV` is non-empty for the first time since MUSE-13, which brings the header's
+  "More" disclosure back. That is where a trust explainer belongs: the desktop bar is the
+  decision path and is budgeted at four links plus the disclosure, a fifth uppercase link
+  at 0.18em tracking is what makes it wrap, and the entry is still complete in the mobile
+  panel and in the footer's quick list. `test/nav.test.ts` was already written as a
+  conditional on `MORE_NAV` rather than as "there is no More button", so the disclosure is
+  held to its own criteria the day it comes back.
 - **`/pricing` publishes two periods: 55 € for one month, 100 € for two** — confirmed by
   the studio, and the whole of it. No drop-in rate, no student discount, no third package;
   `test/pricing.test.ts`'s `CONFIRMED_TIERS` is the receipt and a third document in the

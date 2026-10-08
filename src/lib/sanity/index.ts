@@ -4,6 +4,7 @@ import { inDevServer } from './dev';
 import {
   SanityContentError,
   type PageMetaDoc,
+  type ProsePage,
   type SiteSettings,
   decodeClass,
   decodeEvent,
@@ -13,6 +14,7 @@ import {
   decodePage,
   decodePost,
   decodePricingTier,
+  decodeProsePage,
   decodeScheduleEntry,
   decodeSiteSettings,
   decodeStudioStory,
@@ -29,6 +31,7 @@ import {
   PAGES_QUERY,
   POSTS_QUERY,
   PRICING_QUERY,
+  PROSE_PAGES_QUERY,
   SCHEDULE_QUERY,
   SITE_SETTINGS_QUERY,
   STUDIO_STORY_QUERY,
@@ -113,6 +116,8 @@ export type {
   PageMetaDoc,
   Post,
   PricingTier,
+  ProsePage,
+  ProseSection,
   ScheduleEntry,
   SiteSettings,
   StudioEvent,
@@ -306,6 +311,52 @@ export async function getPage(route: string): Promise<PageMetaDoc> {
     );
   }
   return document;
+}
+
+/**
+ * The prose of one page that is only prose (MUSE-65).
+ *
+ * **Not memoised**, for the reason `getStudioStory` is not: `/whatisbachata` is the only
+ * caller, twice per build, once per locale — so a cache would save one request and cost
+ * the thing a cache costs, which is that `test/projections.test.ts` swaps the fixture per
+ * test and a memoised reader answers the second test from the first test's dataset.
+ *
+ * `minimum` is 0 on purpose and it is the same decision `pagesByRoute` documents, not a
+ * relaxation. `requireDocuments` can only count, and counting is the wrong instrument
+ * here: with the document for *this* route missing and three others present it would say
+ * "the dataset holds 3 … this page needs at least 4 … this is an empty dataset", which
+ * names neither the route nor the document and offers a remedy that does not exist. So
+ * the shortfall is reported below, by route, which is the message written for the failure
+ * that actually happens — a prose page routed before its document was seeded.
+ *
+ * A duplicate is the other half and just as bad: two documents for one route means the
+ * page's heading depends on which row GROQ answered first, which is not debuggable from
+ * the output. The Studio's fixed route list makes both unlikely and neither impossible.
+ */
+export async function getProsePage(route: string): Promise<ProsePage> {
+  const rows = await runQuery<unknown>(PROSE_PAGES_QUERY);
+  const documents = requireDocuments(rows, 'prosePage', decodeProsePage, 0);
+
+  const here = documents.filter((document) => document.route === route);
+  if (here.length === 1) return here[0]!;
+
+  throw new SanityContentError(
+    [
+      here.length === 0
+        ? `No \`prosePage\` document describes: ${route}. Add one in the Studio under ` +
+          `„Tekst stranica” and pick that route — without it the page would publish a ` +
+          `heading above nothing. The query ran and the API answered, so this is a ` +
+          `document that is not there, not a broken read path.`
+        : `More than one \`prosePage\` document describes: ${route} ` +
+          `(${here.map((document) => document.id).join(', ')}). Which heading the page ` +
+          `gets would depend on query order; open „Tekst stranica” and delete the spare.`,
+      `  Documents found: ${
+        documents.length === 0
+          ? 'none at all'
+          : documents.map((document) => `${document.route} (${document.id})`).join(', ')
+      }.`,
+    ].join('\n'),
+  );
 }
 
 /**

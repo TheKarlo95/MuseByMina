@@ -264,6 +264,63 @@ export const PAGE_DOCS: FixtureDoc[] = ROUTES.map(({ route }, index) => ({
 }));
 
 /**
+ * **The routes whose pages render prose from the CMS** (MUSE-65) — one `prosePage`
+ * document each, or a build against this dataset fails naming the route.
+ *
+ * Written out rather than derived from `ROUTES`, which is the opposite of what `PAGE_DOCS`
+ * does, and the difference is real: every route needs a `page` document, and only *some*
+ * routes have a body that is prose. Which ones is not written down in code anywhere and
+ * deliberately is not — a fourth list of pages beside `src/pages/`, `ROUTES` and the
+ * documents is what MUSE-46 argues against. So this is a fixture's own list, and
+ * forgetting to extend it when `/faq`, `/firstclass` or `/etiquette` lands is a loud
+ * failure rather than a quiet one: every suite in the repository that builds the site
+ * against `FULL` goes red naming the missing route.
+ */
+export const PROSE_ROUTES: readonly string[] = ['/whatisbachata'];
+
+/** The route the single-document assertions in `test/projections.test.ts` read. */
+export const ROUTE_FOR_PROSE: string = PROSE_ROUTES[0]!;
+
+/**
+ * The prose of a page that is only prose, one document per {@link PROSE_ROUTES} entry.
+ *
+ * **Two sections, and two paragraphs in the first.** `sections` is a two-level array and
+ * both levels are projected member by member, so a projection that returned only the
+ * first member of either — or flattened one into the other — would look entirely right
+ * against a fixture with one section of one paragraph. The second section has a single
+ * paragraph on purpose, so "one paragraph" is not the shape every row has.
+ */
+export const PROSE_PAGE_DOCS: FixtureDoc[] = PROSE_ROUTES.map((route, index) => ({
+  _id: `prose-fixture-${index}`,
+  _type: 'prosePage',
+  route,
+  heading: localeString('prose heading'),
+  lede: localeText('prose lede'),
+  sections: [
+    {
+      _key: 's1',
+      _type: 'prosePageSection',
+      heading: localeString('prose section one'),
+      body: [
+        { _key: 's1p1', _type: 'localeText', hr: 'HR prose one one.', en: 'EN prose one one.' },
+        { _key: 's1p2', _type: 'localeText', hr: 'HR prose one two.', en: 'EN prose one two.' },
+      ],
+    },
+    {
+      _key: 's2',
+      _type: 'prosePageSection',
+      heading: localeString('prose section two'),
+      body: [
+        { _key: 's2p1', _type: 'localeText', hr: 'HR prose two one.', en: 'EN prose two one.' },
+      ],
+    },
+  ],
+}));
+
+/** The one for {@link ROUTE_FOR_PROSE}, named so a test can edit or duplicate it. */
+export const PROSE_PAGE_DOC: FixtureDoc = PROSE_PAGE_DOCS[0]!;
+
+/**
  * The studio's origin story — the other half of `/aboutus` (MUSE-23).
  *
  * A singleton, like `siteSettings`, so the query is `[0]` on a filter pinned to a fixed
@@ -691,6 +748,7 @@ export const DRAFTS: FixtureDoc[] = [DRAFT_SLOT_TWIN, DRAFT_TIER, DRAFT_INSTRUCT
 export const FULL: FixtureDoc[] = [
   SITE_SETTINGS_DOC,
   ...PAGE_DOCS,
+  ...PROSE_PAGE_DOCS,
   STUDIO_STORY_DOC,
   INSTRUCTOR_A,
   INSTRUCTOR_B,
@@ -732,6 +790,7 @@ export const FULL_COUNTS: Record<string, number> = {
   siteSettings: 1,
   studioStory: 1,
   page: PAGE_DOCS.length,
+  prosePage: PROSE_PAGE_DOCS.length,
   class: 2,
   scheduleSlot: 3,
   instructor: 3,
