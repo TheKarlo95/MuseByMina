@@ -695,7 +695,8 @@ export function decodeInstructor(row: unknown): Instructor {
 }
 
 /**
- * The studio's origin story: a heading, the date it started, and the paragraphs.
+ * The studio's origin story: a heading, the paragraphs, and the date it started if
+ * anybody has said one.
  *
  * `foundedOn` stays an ISO date string. Rendering it is `formatDate` in
  * `src/lib/dates.ts`, because the two locales want two different forms of the same date
@@ -704,16 +705,27 @@ export function decodeInstructor(row: unknown): Instructor {
 export interface StudioStory {
   id: string;
   heading: Record<Locale, string>;
-  /** ISO calendar date, `YYYY-MM-DD`. Formatted per locale by the page. */
-  foundedOn: string;
+  /**
+   * ISO calendar date, `YYYY-MM-DD`. Formatted per locale by the page.
+   *
+   * **Optional as of MUSE-60**, for the reason `instructor.bio` is optional: no founding
+   * date for this studio is recorded anywhere, and the placeholder story MUSE-60 seeded
+   * is held to asserting nothing checkable. A required date could only have been
+   * satisfied by inventing one — MUSE-36's mistake, on a field a reader would believe.
+   *
+   * **Optional is not unchecked.** A date that *is* there still has to be a calendar
+   * date, so a half-typed value is a named build failure rather than a page reading
+   * „Od Invalid Date".
+   */
+  foundedOn?: string;
   /** Paragraphs, in the order Mina wrote them. At least one. */
   story: Record<Locale, string>[];
 }
 
 export function decodeStudioStory(row: unknown): StudioStory {
   const where = frame(row, 'studioStory');
-  const foundedOn = text(row, 'foundedOn', where);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(foundedOn)) {
+  const foundedOn = optionalText(row, 'foundedOn', where);
+  if (foundedOn !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(foundedOn)) {
     fail(at(where, 'foundedOn'), 'a calendar date like `2026-08-13`', foundedOn);
   }
 

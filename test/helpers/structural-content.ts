@@ -277,6 +277,12 @@ export const PAGE_DOCS: FixtureDoc[] = ROUTES.map(({ route }, index) => ({
  * because the *format* is the page's decision per locale (design system §10: HR
  * `13. kolovoza 2026.`, EN `13 August 2026`), the same reason an image carries a hotspot
  * rather than a URL.
+ *
+ * **It is set here even though the field is optional** (MUSE-60) and even though the
+ * committed seed leaves it empty — which is the whole reason it is set here. No founding
+ * date for this studio is recorded, so the real dataset cannot exercise the §10 date forms
+ * at all, and the absent case is what `content/seed.ndjson` already covers. This fixture
+ * is the only place the two date renderings are ever produced.
  */
 export const STUDIO_STORY_DOC: FixtureDoc = {
   _id: 'studioStory',

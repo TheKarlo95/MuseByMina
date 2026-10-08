@@ -26,14 +26,25 @@ import type { Locale } from '../lib/i18n';
  * "somebody will replace this" prose in a component is one deploy away from being the next
  * one, because it looks finished.
  *
- * **This component is also not routed yet.** There is no `src/pages/aboutus.astro`, no
- * `ROUTES` entry and no nav entry, because `src/lib/sanity/decode.ts` fails the build by
- * name when a document a page needs is missing — and the `studioStory` singleton and every
- * `instructor` document are missing. A routed page would stop `main` building: every pull
- * request, every deploy, and MUSE-21's scheduled rebuild. The follow-up adds the two page
- * wrappers, the route, the nav entry and the three documents together, because they are
- * only correct together. `test/aboutus.test.ts` drives this component through a preview
- * route (`src/lib/preview.ts`) and asserts the absence of the real one.
+ * **The story on the page today is placeholder prose, and it is placeholder in the
+ * dataset** (MUSE-60). The owner asked for a few generated sentences so the page could
+ * ship; it went into `content/seed.ndjson` rather than into this file precisely so Mina
+ * can type over it, and it is held to asserting nothing checkable — no founding year, no
+ * student count, no claim about anybody's training. The Studio field description says so
+ * in Croatian, which is the only instruction she actually reads. A follow-up replaces it
+ * with her words, and nothing here has to change when it does.
+ *
+ * **`foundedOn` is optional for the same reason.** MUSE-23 made the origin story dated on
+ * purpose, and no date for this studio is recorded anywhere — so the line is omitted
+ * rather than invented. See the note beside it below.
+ *
+ * **This component was built before its page could be routed** (MUSE-23), through a
+ * throwaway preview route, because `src/lib/sanity/decode.ts` fails the build by name when
+ * a document a page needs is missing and the dataset held no `studioStory`. MUSE-60 seeded
+ * the document, added `src/pages/aboutus.astro`, its English twin, the `ROUTES` entry and
+ * the nav entry, and **deleted the preview entry** — an entry that outlives its ticket is
+ * a page somebody forgot to ship. `test/aboutus.test.ts` holds every one of MUSE-23's CSS
+ * criteria against the real route now.
  * ---------------------------------------------------------------------------------
  */
 interface Props {
@@ -83,11 +94,22 @@ const t = {
 <section class="story">
   <p class="eyebrow">{t.eyebrow}</p>
   <h1 class="display">{story.heading[locale]}</h1>
-  {/* The dated half of the origin story. `<time>` carries the machine-readable value so
-      the rendered form can follow §10 per locale without the date becoming unparseable. */}
-  <p class="founded">
-    {t.since} <time datetime={story.foundedOn}>{formatDate(story.foundedOn, locale)}</time>
-  </p>
+  {/*
+    The dated half of the origin story, when there is one. `<time>` carries the
+    machine-readable value so the rendered form can follow §10 per locale without the date
+    becoming unparseable.
+
+    Omitted rather than filled in when `foundedOn` is absent (MUSE-60), exactly as the bio
+    paragraph is: no founding date for this studio is recorded anywhere, and the only way
+    to satisfy a required one was to pick a plausible day and publish it as fact — which is
+    MUSE-36. „Od" with nothing after it is worse than no line, and a line is not what the
+    section is holding up.
+  */}
+  {story.foundedOn && (
+    <p class="founded">
+      {t.since} <time datetime={story.foundedOn}>{formatDate(story.foundedOn, locale)}</time>
+    </p>
+  )}
   <div class="prose">
     {story.story.map((paragraph) => <p>{paragraph[locale]}</p>)}
   </div>

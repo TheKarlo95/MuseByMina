@@ -212,6 +212,23 @@ const CMS_OWNS: { path: string; why: string }[] = [
       'because it is a claim about what the studio sells — and the field MUSE-36 would ' +
       'have been filled with fiction if it had been written in code.',
   },
+  {
+    path: 'studioStory.heading',
+    why:
+      'the `<h1>` of `/aboutus`. One of two fields on the one page whose entire subject ' +
+      'is what the studio says about itself, and the page carries no studio copy of its ' +
+      "own on purpose — `AboutUs.astro`'s copy table holds five chrome words and nothing " +
+      'that describes the studio or anybody in it.',
+  },
+  {
+    path: 'studioStory.story[]',
+    why:
+      "the origin story's paragraphs, and the field this guard matters most for right " +
+      'now: what is seeded is **placeholder prose** (MUSE-60), written so the page could ' +
+      'ship and held to asserting nothing checkable. It is in the dataset precisely so ' +
+      'Mina can type over it without a deploy, and a copy under `src/` is that decision ' +
+      'reversed — placeholder text in a component is one deploy away from being MUSE-36.',
+  },
 ];
 
 /**

@@ -405,14 +405,15 @@ the line, asserting the property against `MUSE_CONTENT_FIXTURE` rather than a pa
 
 ### A component whose page cannot be routed yet
 
-`/aboutus` is built and not published (MUSE-23). Its `studioStory` and `instructor`
-documents do not exist, and the read path fails the build naming a missing document — so
-routing the page would stop `main` building, every pull request and every deploy with it.
-The component is still held to its acceptance criteria, most of which are statements about
-CSS that only a real build produces:
+A page ticket sometimes splits in two because its *content* is not ready. MUSE-23 built
+`/aboutus` against a dataset holding neither the origin story nor a single instructor, and
+the read path fails the build naming a missing document — so routing the page would have
+stopped `main` building, every pull request and every deploy with it. The component was
+still held to its acceptance criteria, most of which are statements about CSS that only a
+real build produces:
 
 ```bash
-MUSE_PREVIEW_ROUTES=aboutus npm run build   # injects /aboutus-preview and /en/aboutus-preview
+MUSE_PREVIEW_ROUTES=<name> npm run build   # injects /<name>-preview and /en/<name>-preview
 ```
 
 `src/lib/preview.ts` is the registry and carries the argument; `astro.config.mjs` injects
@@ -424,6 +425,35 @@ asserts that, and that no workflow sets the variable.
 
 **An entry in that registry is meant to be short-lived.** If one outlives the ticket that
 added it, that is a page somebody forgot to ship.
+
+**The registry is empty today, and that is the healthy state.** `aboutus` was the only
+entry there has ever been, and MUSE-60 routed the page — wrappers, `ROUTES` entry, nav
+entry, `page` document and `studioStory` document together — and deleted the entry with it.
+`test/aboutus.test.ts` keeps every one of MUSE-23's CSS assertions and points them at
+`/aboutus/` instead of `/aboutus-preview/`; the one preview guard that becomes a tautology
+over an empty registry ("every entry point is under `test/`") is backed by the half that
+does not, which is that `requestedPreviews('aboutus')` now **throws**, naming the name. A
+stale `MUSE_PREVIEW_ROUTES=aboutus` is a named error rather than a build that silently
+injects nothing.
+
+### `/aboutus` ships placeholder prose, on purpose and visibly
+
+The studio story on that page is **placeholder text awaiting Mina's words** (MUSE-60). The
+owner asked for a few generated sentences so the page could ship. Three things make that a
+stopgap rather than the next MUSE-36:
+
+- It is in **`content/seed.ndjson`**, not in `AboutUs.astro`, so Mina replaces it by typing
+  over it in the Studio with no deploy.
+- It **asserts nothing checkable** — no founding year, no student count, no award, no claim
+  about anybody's training.
+- The Studio field descriptions say `PRIVREMENI TEKST` in Croatian, which is the only
+  instruction she actually reads.
+
+`studioStory.foundedOn` is optional for the same reason: no founding date for this studio
+is recorded anywhere, and the page omits the line rather than inventing one.
+
+**No bio is written for either instructor**, and none should be. See "an optional field is
+a decision" in `CLAUDE.md`.
 
 The deploy fetches live, and cannot do otherwise by accident: there is no default fixture
 path and no fallback (a path that does not resolve *fails* the build), the build log says

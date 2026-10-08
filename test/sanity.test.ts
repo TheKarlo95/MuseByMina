@@ -274,7 +274,17 @@ describe('the Studio Mina opens', () => {
      * of anyone on the roster.
      */
     expect(requiredFieldsOf('instructor')).toEqual(['name', 'role', 'slug']);
-    expect(requiredFieldsOf('studioStory')).toEqual(['foundedOn', 'heading', 'story']);
+    /**
+     * `foundedOn` came off this list in MUSE-60, and that is this assertion working.
+     *
+     * MUSE-23 made the origin story *dated* on purpose and required the date. No founding
+     * date for this studio is recorded anywhere, and MUSE-60 routed the page with a
+     * placeholder story held to asserting nothing checkable — so the only way to satisfy a
+     * required date was to pick a plausible day and publish it as fact, which is precisely
+     * the move that put thirteen invented classes on the live site. `/aboutus` omits the
+     * line when there is none. Put it back when Mina has said a date, not before.
+     */
+    expect(requiredFieldsOf('studioStory')).toEqual(['heading', 'story']);
     expect(requiredFieldsOf('scheduleSlot')).toEqual(['active', 'class', 'day', 'start']);
     expect(requiredFieldsOf('page')).toEqual(['description', 'name', 'route', 'title']);
     /**

@@ -429,9 +429,10 @@ describe('the rules are enforced on the test tree, not remembered', () => {
   it('skips nothing it walks except data that cannot execute', () => {
     // The walk and the filter are separate claims, and it was the *filter* that was
     // broken: `.endsWith('.ts')`. This says the filter drops only inert data, whatever
-    // the tree happens to hold — so it keeps holding when `test/preview/aboutus.astro`
-    // is deleted with the ticket that routes the page, and when the next kind of helper
-    // arrives.
+    // the tree happens to hold — which is why it kept holding when MUSE-60 deleted
+    // `test/preview/aboutus.astro` with the ticket that routed the page, taking the only
+    // `.astro` file under `test/` with it, and why it will hold for the next kind of
+    // helper.
     const inert = new Set<string>(INERT_EXTENSIONS);
     const inspected = new Set(inspectedFiles());
     const skipped = testFiles().filter((file) => !inspected.has(file));

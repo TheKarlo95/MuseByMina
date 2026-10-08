@@ -148,15 +148,23 @@ describe('`ROUTES` and `src/pages/` describe the same site', () => {
   });
 
   /**
-   * A preview route is neither a ghost nor a missing page (MUSE-23).
+   * A preview route is neither a ghost nor a missing page (MUSE-23), and an entry whose
+   * page has shipped is neither (MUSE-60).
    *
-   * `MUSE_PREVIEW_ROUTES=aboutus npm run build` injects `/aboutus-preview` so a component
-   * whose content does not exist yet can still be asserted on against `dist`. Its entry
-   * point lives under `test/`, which is **not** the tree the walk above reads, and its URL
-   * carries a `-preview` suffix that no `ROUTES` entry has — so it cannot read as a page
-   * that forgot its route, and `/aboutus` cannot read as a route that forgot its page.
-   * Both halves are asserted, because the first is what the two tests above depend on and
-   * the second is what makes the warning below able to fire for `/aboutus` at all.
+   * `MUSE_PREVIEW_ROUTES=aboutus npm run build` used to inject `/aboutus-preview` so a
+   * component whose content did not exist yet could still be asserted on against `dist`.
+   * Its entry point lived under `test/`, which is **not** the tree the walk above reads,
+   * and its URL carried a `-preview` suffix that no `ROUTES` entry has — so it could not
+   * read as a page that forgot its route, and `/aboutus` could not read as a route that
+   * forgot its page.
+   *
+   * The registry is **empty** now: MUSE-60 routed `/aboutus` and deleted the entry, which
+   * is what `src/lib/preview.ts` says has to happen. So the loop below has nothing to
+   * iterate, and the assertion that carries the weight is the one after it — a name in the
+   * registry must *not* be a page or a route, which is the check that would have caught the
+   * entry outliving its ticket. The first two are kept for the next page ticket whose
+   * content is not ready; `test/aboutus.test.ts` is where the retirement itself is asserted
+   * and where the non-vacuous half of the preview guard now lives.
    */
   it('counts a preview route as neither a page nor a route', () => {
     const declared = new Set(ROUTES.map(({ route }) => route));
@@ -172,6 +180,14 @@ describe('`ROUTES` and `src/pages/` describe the same site', () => {
         expect(declared.has(pattern.replace(/^\/en/, '') || '/')).toBe(false);
       }
     }
+  });
+
+  it('serves no -preview URL, with the registry empty and the variable unset', () => {
+    // Read off the build rather than off the registry, which is the claim that survives
+    // the registry being empty: `/aboutus-preview` was a real URL in a real output tree
+    // for the length of MUSE-23, and it is gone.
+    expect(clean.htmlFiles().filter((file) => file.includes('-preview'))).toEqual([]);
+    expect(Object.keys(PREVIEW_ROUTES)).toEqual([]);
   });
 });
 
@@ -195,15 +211,19 @@ describe('an inert `page` document is recognised', () => {
   });
 
   it('finds a document whose route is not served, and names it', () => {
+    // `/gallery` is one of MUSE-13's twelve: a route the finished information
+    // architecture names and this site does not serve. It replaced `/aboutus` here when
+    // MUSE-60 routed that page — an inert-document fixture has to name a route `ROUTES`
+    // really does not have, or the test asserts the opposite of what it says.
     const documents = [...ROUTES.map(({ route }, i) => doc(`page-${i}`, route)),
-      doc('page-aboutus', '/aboutus', 'O nama')];
+      doc('page-gallery', '/gallery', 'Galerija')];
 
-    expect(inertRouteDocuments(documents).map((d) => d.id)).toEqual(['page-aboutus']);
+    expect(inertRouteDocuments(documents).map((d) => d.id)).toEqual(['page-gallery']);
 
     const warning = inertRouteWarning(documents);
     expect(warning).toContain(INERT_ROUTE_WARNING);
-    expect(warning).toContain('page-aboutus');
-    expect(warning).toContain('/aboutus');
+    expect(warning).toContain('page-gallery');
+    expect(warning).toContain('/gallery');
     // The remedy, both ways round, and the list to compare against. A warning that only
     // states the problem is one the reader has to go and research.
     expect(warning).toContain('src/pages/');
@@ -225,11 +245,11 @@ describe('an inert `page` document is recognised', () => {
 /* ------------------------------------------- an inert `page` document, in a real build */
 
 const GHOST = {
-  _id: 'page-ghost-aboutus',
+  _id: 'page-ghost-gallery',
   _type: 'page',
-  route: '/aboutus',
-  name: { _type: 'localeString', hr: 'O nama', en: 'About us' },
-  title: { _type: 'localeString', hr: 'O nama — Muse by Mina', en: 'About us — Muse by Mina' },
+  route: '/gallery',
+  name: { _type: 'localeString', hr: 'Galerija', en: 'Gallery' },
+  title: { _type: 'localeString', hr: 'Galerija — Muse by Mina', en: 'Gallery — Muse by Mina' },
   description: {
     _type: 'localeString',
     hr: 'Opis stranice koja ne postoji, upisan u Studiju.',
@@ -242,8 +262,9 @@ let ghosted: Build;
 
 beforeAll(() => {
   clean = buildSite(PAGES_DEPLOY);
-  // The ticket's own reproduction: the committed seed plus one document describing
-  // `/aboutus`, which MUSE-23 built and deliberately did not route.
+  // The ticket's own reproduction: the committed seed plus one document describing a
+  // route this site does not serve. It was `/aboutus` until MUSE-60 routed that page;
+  // `/gallery` is one of MUSE-13's twelve and has no component, let alone a page.
   ghosted = buildSite(PAGES_DEPLOY, {
     [FIXTURE_ENV]: fixtureOf([...seedDocs(), GHOST], 'routes'),
   });
@@ -356,17 +377,17 @@ describe('the Studio refuses a route the site does not serve', () => {
   });
 
   it('refuses a route the site does not serve, however it got there', async () => {
-    // `/aboutus` is the ticket's case — a page that is built and not routed. The others
-    // are what a paste produces: a full URL, a trailing slash, a locale prefix.
+    // `/gallery` is MUSE-13's case — a route the finished information architecture names
+    // and this site does not serve. The others are what a paste produces: a full URL, a
+    // trailing slash, a locale prefix.
     //
-    // `/pricing` was in this list and MUSE-59 routed it, so it moved to the positive
-    // control above — which is the list this one is derived against, and the reason that
-    // control exists. A route graduating from "refused" to "accepted" is what shipping a
-    // page looks like from here; the remaining four can never graduate, because three of
-    // them are spellings no `ROUTES` entry may have and `/aboutus` is MUSE-23's
-    // deliberately unrouted component.
+    // `/pricing` was in this list and MUSE-59 routed it; `/aboutus` was in it and MUSE-60
+    // routed it. Both moved to the positive control above — which is the list this one is
+    // derived against, and the reason that control exists. A route graduating from
+    // "refused" to "accepted" is what shipping a page looks like from here, and this list
+    // is now down to one real route plus three spellings no `ROUTES` entry may have.
     for (const route of [
-      '/aboutus',
+      '/gallery',
       'https://example.test/schedule',
       '/schedule/',
       '/en/schedule',
@@ -385,7 +406,7 @@ describe('the Studio refuses a route the site does not serve', () => {
     // already filled in. Asserted over the whole marker set rather than the first one,
     // because Sanity reports the inferred rule and the declared rule both and the order
     // between them is its business, not ours.
-    const wrong = (await routeErrors('/aboutus')).join(' | ');
+    const wrong = (await routeErrors('/gallery')).join(' | ');
     expect(wrong).toContain('nije među stranicama');
     expect(wrong).toContain('ne prikazuje se nigdje');
 

@@ -81,14 +81,18 @@ describe('the built site ships no JavaScript files and no CMS client', () => {
     // page that silently stopped building (a content error swallowed somewhere) would
     // otherwise look like a pass everywhere else in this file.
     //
-    // MUSE-59 added the first new page since: `/pricing`, with the `pricingTier`
-    // documents that make it buildable. A page arriving here is the one case where
-    // editing this list is correct, and it has to be a line in a diff rather than a list
-    // derived from `ROUTES` — the claim is "the build emitted these and nothing else",
-    // and deriving it from the registry would make it agree with itself.
+    // MUSE-59 added the first new page since (`/pricing`, with the `pricingTier`
+    // documents that make it buildable) and MUSE-60 the second (`/aboutus`, with the
+    // `studioStory` document that makes it buildable at all). A page arriving here is the
+    // one case where editing this list is correct, and it has to be a line in a diff
+    // rather than a list derived from `ROUTES` — the claim is "the build emitted these
+    // and nothing else", and deriving it from the registry would make it agree with
+    // itself.
     expect(build.htmlFiles()).toEqual([
       '404.html',
+      'aboutus/index.html',
       'contact/index.html',
+      'en/aboutus/index.html',
       'en/contact/index.html',
       'en/index.html',
       'en/pricing/index.html',

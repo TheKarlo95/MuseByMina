@@ -47,11 +47,14 @@ export interface NavItem {
 export const PRIMARY_NAV: NavItem[] = [
   { route: '/', label: { hr: 'Početna', en: 'Home' }, mobileOnly: true },
   { route: '/schedule', label: { hr: 'Raspored', en: 'Schedule' } },
-  // MUSE-59 re-added this one, with its page and its `pricingTier` documents in the same
-  // pull request — which is what "each page ticket re-adds its own entry" means. It was
-  // one of MUSE-13's twelve: the entry was here, `/pricing` was not a route, and the link
-  // 404ed in both locales on every page of the site.
+  // MUSE-59 and MUSE-60 each re-added one of these, with its page and its documents in
+  // the same pull request — which is what "each page ticket re-adds its own entry" means.
+  // Both were among MUSE-13's twelve: the entries were here, neither route existed, and
+  // both links 404ed in both locales on every page of the site. `/aboutus` waited for its
+  // `studioStory` document in particular, because the build fails by name on a missing
+  // one, so the entry could not go in ahead of it.
   { route: '/pricing', label: { hr: 'Cjenik', en: 'Pricing' } },
+  { route: '/aboutus', label: { hr: 'O nama', en: 'About us' } },
   { route: '/contact', label: { hr: 'Kontakt', en: 'Contact' } },
 ];
 
