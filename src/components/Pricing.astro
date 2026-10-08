@@ -263,10 +263,22 @@ const packages = tiers.map((tier) => ({
   }
   @media (min-width: 768px) {
     .tiers {
-      /* `auto-fit` with a floor rather than three fixed columns: Croatian runs 20–25%
-         longer than English (§10), so the cards size to their content and a fourth tier
-         wraps instead of squeezing the other three. */
-      grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+      /* `auto-fit` with a floor and a ceiling rather than three fixed columns: Croatian
+         runs 20–25% longer than English (§10), so the cards size to their content between
+         those two bounds and a fourth tier wraps instead of squeezing the other three.
+
+         The ceiling is what MUSE-59 added, and it is about the real data rather than
+         about taste. §7.2 describes three cards; the studio confirmed **two** periods, and
+         with `1fr` two tracks split 1280px into a pair of 600px cards holding a name, a
+         price, one line and a button — a price list that reads as though a third card
+         failed to load. A ceiling plus `justify-content: center` keeps a tier the same
+         size whether there are two of them or four, which is also what makes the row
+         comparable: a card that is wider because there are fewer of them is a card the
+         eye weighs differently. Not a `width` on the card — §10's rule is that the
+         content decides the size, and a track range is a floor and a ceiling, not a
+         width. */
+      grid-template-columns: repeat(auto-fit, minmax(15rem, 24rem));
+      justify-content: center;
       gap: var(--space-6);
     }
   }
