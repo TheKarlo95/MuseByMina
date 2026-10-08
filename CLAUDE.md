@@ -198,15 +198,23 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   both. §12's clear space is a *fraction of the drawn size*, so it is derived in
   `src/lib/lockup.ts`, which refuses to draw below §12's 100px rather than clamping.
 
-  **The masthead is the one surface still breaking the rule, and it is measured, not
-  forgotten.** 100px wide is 73px tall at 1.372:1, against a 64px mobile band (§7.1); the
-  size that fits is 55px, where "DANCE STUDIO" and "BY MINA" stop being words. §12 names
-  the **icon-only mark** as the compact header's variant, and **MUSE-40 shipped that
-  artwork**, so the exemption is now fixable rather than blocked — it is still live, and
-  closing it is its own ticket. It is the single entry in `REBUILT_FROM_PARTS`, carrying
-  its reason and that ticket, and the entry is **asserted still live**, so fixing the
-  header without deleting the line is also red. Do not shrink the lockup into the band to
-  make the guard green: it would pass, and the logo would be illegible.
+  **The masthead carries the icon-only mark instead, and which surface gets which is
+  arithmetic** (MUSE-67). 100px wide is 73px tall at 1.372:1 and 121px with its clear
+  space, against bands of 64px and 80px (§7.1) — so the lockup is out of the masthead at
+  *both* widths, not only on phones, and the size that would fit is 55px, where "DANCE
+  STUDIO" and "BY MINA" stop being words. §12's variants table names the icon-only mark
+  for the compact header; MUSE-40 shipped it, and at **36px tall — 27px wide against
+  §12's 24px floor, 12px of clear space, a 60px envelope** — it fits both bands. One
+  size in both, because a second size is a second dilation radius and so a second file.
+  The full table is in `logo/README.md`, which is where the next person will look. Do not
+  shrink the lockup into the band to make the guard green: it would pass, and the logo
+  would be illegible.
+
+  `REBUILT_FROM_PARTS` is now **empty**, and both halves of that machine worked in order:
+  the entry was asserted *still live*, so fixing the masthead turned the suite red asking
+  for the line to be deleted. What replaced the exemption is not an empty map — it is
+  `the built masthead presents the mark`, so "no component rebuilds the lockup" cannot be
+  satisfied by a band with no brand in it at all.
 - **The icon-only mark is a crop of the lockup, and the small sizes are thickened**
   (MUSE-40). §12 specifies it as dancer + `M`; both were already in
   `muse-lockup-white-transparent.png`, with a clean 18px run of transparent columns
@@ -216,17 +224,25 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   stroke there is nothing left to antialias, so the alpha is dilated by `STROKE_GAIN ÷
   scale` before resampling, and `test/icon.test.ts` measures the committed pixels against
   what an undilated crop would have given — a regenerated-without-it icon is otherwise
-  the right mark, right size, right colour, and a smudge. **Both schemes, mutually
-  exclusive `media`**: the artwork is white-only, invisible on a light tab strip, and the
-  plum variant is §12's recolour (RGB replaced, alpha preserved) with a test pinning the
-  two alpha channels byte-identical. All five files carry **`?url&no-inline`** — they are
-  under Vite's 4 KB threshold, and inlined they became `data:` URIs, which is 8.3 KB of
-  base64 on every page, all five icons shipped to every visitor, and the icons out of
-  both the budget's `image` line and `test/assets.test.ts`'s reach. There is **no
-  `public/`**: on the Pages sub-path a `public/favicon.ico` publishes under the base
-  prefix while the bare probe goes to the *origin* root, so it would answer nothing and
-  cost MUSE-35's resolution bug. No `og:image` here — `siteSettings.shareImage` is a
-  different asset.
+  the right mark, right size, right colour, and a smudge. The masthead's copy
+  (`muse-mark-white.png`, MUSE-67) is the same intervention at a different size and so a
+  different amount — **0.3 CSS px per side, not 0.5**, because 36px is twice the tab
+  icon's worst case — and it is kept at the crop's own 461 × 622 with no resample, since
+  Astro emits the WebP from it. The unit is CSS pixels because one file serves every
+  display. **Both schemes, mutually exclusive `media`**: the artwork is white-only,
+  invisible on a light tab strip, and the plum variant is §12's recolour (RGB replaced,
+  alpha preserved) with a test pinning the two alpha channels byte-identical. All five
+  *tab* files carry **`?url&no-inline`** — they are under Vite's 4 KB threshold, and
+  inlined they became
+  `data:` URIs, which is 8.3 KB of base64 on every page, all five icons shipped to every
+  visitor, and the icons out of both the budget's `image` line and
+  `test/assets.test.ts`'s reach. The masthead mark does not need the suffix and must not
+  have it: it goes through `astro:assets`, which emits a file by construction, and the
+  query string would hand the component a URL instead of the `ImageMetadata` `<Image>`
+  needs. There is **no `public/`**: on the Pages sub-path a `public/favicon.ico`
+  publishes under the base prefix while the bare probe goes to the *origin* root, so it
+  would answer nothing and cost MUSE-35's resolution bug. No `og:image` here —
+  `siteSettings.shareImage` is a different asset.
 - `rootPath()`/`rootUrl()` in `src/lib/site.ts` are for files the build publishes at the
   deploy root — `robots.txt`, `llms.txt`, the sitemap — and for a future `CNAME`. They
   are **not** the way to reference a bundled asset; see the bullet above, and note that

@@ -1,6 +1,14 @@
 ---
+import { Image } from 'astro:assets';
+
 import { PRIMARY_NAV, MORE_NAV, CTA } from '../lib/nav';
 import { localeUrl, routeKey, type Locale } from '../lib/i18n';
+import {
+  iconClearSpace,
+  MASTHEAD_MARK_EMITTED,
+  MASTHEAD_MARK_HEIGHT,
+} from '../lib/icon';
+import mark from '../assets/icon/muse-mark-white.png';
 import LocaleSwitch from './LocaleSwitch.astro';
 import ThemeSwitch from './ThemeSwitch.astro';
 
@@ -25,6 +33,9 @@ interface Props {
 const { locale, localeSwitch = true } = Astro.props;
 
 const here = routeKey(Astro.url.pathname);
+
+/** §12's clear space for the mark at the size this band draws it. See `src/lib/icon.ts`. */
+const markClear = iconClearSpace(MASTHEAD_MARK_HEIGHT);
 const t = {
   menu: locale === 'hr' ? 'Izbornik' : 'Menu',
   more: locale === 'hr' ? 'Više' : 'More',
@@ -35,43 +46,40 @@ const t = {
 <header class="header" data-header>
   <div class="inner">
     {/*
-      **This is the lockup rebuilt from separate parts, which design system §12 forbids
-      by name, and MUSE-64 measured why it is still here rather than fixing it.**
+      **The icon-only mark, which is what §12 names for this surface** (MUSE-67).
 
-      The footer now carries the real artwork (`Lockup.astro`). The masthead cannot, and
-      the arithmetic is short enough to check:
+      The lockup cannot be here and never could: §12's minimum reproduction size for it
+      is 100px wide, the artwork is 1.372:1, so the smallest legible lockup is 73px tall
+      against a 64px band (§7.1) — and 121px tall once §12's clear space is added, which
+      does not fit the 80px desktop band either. The arithmetic is in `logo/README.md`
+      and the constants it runs on are in `src/lib/lockup.ts` and `src/lib/icon.ts`.
 
-        - §12's minimum reproduction size for the lockup is **100px wide**. That is a
-          legibility floor, not a preference — the artwork carries three type sizes in
-          one image, and at 100px "DANCE STUDIO" and "BY MINA" are already at the edge of
-          readable. Rendered at 66px they are grey smears.
-        - The artwork is 855 × 622 after trimming, so 100px wide is **73px tall**.
-        - This band is **64px** on mobile and **80px** on desktop (§7.1), and §12 also
-          wants the cap height of "MUSE" — 24px at that size — clear on all four sides.
+      Until MUSE-40 the fallback was two spans of live type, which §12 forbids by name,
+      registered as the single exemption in `test/lockup.test.ts`. MUSE-40 shipped the
+      mark — a crop of the same lockup — and §12's variants table names it for exactly
+      this surface. 36px tall is 27px wide against §12's 24px floor, with 12px of clear
+      space, so the whole envelope is 60px in a 64px band.
 
-      73 does not fit in 64 with the clear space, and it does not fit in 64 *without* it
-      either. The size that does fit the mobile band with its clear space is 55px wide,
-      a little over half §12's minimum. So every available move breaks one of the
-      design system's own rules, and which one to break is a brand decision rather than
-      an engineering one.
-
-      **§12 already answers this, and the answer is artwork that does not exist.** Its
-      variants table lists the icon-only mark (dancer + `M`) as the variant for exactly
-      this surface — "favicon, social avatar, **compact mobile header**" — against the
-      status "Missing". That is MUSE-40, blocked on artwork, and it is the proper fix
-      here. The alternative is a true vector redraw, which also unblocks the icon; both
-      are design work, and tracing one out of a 1254px PNG would be inventing brand.
-
-      Until one of those lands, this stays — deliberately, registered as the single
-      exemption in `test/lockup.test.ts`, which fails if a *second* component grows one
-      and fails again if this one is fixed without the exemption being deleted. Do not
-      quietly shrink the lockup into this band to make the guard go green: the guard
-      would pass and the logo would be illegible, which is the trade §12's minimum size
-      exists to refuse.
+      `alt=""` is deliberate: the link owns the accessible name. Two names on one link
+      is read as a repetition by some combinations and as a sentence by others, and the
+      criterion is „exactly once".
     */}
-    <a class="logo" href={localeUrl('/', locale)} aria-label={t.home}>
-      <span class="logoMark">Muse</span>
-      <span class="logoSub">by Mina</span>
+    <a
+      class="logo"
+      href={localeUrl('/', locale)}
+      aria-label={t.home}
+      style={`--mark-height:${MASTHEAD_MARK_HEIGHT}px;--mark-clear:${markClear}px`}
+    >
+      <Image
+        src={mark}
+        alt=""
+        width={MASTHEAD_MARK_EMITTED.width}
+        height={MASTHEAD_MARK_EMITTED.height}
+        format="webp"
+        quality={80}
+        loading="eager"
+        decoding="async"
+      />
     </a>
 
     <button
@@ -240,27 +248,29 @@ const t = {
   }
 
   /* The header band is --surface-deep in BOTH themes, so its contents are always
-     the light-on-dark pairing — never theme-dependent. Design system §12. */
+     the light-on-dark pairing — never theme-dependent. That is why the mark is the
+     white variant on a light page too, with no `media` query and no second file:
+     §12's `.logo-white` / `.logo-plum` utilities are for a logo on --surface. */
   .logo {
-    display: flex;
-    flex-direction: column;
-    line-height: 1;
-    text-decoration: none;
-    color: var(--band-text);
-    margin-right: auto;
+    display: block;
+    margin-inline-end: auto;
+    /* §12's clear space, on all four sides, derived from the drawn height in
+       `src/lib/icon.ts` — a padding rather than a margin so a neighbour cannot collapse
+       it. It also takes the home link from 27 × 36 to 51 × 60, which is the tap target
+       §7.1 asks for and the typeset wordmark used to supply by being wide. */
+    padding: var(--mark-clear);
+    /* The leading edge borrows the band's own gutter, the way `Lockup.astro` does: the
+       inner padding is 24px mobile / 48px desktop against a 12px requirement, so the
+       space is already there and the mark aligns with the content below it instead of
+       hanging 12px inside a column whose every other line starts at the edge. */
+    margin-inline-start: calc(-1 * var(--mark-clear));
   }
-  .logoMark {
-    font-family: var(--font-display);
-    font-size: 1.625rem;
-    letter-spacing: 0.01em;
-  }
-  .logoSub {
-    font-family: var(--font-label);
-    font-size: 0.5625rem;
-    letter-spacing: 0.32em;
-    text-transform: uppercase;
-    color: var(--band-accent);
-    margin-top: 2px;
+  .logo img {
+    display: block;
+    /* Height-driven: the band is a height and the mark is portrait. The emitted
+       width/height attributes carry the ratio, so `auto` restates nothing. */
+    height: var(--mark-height);
+    width: auto;
   }
 
   .srOnly {

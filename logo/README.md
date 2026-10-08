@@ -34,28 +34,54 @@ from the original if the artwork is ever replaced.
 
 ### Where it appears, and where it cannot
 
-**The footer carries it. The masthead does not**, and the reason is arithmetic rather
-than preference:
+**The footer carries the lockup. The masthead carries the icon-only mark**, and the
+reason is arithmetic rather than preference. This is the question somebody asks again
+every year, so here is the whole of the answer:
+
+| | Lockup | Icon-only mark |
+|---|---|---|
+| Artwork, trimmed to its ink | 855 × 622 = **1.372 : 1** | 461 × 622 = **0.741 : 1** |
+| §12 minimum reproduction size | **100px wide** | **24px wide** |
+| …which is | **73px tall** | 32px tall |
+| §12 clear space there (cap height of "MUSE") | **24px** per side | 11px per side |
+| So the smallest §12-legal envelope is | **121px tall** | 54px tall |
+| Header band (§7.1) | **64px** mobile / 80px desktop | same |
+| Fits? | **No — neither band** | **Yes — both** |
+
+73 does not fit in 64 with the clear space and does not fit in 64 *without* it, and 121
+does not fit the 80px desktop band either — so the lockup is out of the masthead at every
+width, not merely on phones. The size that *would* fit the mobile band is 55px wide, a
+little over half the minimum, and at that size "DANCE STUDIO" and "BY MINA" are grey
+smears rather than words, which is exactly what the minimum exists to refuse.
+
+**§12 names the fix in its own variants table: the icon-only mark, listed for the
+*compact mobile header*.** MUSE-40 shipped that mark; MUSE-67 put it in the band and
+deleted the exemption the typeset wordmark had been living under.
+
+#### What the masthead actually draws
 
 | | |
 |---|---|
-| §12 minimum reproduction size | **100px wide** |
-| Artwork aspect, trimmed | 855 : 622 = **1.372 : 1** |
-| So the smallest legible lockup is | **73px tall** |
-| §12 clear space at that size (cap height of "MUSE") | **24px** on all four sides |
-| Header band (§7.1) | **64px** mobile / 80px desktop |
+| Height | **36px**, one size in both bands |
+| Width that follows | 27px — §12's floor is 24 |
+| §12 clear space (cap height of "MUSE" at that scale) | **12px** on all four sides |
+| Envelope | **60px**, inside a 64px band with 4px to spare |
+| Variant | **White, both themes** — the band is `--surface-deep` |
+| Emitted | one 53 × 72 WebP, **1,658 bytes**, 2× for a retina display |
 
-73 does not fit in 64 with the clear space and does not fit in 64 without it. The size
-that *would* fit the mobile band is 55px wide — a little over half the minimum — and at
-that size "DANCE STUDIO" and "BY MINA" are grey smears rather than words, which is what
-the minimum exists to refuse. The masthead therefore still sets the brand in live type,
-which §12 forbids by name; it is registered as a single exemption in
-`test/lockup.test.ts` and explained in `src/components/Header.astro`.
+36 rather than the 38 that would exactly fill the band: the four pixels are worth more as
+slack than as mark, since a border or a padding change should not be able to make the
+clear space quietly false. It is also what the typeset wordmark it replaces occupied —
+26px of Cormorant over a 9px label, about 37px of ink — so the masthead's optical weight
+did not change when the artwork did. One size in both bands because a second size is a
+second dilation radius (below) and therefore a second file, and the wordmark did not
+change size between the bands either.
 
-**§12 already names the fix: the icon-only mark, which it lists as the variant for the
-*compact mobile header*.** That mark now exists — see the next section — so the
-exemption can be closed. Doing so is a separate ticket, not MUSE-40, which shipped the
-artwork and deliberately did not touch the masthead.
+The clear-space fraction is the lockup's, and that is not an approximation: the crop runs
+the full height of the lockup's ink (256 → 878 is all 622 of it), so a mark drawn 36px
+tall *is* the lockup drawn 36px tall with the type cropped off. `iconClearSpace` in
+`src/lib/icon.ts` imports `LOCKUP_CAP_HEIGHT_RATIO` rather than restating it, and refuses
+to answer below §12's minimum rather than clamping.
 
 ## The icon-only mark was never missing (MUSE-40)
 
@@ -87,6 +113,7 @@ Then, per output file:
 | `muse-icon-white-16.png` | same alpha as the plum 16, RGB set to white | 16 × 16 | `#FFFFFF` |
 | `muse-icon-white-32.png` | same alpha as the plum 32, RGB set to white | 32 × 32 | `#FFFFFF` |
 | `muse-apple-touch.png` | crop, **no dilation**, white, inset 14% on a plum ground, 64-colour palette | 180 × 180 | opaque |
+| `muse-mark-white.png` | crop, alpha dilated by a disc of r=5, white — **no resample** (MUSE-67) | 461 × 622 | `#FFFFFF` |
 
 Three things in that table are decisions rather than settings:
 
@@ -97,6 +124,18 @@ sizing. The radius is not a fixed number: it is `0.5 ÷ scale`, so every size ga
 same *rendered* half-pixel per side. `STROKE_GAIN` in `src/lib/icon.ts` is that 0.5, and
 `test/icon.test.ts` measures the committed files against what an undilated crop would
 have produced, so regenerating one without it is a red test rather than a quiet smudge.
+
+`muse-mark-white.png` is the same intervention at the masthead's size and is otherwise
+the plain crop — it is kept at the crop's own 461 × 622 because Astro emits the WebP from
+it, so the only thing done to the artwork here is the thickening. Its gain is **0.3 CSS
+pixels per side**, not 0.5: 36px is twice the tab icon's worst case, and the amount was
+chosen by rendering 0, 0.25, 0.3, 0.35 and 0.45 at 1×, 2× and 3× on `--surface-deep` and
+looking at them — below 0.3 the 1× mark is still washed, and by 0.35 the dancer's head
+and raised arm begin to merge at 2×, which is the detail the mark is for. The unit is CSS
+pixels rather than device pixels because one file serves every display, and optical
+sizing is about how large the mark is *drawn*. `test/lockup.test.ts` re-measures the
+committed file against the supplied lockup every run: it must cover every pixel of the
+crop's ink, add none further than r from it, and carry at least 1.6× the crop's ink.
 
 **Two colour variants with identical alpha.** The supplied artwork is white only, which
 is invisible on a light tab strip; the plum variant replaces RGB and preserves alpha,
@@ -112,7 +151,8 @@ composites a transparent one unpredictably, so it brings its own plum ground.
 - A true vector redraw — also unlocks the dancer silhouette as a watermark motif, and is
   the only thing that would let the mark be recoloured with `currentColor`. The icons
   above are rasters cropped from a raster, which is fine at every size a favicon, avatar
-  or masthead needs and is not a vector.
+  or masthead needs and is not a vector. It would also retire the dilation: a stroked
+  vector can simply be drawn heavier at a small size.
 - A **social share image** (`og:image`). Not this — `siteSettings.shareImage` is a field
   in Sanity and a 1200 × 630 composition, which a square icon is not.
 
@@ -128,7 +168,7 @@ over busy imagery without a scrim.
 
 The tab icons are the one deliberate exception to the clear-space rule, and only to it:
 a favicon is drawn in a 16 or 32 pixel box that the browser already pads, so the mark
-fills its square's height. §12's 24px minimum is about a mark placed *on a page*, which
-is what a future masthead use would be.
+fills its square's height. §12's 24px minimum is about a mark placed *on a page* — which
+is what the masthead is, and it observes both rules.
 
 Full guidance: `../../MuseByMina2/docs/design-system/muse-design-system.md` §12.
