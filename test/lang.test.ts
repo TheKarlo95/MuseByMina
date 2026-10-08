@@ -1,10 +1,21 @@
 import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { launchChecks, openRedirectProbe } from '../scripts/browser-checks.mjs';
-import { LANG_STORAGE_KEY } from '../src/lib/lang';
+import {
+  launchChecks,
+  openCheckPage,
+  openRedirectProbe,
+} from '../scripts/browser-checks.mjs';
+import { DEFAULT_LOCALE, LOCALES, type Locale } from '../src/lib/i18n';
+import { LANG_PARAM, LANG_STORAGE_KEY } from '../src/lib/lang';
+import { ROUTES } from '../src/lib/pages';
 import { settleScroll } from './helpers/browser-settle';
-import { pagePath, startPreview, type Preview } from './helpers/preview';
+import {
+  pagePath,
+  PREVIEW_BASE,
+  startPreview,
+  type Preview,
+} from './helpers/preview';
 
 /**
  * MUSE-10 — the language redirect must carry `#fragment` and `?query` across.
@@ -121,6 +132,66 @@ async function session(locale: string): Promise<Session> {
     await settleScroll(page);
   };
   return { page, open, close };
+}
+
+/**
+ * Activate `selector` and wait until the browser has finished moving.
+ *
+ * The condition, not a clock (MUSE-54). Two facts make this exact rather than a guess:
+ * `langInitScript` is a **blocking inline script in `<head>`**, so a document that has
+ * reached `readyState === 'complete'` has already decided whether to hop; and
+ * `waitForFunction` polls on the page's own `requestAnimationFrame` and re-evaluates in
+ * whatever document is current, so a redirect mid-flight is waited out rather than raced.
+ * Together they say "the browser has stopped somewhere" — which is what a test reading
+ * the landing URL needs, and what a fixed sleep cannot promise on a box running ten
+ * builds.
+ *
+ * The URL has to differ from where the click started, so a click that goes nowhere fails
+ * here naming the selector rather than two assertions later as a wrong landing.
+ */
+async function follow(page: Page, selector: string): Promise<void> {
+  const from = page.url();
+  await page.locator(selector).first().click();
+  try {
+    await page.waitForFunction(
+      (was) => document.readyState === 'complete' && location.href !== was,
+      from,
+      { timeout: 20_000 },
+    );
+  } catch (cause) {
+    throw new Error(
+      `gave up waiting for ${selector} to settle somewhere other than ${from}`,
+      { cause },
+    );
+  }
+  await page.waitForLoadState('networkidle').catch(() => undefined);
+}
+
+/**
+ * Run `work` over `items`, a few at a time, keeping the input order.
+ *
+ * The matrix below is eighteen browser contexts whose cases share nothing; serially that
+ * is most of this suite's wall clock for assertions that could have run together. Each
+ * case already owns its context, so there is nothing to interleave. Same shape as
+ * `test/localeswitch.test.ts`'s.
+ */
+async function inParallel<T, R>(
+  items: readonly T[],
+  limit: number,
+  work: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length) as R[];
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = next;
+      next += 1;
+      if (index >= items.length) return;
+      out[index] = await work(items[index]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
 }
 
 interface Geometry {
@@ -536,9 +607,10 @@ describe('an unknown path is readable, and keeps the choice (MUSE-38)', () => {
           `the ${locale} half is not visible`,
         ).toBe(true);
       }
-      // Readable *and* leavable: the English half's exit is a link to the English site.
+      // Readable *and* leavable: the English half's exit is a link to the English site,
+      // and since MUSE-56 it names the language it leads to rather than only the path.
       const exit = page.locator(exitIn('en')).first();
-      expect(await exit.getAttribute('href')).toBe(pagePath('/en'));
+      expect(await exit.getAttribute('href')).toBe(`${pagePath('/en')}?${LANG_PARAM}=en`);
       expect(await exit.isVisible()).toBe(true);
 
       // And no switcher, which is MUSE-13's constraint and still holds: there is no
@@ -560,8 +632,10 @@ describe('an unknown path is readable, and keeps the choice (MUSE-38)', () => {
       for (const locale of ['hr', 'en']) {
         expect(await page.locator(`main [lang="${locale}"]`).first().isVisible()).toBe(true);
       }
+      // Stamped at render time, not on load, so the exit names its language here too
+      // (MUSE-56) — see the block at the end of this file for why that matters.
       expect(await page.locator(exitIn('en')).first().getAttribute('href')).toBe(
-        pagePath('/en'),
+        `${pagePath('/en')}?${LANG_PARAM}=en`,
       );
     } finally {
       await close();
@@ -674,6 +748,433 @@ describe('an unknown path is readable, and keeps the choice (MUSE-38)', () => {
       );
     } finally {
       await Promise.all([baseline.close(), foreign.close()]);
+    }
+  });
+});
+
+/**
+ * MUSE-56 — the error page's exits have to be links to a *language*, not to a path.
+ *
+ * MUSE-38 gave the error page two exits, one per locale, each built with
+ * `localeUrl('/', l)`. Every one of that ticket's acceptance criteria passes and the pair
+ * is still asymmetric, because of where the two hrefs land:
+ *
+ *   - `/MuseByMina/en/` is the English homepage, which does not `detect` — so the English
+ *     exit is immune and lands in English for everybody.
+ *   - `/MuseByMina/` is the Croatian homepage, **the one route on the site that does**.
+ *     So the Croatian exit handed the visitor straight to browser detection, which then
+ *     overruled the click:
+ *
+ *         nav=en-US stored=null  →  /en/   ← pressed „Početna", got English
+ *         nav=de-DE stored=null  →  /en/   ← same
+ *         nav=hr-HR stored=en    →  /en/   ← same
+ *
+ * The cohort that harms is a Croatian reader whose browser is not configured Croatian —
+ * a work laptop, a borrowed phone, a default install, which in Zagreb is ordinary. They
+ * are shown a bilingual page, they pick the Croatian half, and they are given English.
+ * That is MUSE-38's own complaint, re-created by MUSE-38, pointing the other way.
+ *
+ * The fix is `carryLocation` (`src/lib/lang.ts`), which is where the rule already lived
+ * and what the header switcher already does: a link that names its language cannot be
+ * reinterpreted. The exits are stamped at render time rather than by a script, because
+ * the error page is deliberately legible and leavable with JavaScript off
+ * (`src/pages/404.astro`) and a client-side rewrite would make the durability of the
+ * exits depend on the one thing that page is written not to depend on.
+ *
+ * The matrix is written as a single assertion over every combination rather than a case
+ * each, so a failure prints the grid the ticket was filed with instead of the first row
+ * that broke.
+ */
+describe("the 404's exits land in the language that was pressed (MUSE-56)", () => {
+  /** A path the build has no page for — what a stale or mistyped link looks like. */
+  const MISSING = '/nope';
+
+  /** The exit link inside a locale's half of the bilingual body. */
+  const exitIn = (locale: Locale): string => `main [lang="${locale}"] a[href]`;
+
+  /** The header CTA: on this page it is the Croatian chrome's link to `/#trial`. */
+  const HEADER_CTA = '[data-header] a.cta';
+
+  /** The homepage each locale's exit leads to. */
+  const homeOf = (locale: Locale): string => pagePath(locale === 'hr' ? '/' : '/en');
+
+  /**
+   * Three browsers: the two the site has a locale for, and one it does not.
+   *
+   * `de-DE` is the case neither of the others covers. `hr-HR` is Croatian and `en-US` is
+   * the mirror, so a fix that merely confused "the browser's language" with "the English
+   * locale" would pass on both; a German browser is somebody the site has no page for,
+   * who must still be given the language they pressed.
+   */
+  const BROWSERS = ['en-US', 'hr-HR', 'de-DE'] as const;
+
+  /** `muse-lang` as the visitor arrives: never set, or set on an earlier visit. */
+  const STORED = [undefined, 'en', 'hr'] as const;
+
+  interface Pressed {
+    navigatorLocale: string;
+    storedLang: string | undefined;
+    /** The half of the bilingual body whose exit was clicked. */
+    pressed: Locale;
+  }
+
+  /** What happened, as one line of the ticket's table. */
+  function row(
+    at: Pressed,
+    landed: string,
+    htmlLang: string | null,
+    stored: string | null,
+  ): string {
+    return (
+      `nav=${at.navigatorLocale} stored=${at.storedLang ?? 'null'} ` +
+      `pressed=${at.pressed} → ${landed} lang=${htmlLang} stored=${stored}`
+    );
+  }
+
+  /**
+   * Every combination, in a fixed order so the expected table can be written out.
+   *
+   * Both exits from each browser and each stored value: 3 × 3 × 2. The English exit is in
+   * here because it is the half that already worked, and "must stay true" is an
+   * acceptance criterion rather than an assumption — a fix that made the Croatian exit
+   * durable by making *both* of them name Croatian would satisfy half this grid.
+   */
+  const CASES: Pressed[] = BROWSERS.flatMap((navigatorLocale) =>
+    STORED.flatMap((storedLang) =>
+      LOCALES.map((pressed) => ({ navigatorLocale, storedLang, pressed })),
+    ),
+  );
+
+  /**
+   * Open the error page in a browser of this suite's choosing.
+   *
+   * Through `openRedirectProbe` like the rest of this file: the subject is where a click
+   * takes a browser, so the door that pins a locale and asserts the landing would pin the
+   * subject away (MUSE-48). The browser language is named per case, never defaulted —
+   * Playwright's own default is `en-US`, which is the first row of the table.
+   */
+  async function arrive(opts: {
+    locale: string;
+    storedLang?: string;
+    javaScript?: boolean;
+  }): Promise<{ page: Page; close(): Promise<void> }> {
+    const { page, close } = await openRedirectProbe(browser, {
+      navigatorLocale: opts.locale,
+      storedLang: opts.storedLang,
+      context: {
+        // Wide enough that the header is the desktop layout, so the chrome's own links
+        // are on screen rather than behind the menu button.
+        viewport: { width: 1280, height: 900 },
+        ...(opts.javaScript === false ? { javaScriptEnabled: false } : {}),
+      },
+    });
+    await page.goto(urlFor(MISSING), { waitUntil: 'load' });
+    return { page, close };
+  }
+
+  it('lands in the pressed language from every browser and every stored value', async () => {
+    const landed = await inParallel(CASES, 4, async (at) => {
+      const { page, close } = await arrive({
+        locale: at.navigatorLocale,
+        storedLang: at.storedLang,
+      });
+      try {
+        await follow(page, exitIn(at.pressed));
+        return row(
+          at,
+          new URL(page.url()).pathname,
+          await page.getAttribute('html', 'lang'),
+          await storedLang(page),
+        );
+      } finally {
+        await close();
+      }
+    });
+
+    // The whole grid, written out. Three facts per row, because each is separately
+    // satisfiable: the page that was reached, the language that page declares, and the
+    // value left behind for wherever the visitor goes after it.
+    expect(landed).toEqual(
+      CASES.map((at) =>
+        row(at, homeOf(at.pressed), at.pressed === 'hr' ? 'hr-HR' : 'en', at.pressed),
+      ),
+    );
+  });
+
+  it('names the language on the href, so every way of following it is durable', async () => {
+    // Not a detail of the fix — it *is* the fix, and it is why the assertion is about the
+    // attribute rather than only about a click. Middle-click, "open in new tab" and "copy
+    // link address" fire no `click` event, so a link corrected only by a handler is a
+    // link corrected for one of the four ways of following it (MUSE-16, MUSE-33).
+    const { page, close } = await arrive({ locale: FOREIGN_LOCALE });
+    try {
+      for (const locale of LOCALES) {
+        expect(await page.getAttribute(exitIn(locale), 'href'), `the ${locale} exit`).toBe(
+          `${homeOf(locale)}?${LANG_PARAM}=${locale}`,
+        );
+      }
+    } finally {
+      await close();
+    }
+  });
+
+  it('names it in the markup too, so it survives JavaScript being off', async () => {
+    // The switcher's `?lang=` is attached on load and deliberately absent from the markup,
+    // so a crawler is not offered a second URL for every page on the site
+    // (`test/localeswitch.test.ts`). The error page's is the other way round: one page,
+    // `noindex`, and a body whose stated reason for being bilingual is that it needs no
+    // mechanism. With no script there is no detection to be overruled by either, so this
+    // is not what makes a bare href dangerous — it is what makes the fix one token in a
+    // template rather than a second mechanism on the page MUSE-38 refused to give one to.
+    const { page, close } = await arrive({ locale: FOREIGN_LOCALE, javaScript: false });
+    try {
+      for (const locale of LOCALES) {
+        expect(await page.getAttribute(exitIn(locale), 'href'), locale).toBe(
+          `${homeOf(locale)}?${LANG_PARAM}=${locale}`,
+        );
+      }
+    } finally {
+      await close();
+    }
+  });
+
+  /**
+   * The Croatian chrome this page also renders — looked at, and deliberately left alone.
+   *
+   * The header, footer and CTA here are the same components every other page renders, in
+   * Croatian, and two of their links (`/` and `/#trial`) land on the one detecting route.
+   * Their *exposure* is therefore identical to the Croatian exit's, and they are still not
+   * the same thing:
+   *
+   *   - **They are not a language affordance.** Each is offered once, with no counterpart
+   *     in the other language, so following one asserts nothing about language. The two
+   *     exits are offered as a pair, one per locale, and it is the pairing that makes a
+   *     click a *choice* — which is the thing that may not be overruled.
+   *   - **There is no 404-only chrome to change.** Stamping `?lang=hr` on the logo, the
+   *     nav and the CTA stamps it on every Croatian page of the site, and that is a
+   *     decision about MUSE-10's detection rather than a fix for this defect: it would
+   *     freeze an `en-US` visitor who followed a shared Croatian deep link into Croatian
+   *     the moment they clicked the logo, which is the cohort MUSE-38 exists for.
+   *   - **The fix reaches them anyway, once a choice has been made.** Pressing either exit
+   *     stores the language, and a stored choice outranks the browser (MUSE-33), so the
+   *     chrome follows the choice from then on. The second test below is that composition.
+   *
+   * What has to hold either way is MUSE-10: the CTA carries `#trial` across the redirect,
+   * in both directions. The *geometry* of the landing — the form on screen below the fixed
+   * header — is asserted by the MUSE-10 block above and by `test/localeswitch.test.ts`;
+   * the question here is only whether the fragment survived, and into which language.
+   */
+  it("carries #trial across the chrome's CTA, in both directions", async () => {
+    for (const [locale, stored, landing] of [
+      // Nothing stored: the browser decides, which is MUSE-10 working as designed.
+      [CROATIAN_LOCALE, undefined, '/'],
+      [FOREIGN_LOCALE, undefined, '/en'],
+      // A stored choice outranks the browser, in the direction that crosses languages.
+      [CROATIAN_LOCALE, 'en', '/en'],
+      [FOREIGN_LOCALE, 'hr', '/'],
+    ] as const) {
+      const where = `nav=${locale} stored=${stored ?? 'null'}`;
+      const { page, close } = await arrive({ locale, storedLang: stored });
+      try {
+        expect(await page.getAttribute(HEADER_CTA, 'href'), where).toBe(
+          `${pagePath('/')}${TRIAL}`,
+        );
+
+        await follow(page, HEADER_CTA);
+
+        const landed = new URL(page.url());
+        expect(landed.pathname, where).toBe(pagePath(landing));
+        // The regression MUSE-10 exists to prevent, across exactly this redirect.
+        expect(landed.hash, where).toBe(TRIAL);
+        // And the fragment names something on the page it reached, in that language.
+        expect(await page.locator(TRIAL).count(), where).toBe(1);
+        expect(await page.locator(FORM).count(), where).toBe(1);
+      } finally {
+        await close();
+      }
+    }
+  });
+
+  it('lets a pressed exit govern the chrome from then on, fragment included', async () => {
+    // The composition, and the reason the chrome needs no change of its own: one browser,
+    // two dead links. An `en-US` visitor presses „Početna", which stores `hr`, and the
+    // Croatian CTA they meet on the next stale URL is no longer reinterpreted.
+    const { page, close } = await arrive({ locale: FOREIGN_LOCALE });
+    try {
+      await follow(page, exitIn('hr'));
+      expect(new URL(page.url()).pathname).toBe(pagePath('/'));
+      expect(await storedLang(page)).toBe('hr');
+
+      await page.goto(urlFor(MISSING), { waitUntil: 'load' });
+      await follow(page, HEADER_CTA);
+
+      const landed = new URL(page.url());
+      expect(landed.pathname).toBe(pagePath('/'));
+      expect(landed.hash).toBe(TRIAL);
+      expect(await page.getAttribute('html', 'lang')).toBe('hr-HR');
+    } finally {
+      await close();
+    }
+  });
+});
+
+/**
+ * MUSE-56's class, rather than its instance.
+ *
+ * One token fixes the error page. The thing worth keeping is the rule, because this is the
+ * **second** time a bare homepage href has been reinterpreted: MUSE-33 found it on the
+ * switcher's middle-clicked link, MUSE-56 found it on the error page's Croatian exit, and
+ * both times the href looked like an ordinary link to `/`.
+ *
+ * So the invariant is stated about markup rather than about either page:
+ *
+ *   **A link the page has marked with a language of its own — a `lang` attribute on the
+ *   anchor or on an ancestor below `<html>`, or an `hreflang` on the anchor — is the page
+ *   offering that destination *as* that language. Its href must name the language,
+ *   `?lang=` and all.**
+ *
+ * That definition is what makes this a rule and not a list of two pages. It catches both
+ * affordances the site has, for opposite reasons: the switcher's entry carries `lang` and
+ * `hreflang` on the `<a>` itself, and the error page's exits sit inside the `lang`-marked
+ * halves of its bilingual body. It catches the Croatian exit in particular, which is the
+ * case a *cross-locale* rule cannot see — `/` from a document declaring `hr-HR` crosses
+ * nothing, and is precisely the href that was reinterpreted.
+ *
+ * It is read **from the DOM, in a browser**, not out of the built HTML. The switcher's
+ * `?lang=` is attached on load and deliberately absent from the markup so a crawler is not
+ * offered a second URL for every page on the site; the error page's is stamped at render
+ * time, because that page must work with no script at all. The one level both are true at
+ * is the href the browser would actually navigate to — which is also the level MUSE-33 is
+ * about, since middle-click and "copy link address" read that attribute and fire no
+ * handler.
+ *
+ * The census is asserted as well as the rule. A guard that finds no affordances passes,
+ * and would keep passing while an affordance quietly stopped being marked — so the count
+ * is pinned per page: one on every ordinary page (the switcher's other-locale entry; the
+ * entry for the locale being read is not a link at all, MUSE-39) and two on the error page.
+ */
+describe('a language affordance names its language (MUSE-33, MUSE-56)', () => {
+  /** Every page the build serves, plus a dead path, which is how the 404 is reached. */
+  const SWEPT: string[] = [
+    ...ROUTES.flatMap(({ route }) => [route, `/en${route === '/' ? '' : route}`]),
+    '/nope',
+  ];
+
+  /** How many marked links each swept page is expected to carry. */
+  const expected = (route: string): number => (route === '/nope' ? 2 : 1);
+
+  /** One link the page has marked with a language, as the browser sees it. */
+  interface Affordance {
+    /** The language the page marked it with, folded. */
+    marked: string;
+    /** The `href` attribute verbatim — what "copy link address" would hand over. */
+    href: string;
+    /** Its resolved path, which is what names the destination's locale. */
+    pathname: string;
+    /** `?lang=` on the resolved href, or `null` when the link names no language. */
+    requested: string | null;
+    /** The link's text, so a failure can be read without opening the page. */
+    text: string;
+  }
+
+  /**
+   * Every marked link on the page, read out of the live DOM.
+   *
+   * `closest('[lang]')` walks anchor-upward, so the nearest marking wins — and
+   * `documentElement` is excluded, because every page declares a language there and a rule
+   * that counted it would demand `?lang=` on every link the site has.
+   */
+  function affordances(page: Page, locales: readonly string[]): Promise<Affordance[]> {
+    return page.evaluate((known) => {
+      const named = (value: string | null | undefined): string | null =>
+        typeof value === 'string' && known.includes(value.toLowerCase())
+          ? value.toLowerCase()
+          : null;
+
+      return [...document.querySelectorAll('a[href]')].flatMap((a) => {
+        const nearest = a.closest('[lang]');
+        const inherited =
+          nearest === null || nearest === document.documentElement
+            ? null
+            : named(nearest.getAttribute('lang'));
+        const marked = named(a.getAttribute('hreflang')) ?? inherited;
+        if (marked === null) return [];
+
+        const resolved = new URL((a as HTMLAnchorElement).href, location.href);
+        if (resolved.origin !== location.origin) return [];
+        return [
+          {
+            marked,
+            href: a.getAttribute('href') ?? '',
+            pathname: resolved.pathname,
+            requested: resolved.searchParams.get('lang'),
+            text: (a.textContent ?? '').trim().slice(0, 40),
+          },
+        ];
+      });
+    }, [...locales]);
+  }
+
+  /** The locale a built path leads to: `/MuseByMina/en/schedule/` → `en`. */
+  function destinationOf(pathname: string): Locale {
+    const first = pathname.slice(PREVIEW_BASE.length).split('/').filter(Boolean)[0];
+    return LOCALES.find((locale) => locale === first) ?? DEFAULT_LOCALE;
+  }
+
+  it('holds for every marked link on every page the site serves', async () => {
+    for (const route of SWEPT) {
+      // `openCheckPage` here, not the probe: this sweep *measures* pages, so it must come
+      // through the door that asserts it measured the page it asked for (MUSE-48). Asking
+      // for `/en/schedule` is how it asks for the English one.
+      const open = await openCheckPage(browser, preview, route);
+      try {
+        const marked = await affordances(open.page, LOCALES);
+
+        expect(
+          marked.length,
+          `${route} carries ${marked.length} marked links: ${JSON.stringify(marked)}`,
+        ).toBe(expected(route));
+
+        for (const link of marked) {
+          const where = `${route} → ${link.href} (marked ${link.marked}, "${link.text}")`;
+          // The rule: the href names a language.
+          expect(link.requested, `${where} does not name its language`).not.toBeNull();
+          // …the one the page offered it as…
+          expect(link.requested, `${where} names the wrong language`).toBe(link.marked);
+          // …and the one the path actually leads to, so the two cannot disagree.
+          expect(destinationOf(link.pathname), `${where} leads somewhere else`).toBe(
+            link.marked,
+          );
+        }
+      } finally {
+        await open.close();
+      }
+    }
+  });
+
+  it('finds the error page’s two exits and an ordinary page’s one switch', async () => {
+    // The census as a readable list rather than only as a count, so the shape of what is
+    // being guarded is in the suite: two exits on the error page, one switch everywhere
+    // else, and nothing else on the site marked with a language at all.
+    const missing = await openCheckPage(browser, preview, '/nope');
+    try {
+      const marked = await affordances(missing.page, LOCALES);
+      expect(marked.map((link) => `${link.marked} → ${link.href}`).sort()).toEqual([
+        `en → ${pagePath('/en')}?${LANG_PARAM}=en`,
+        `hr → ${pagePath('/')}?${LANG_PARAM}=hr`,
+      ]);
+    } finally {
+      await missing.close();
+    }
+
+    const home = await openCheckPage(browser, preview, '/');
+    try {
+      const marked = await affordances(home.page, LOCALES);
+      expect(marked.map((link) => `${link.marked} → ${link.href}`)).toEqual([
+        `en → ${pagePath('/en')}?${LANG_PARAM}=en`,
+      ]);
+    } finally {
+      await home.close();
     }
   });
 });

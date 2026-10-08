@@ -259,6 +259,36 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   from the redirect, living on one page — is how MUSE-38 happened in the first place: two
   individually-correct mechanisms answering one question between them.
 
+  **A link that offers a language must name it, and `carryLocation` is the only place that
+  rule lives** (MUSE-33, MUSE-56). The two exits were built with `localeUrl('/', l)` alone,
+  which is asymmetric in a way that is invisible beside MUSE-38's criteria: `/en/` does not
+  language-detect, so the English exit always worked, while the Croatian one points at the
+  bare deploy root — **the single route on the site that does** — and handed the click to
+  browser detection, which overruled it. An `en-US`, `de-DE` or `en`-storing visitor who
+  deliberately pressed „Početna" was given the English site, and *neither* exit persisted
+  the press. This is the second time a bare homepage href has been reinterpreted; MUSE-33's
+  middle-click case was the first. So the guard is the class, not the instance:
+  `test/lang.test.ts` reads every page in a browser and fails if a link the page has
+  **marked with a language** — `lang` on the anchor or on an ancestor below `<html>`, or
+  `hreflang` on the anchor — has an href that does not name that language. Marking rather
+  than "crosses locales", because `/` from an `hr-HR` document crosses nothing and is
+  exactly the href that broke; in a browser rather than against `dist`, because the
+  switcher's `?lang=` is attached on load and the error page's is stamped at render time,
+  and the href the browser would navigate to is the one level both are true at. The census
+  is pinned too — two exits on the error page, one switch everywhere else — because a guard
+  that finds no affordances passes.
+
+  **The error page's monolingual chrome is deliberately not stamped.** Its logo, nav and
+  CTA have the identical exposure (`/` and `/#trial` land on the detecting route) and are
+  not a language affordance: each is offered once with no counterpart, so following one
+  asserts nothing about language, where the exits are a pair and pressing one is a choice.
+  There is also no 404-only chrome — stamping it would stamp every Croatian page, which
+  would freeze an `en-US` visitor who followed a shared Croatian deep link into Croatian
+  the moment they clicked the logo, i.e. break the cohort MUSE-38 exists for. A pressed
+  exit stores the language and a stored choice outranks the browser, so the fix governs the
+  chrome from the first press anyway; `test/lang.test.ts` pins that composition and pins
+  `#trial` surviving the CTA's redirect in both directions (MUSE-10).
+
   The **footer** marks the current route with `aria-current="page"`, because `/privacy/` is
   reachable only from there (the nav omits it on purpose, MUSE-7) and nothing else on the
   site can mark it. It stays an `<a>`: MUSE-39's rule is that whatever carries

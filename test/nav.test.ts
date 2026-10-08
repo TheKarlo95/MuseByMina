@@ -148,10 +148,21 @@ function crawl(filter?: (ref: PageRef) => boolean): Crawled[] {
 
 const isAnchor = (ref: PageRef): boolean => ref.source.startsWith('<a href>');
 
-/** `/MuseByMina/en/schedule/` → `{ locale: 'en', route: '/schedule' }`. */
+/**
+ * `/MuseByMina/en/schedule/` → `{ locale: 'en', route: '/schedule' }`.
+ *
+ * A `?query` is dropped, because an *address* is a path and the question every caller asks
+ * is which page a reference leads to. `request` carries the query — that is what makes it
+ * a request, and `test/urls.test.ts`'s model of the host needs it — so this used to read
+ * `/MuseByMina/?lang=hr` as the route `/?lang=hr`, in no locale, and the error page's two
+ * exits stopped looking like links to the two homepages the moment MUSE-56 made them name
+ * their language. The fragment goes with it for the same reason: `/#trial` is the
+ * homepage.
+ */
 function addressOf(request: string): { locale: Locale; route: string } {
   const base = basePath(build);
-  const segments = request.slice(base.length).split('/').filter(Boolean);
+  const path = request.split(/[?#]/)[0]!;
+  const segments = path.slice(base.length).split('/').filter(Boolean);
   const locale = LOCALES.find((l) => l === segments[0]);
   if (locale) segments.shift();
   return { locale: locale ?? 'hr', route: `/${segments.join('/')}` };

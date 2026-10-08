@@ -43,12 +43,21 @@ export const LANG_PARAM = 'lang';
  * rather than round-tripped through `URLSearchParams.toString()`, which re-encodes what it
  * did not have to touch — `%20` comes back out as `+` — and a function claiming to *carry*
  * a visitor's campaign tags should not be rewriting them (MUSE-33).
+ *
+ * `search` and `hash` default to empty, because there is a caller with nothing to carry:
+ * the error page's two exits (`src/pages/404.astro`), which are built at render time and
+ * so cannot have either. They still have to come through here, which is the point of the
+ * defaults — MUSE-56 was those two hrefs being built with `localeUrl()` alone, and the
+ * Croatian one therefore pointing at the bare deploy root, which is the single route on
+ * the site that browser detection may reinterpret. Hand-appending `?lang=` there would
+ * have fixed the page and left the rule in two places; a default argument keeps "a link
+ * that names its language" one function, called by everything that offers a language.
  */
 export function carryLocation(
   url: string,
   locale: Locale,
-  search: string,
-  hash: string,
+  search = '',
+  hash = '',
 ): string {
   return `${url}${withLang(search, locale)}${hash}`;
 }
