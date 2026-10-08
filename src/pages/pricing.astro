@@ -1,0 +1,11 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Pricing from '../components/Pricing.astro';
+import { getPage } from '../lib/sanity';
+
+const meta = await getPage('/pricing');
+---
+
+<BaseLayout locale="hr" title={meta.title.hr} description={meta.description.hr}>
+  <Pricing locale="hr" />
+</BaseLayout>

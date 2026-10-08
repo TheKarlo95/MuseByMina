@@ -85,7 +85,7 @@ export type Page = {
   _createdAt: string;
   _updatedAt: string;
   _rev: string;
-  route: "/" | "/schedule" | "/contact" | "/privacy";
+  route: "/" | "/schedule" | "/pricing" | "/contact" | "/privacy";
   name: LocaleString;
   title: LocaleString;
   description: LocaleString;
@@ -495,7 +495,7 @@ export type SITE_SETTINGS_QUERY_RESULT = {
 // Query: *[_type == "page"] | order(route asc){    _id,    route,    name{ hr, en },    title{ hr, en },    description{ hr, en }  }
 export type PAGES_QUERY_RESULT = Array<{
   _id: string;
-  route: "/" | "/contact" | "/privacy" | "/schedule";
+  route: "/" | "/contact" | "/pricing" | "/privacy" | "/schedule";
   name: {
     hr: string;
     en: string;

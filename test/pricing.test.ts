@@ -19,8 +19,12 @@ import {
   periodName,
   resolveFeatured,
 } from '../src/lib/pricing';
+import { PRIMARY_NAV } from '../src/lib/nav';
+import { ROUTES } from '../src/lib/pages';
 import { FIXTURE_ENV } from '../src/lib/sanity/fixture';
 import { PRICE_PERIODS, PRICE_PERIOD_OPTIONS } from '../sanity/schemaTypes/enums';
+import { PAGES_DEPLOY, buildFailure, buildSite, type Build } from './helpers/build';
+import { seedDocs, seedDocsOfType, type SeedDoc } from './helpers/seed';
 import {
   PRICING_NONE_FEATURED,
   PRICING_ONE_FEATURED,
@@ -243,15 +247,21 @@ describe('AC2: exactly one tier is featured — which the schema cannot enforce'
 /* ======================================================= the rendered component */
 
 /**
- * **`/pricing` is not a route, so the component is rendered rather than the page.**
+ * **The component, rendered on its own — for the datasets one seed cannot hold at once.**
  *
- * This commit deliberately ships no `src/pages/pricing.astro`: there are no real prices,
- * the dataset holds no `pricingTier` document, and `getPricingTiers()` fails the build
- * naming the type when there are none — which on `main` would stop every deploy *and*
- * the scheduled rebuild that landed in MUSE-21. So there is nothing to build and nothing
- * for `test/helpers/preview.ts` to serve.
+ * MUSE-22 wrote this half because there was no route: no real prices, no `pricingTier`
+ * document, and `getPricingTiers()` fails the build naming the type when there are none,
+ * which on `main` would have stopped every deploy and the scheduled rebuild MUSE-21
+ * added. MUSE-59 routed the page, and the `dist` assertions at the end of this file are
+ * the half that was missing.
  *
- * The two ways to test it anyway, and why this is the one:
+ * **This half stays, and not out of sentiment.** Four of its subjects cannot exist in
+ * `content/seed.ndjson`, because that file is imported into Mina's dataset: two tiers
+ * ticked as featured, no tier ticked, a third tier, and a `drafts.`-prefixed document
+ * that must not reach the page. Those are properties of *the component under a dataset*,
+ * and the only way to have one is to render it against a fixture.
+ *
+ * The two ways to do that, and why this is the one:
  *
  *   - **A throwaway route inside the test's own build.** Rejected. A suite cannot start
  *     its own build (`test/isolation.test.ts`, rule 4) and `astroBuild` runs in the
@@ -269,10 +279,10 @@ describe('AC2: exactly one tier is featured — which the schema cannot enforce'
  * no asset pipeline, so the component's scoped `<style>` is not in the output: nothing
  * below measures a colour, a border, a computed style or a layout. Those are checked
  * three other ways — `npm run ds` on the source, the two assertions on the style block
- * at the end of this file, and a screenshot taken by hand against a temporary local
- * route (recorded in the pull request). When `/pricing` becomes a route, the browser
- * assertions `test/trialform.test.ts` makes about `/contact` are what should cover it,
- * and these should stay as they are: they are about the *content* of the page.
+ * further down this file, and, now that `/pricing` is a route (MUSE-59), the browser:
+ * `npm run a11y` audits it in both locales and both themes, and `test/numerals.test.ts`
+ * screenshots its prices against the same element with old-style figures forced, which
+ * is the one rule here no source scan can settle.
  *
  * Every assertion is on the HTML a visitor's browser would receive, not on a value the
  * component returned.
@@ -793,3 +803,325 @@ describe('the component copy table', () => {
   });
 });
 
+
+/* ====================================================== MUSE-59: the published page */
+
+/**
+ * **MUSE-59 — the route, and the prices that made it safe to add.**
+ *
+ * Everything above renders the component through the container API, because when MUSE-22
+ * landed there was no `/pricing` to build: no prices had been agreed, the dataset held no
+ * `pricingTier` document, and `getPricingTiers()` fails the build naming the type when
+ * there are none. A route on `main` in that state stops every pull request, every deploy
+ * and MUSE-21's scheduled rebuild.
+ *
+ * This section is the other half, and it asserts against `dist` rather than against a
+ * returned string, because three of the claims cannot be made any other way:
+ *
+ *   - the page is **served** — a component that renders is not a route (MUSE-46);
+ *   - every price on it came from the **committed seed**, which is the dataset the deploy
+ *     will read once it is imported;
+ *   - an **edited** price moves the number on the page. That is the only assertion a
+ *     hardcoded literal fails while every equality test still passes — MUSE-50's whole
+ *     subject, and here it is also the difference between a CMS field and a price list
+ *     somebody would have to open a pull request to correct.
+ *
+ * Canonical, hreflang, the sitemap, `llms.txt` and the 200 through the model of GitHub
+ * Pages are deliberately **not** re-asserted here. They are derived from `src/pages/` by
+ * `test/seo.test.ts`, `test/urls.test.ts` and `test/nav.test.ts`, so `/pricing` joined
+ * those the moment its two files existed; a copy of them keyed on this one route is a
+ * second list to keep exhaustive. Two cheap presence checks stay, because this suite has
+ * the build in hand and "the page exists but nothing links to it" is the shape MUSE-13
+ * and MUSE-37 are about.
+ */
+
+/**
+ * **What the studio confirmed, frozen — the receipt, not the source.**
+ *
+ * Two periods and no others: 55 € for one month, 100 € for two. The seed is the source and
+ * the page reads it; this is the second copy that makes „somebody invented a third tier"
+ * a red test rather than a thing a reviewer has to notice. `src/data/schedule.ts` is why:
+ * thirteen invented classes passed every test in the repository for the life of the
+ * project, because the suite compared the page to the file the page was rendered from
+ * (MUSE-36).
+ *
+ * It follows `PUBLISHED_BEFORE_THE_MIGRATION` in `test/content.test.ts` exactly: when Mina
+ * legitimately changes a price or adds a package, **edit this list in the same commit with
+ * a sentence saying who decided it** — do not quietly make it match.
+ *
+ * `featured` is in here for the same reason the prices are. Nobody has asked the studio
+ * which package to single out, so neither tier is featured, and „an empty optional field
+ * is a decision" is only a decision if undoing it is visible.
+ */
+const CONFIRMED_TIERS = [
+  { id: 'pricing-one-month', priceEur: 55, period: 'month', featured: false },
+  { id: 'pricing-two-months', priceEur: 100, period: 'package', featured: false },
+] as const;
+
+/**
+ * The prices the edited dataset states instead, for the MUSE-50 build.
+ *
+ * Deliberately unlike anything else a page of this site prints, and neither one a
+ * substring of the other or of the seeded pair — the absence claim below is a byte search
+ * over every file in the output, so `€15` inside `€150` would make it pass for the wrong
+ * reason.
+ */
+const EDITED_PRICES: Record<string, number> = {
+  'pricing-one-month': 73,
+  'pricing-two-months': 151,
+};
+
+/** Where each locale's pricing page lands in the output. */
+const PRICING_PAGE: Record<Locale, string> = {
+  hr: 'pricing/index.html',
+  en: 'en/pricing/index.html',
+};
+
+/**
+ * The seed's tiers in the order `PRICING_QUERY` returns them.
+ *
+ * `order` ascending with `priceEur` as the tie-break, which is `coalesce(order, 999) asc,
+ * priceEur asc` — reproduced rather than imported, because importing the query would make
+ * the assertion "the query agrees with itself" (the reason `seededSchedule` joins by hand).
+ */
+function seededTiers(): SeedDoc[] {
+  return seedDocsOfType('pricingTier').sort((a, b) => {
+    const rank = (doc: SeedDoc): number =>
+      typeof doc.order === 'number' ? doc.order : 999;
+    return rank(a) - rank(b) || (a.priceEur as number) - (b.priceEur as number);
+  });
+}
+
+/** The text of every `data-price` element on a page, in document order. */
+function pricesIn(html: string): string[] {
+  return [...html.matchAll(/<p\b[^>]*\bdata-price\b[^>]*>([\s\S]*?)<\/p>/g)].map((m) =>
+    textOf(m[1]!),
+  );
+}
+
+/** Every formatted price the committed seed produces, in both locales. */
+function seededPriceStrings(): string[] {
+  return seededTiers().flatMap((tier) =>
+    LOCALES.map((locale) => formatPrice(tier.priceEur as number, locale)),
+  );
+}
+
+let published: Build;
+let repriced: Build;
+let withoutTiers = '';
+
+beforeAll(() => {
+  if (SEED_FIXTURE === undefined) {
+    throw new Error(
+      `${FIXTURE_ENV} is unset, so these builds would fetch the live dataset. ` +
+        'vitest.config.ts points it at content/seed.ndjson.',
+    );
+  }
+  published = buildSite(PAGES_DEPLOY, { [FIXTURE_ENV]: SEED_FIXTURE });
+
+  repriced = buildSite(PAGES_DEPLOY, {
+    [FIXTURE_ENV]: fixtureOf(
+      seedDocs().map((doc) =>
+        doc._type === 'pricingTier' && doc._id in EDITED_PRICES
+          ? { ...doc, priceEur: EDITED_PRICES[doc._id]! }
+          : doc,
+      ),
+      'pricing-repriced',
+    ),
+  });
+
+  // The ordering trap in the ticket, as a test: this is the state `main` is in until the
+  // dataset is seeded, and it has to be loud.
+  withoutTiers = buildFailure(PAGES_DEPLOY, {
+    [FIXTURE_ENV]: fixtureOf(
+      seedDocs().filter((doc) => doc._type !== 'pricingTier'),
+      'pricing-unseeded',
+    ),
+  });
+}, 600_000);
+
+describe('MUSE-59: two periods, confirmed by the studio, and no others', () => {
+  it('seeds exactly the confirmed tiers, at the confirmed prices', () => {
+    expect(
+      seededTiers().map((tier) => ({
+        id: tier._id,
+        priceEur: tier.priceEur,
+        period: tier.period,
+        featured: tier.featured,
+      })),
+    ).toEqual(CONFIRMED_TIERS.map((tier) => ({ ...tier })));
+  });
+
+  it('invents no third tier, no drop-in rate and no package', () => {
+    // The assertion MUSE-36 did not have. A fourth document in the seed is content nobody
+    // confirmed, and a price is a commercial claim as well as a string.
+    expect(seededTiers()).toHaveLength(CONFIRMED_TIERS.length);
+  });
+
+  it('gives the two-month tier a real discount rather than a rounder number', () => {
+    const [oneMonth, twoMonths] = CONFIRMED_TIERS;
+    expect(twoMonths.priceEur).toBeLessThan(2 * oneMonth.priceEur);
+  });
+
+  it('says on the page that it is a discount, so nobody has to do the arithmetic', () => {
+    // The tier's own `features`, which is where a reason a package is worth buying
+    // belongs — not a number computed in a component, which would be a second place a
+    // price lives (and would go stale against `priceEur` on the next Studio edit).
+    const twoMonths = seededTiers().find((tier) => tier._id === 'pricing-two-months')!;
+    const features = twoMonths.features as Record<Locale, string>[];
+    expect(features.length).toBeGreaterThan(0);
+    for (const locale of LOCALES) {
+      for (const feature of features) {
+        expect(feature[locale]?.trim(), `${locale}`).toBeTruthy();
+        expect(published.read(PRICING_PAGE[locale]), locale).toContain(feature[locale]);
+      }
+    }
+  });
+
+  it('fills both locales of every string on every tier', () => {
+    // `decodePricingTier` fails the build on a half-translated tier, so this is the same
+    // claim stated against the artefact the orchestrator is about to import.
+    for (const tier of seededTiers()) {
+      for (const locale of LOCALES) {
+        expect((tier.name as Record<Locale, string>)[locale], tier._id).toBeTruthy();
+      }
+    }
+  });
+});
+
+describe('MUSE-59: /pricing is a route this site serves', () => {
+  it('declares the route where a reader meets it, not at the end', () => {
+    // Between the timetable and the contact page: what is on, what it costs, how to come.
+    const order = ROUTES.map(({ route }) => route);
+    expect(order).toContain('/pricing');
+    expect(order.indexOf('/pricing')).toBe(order.indexOf('/schedule') + 1);
+    expect(order.indexOf('/pricing')).toBeLessThan(order.indexOf('/contact'));
+  });
+
+  it('gives the route a Studio label', () => {
+    const entry = ROUTES.find(({ route }) => route === '/pricing');
+    expect(entry?.studioLabel?.trim()).toBeTruthy();
+  });
+
+  it('puts it in the navigation, in both languages', () => {
+    // MUSE-13's twelve dead links are what this is: the entry existed and the page did
+    // not. `test/nav.test.ts` follows every link in the built output, so the 404 half is
+    // covered there; this is the half that says the entry is there at all.
+    const entry = PRIMARY_NAV.find(({ route }) => route === '/pricing');
+    expect(entry, '/pricing is not in PRIMARY_NAV').toBeDefined();
+    for (const locale of LOCALES) expect(entry!.label[locale]?.trim(), locale).toBeTruthy();
+  });
+
+  it('builds a page in each locale', () => {
+    for (const locale of LOCALES) {
+      expect(published.htmlFiles(), locale).toContain(PRICING_PAGE[locale]);
+    }
+  });
+
+  it('is advertised to machines and to crawlers', () => {
+    // Cheap, and both derived from the registry rather than written here: the full
+    // non-redirecting/canonical/hreflang claims are `test/seo.test.ts` and
+    // `test/urls.test.ts`, which read their page list off `src/pages/`.
+    expect(published.read('llms.txt')).toContain('/pricing/');
+    const sitemaps = published.files().filter((file) => /^sitemap-\d+\.xml$/.test(file));
+    expect(sitemaps.length, 'the build emitted no numbered sitemap').toBeGreaterThan(0);
+    expect(sitemaps.map((file) => published.read(file)).join('')).toContain('/pricing/');
+  });
+});
+
+describe('MUSE-59: every price on the page came out of the dataset', () => {
+  for (const locale of LOCALES) {
+    it(`${locale}: each card's price is exactly what its document formats to`, () => {
+      const html = published.read(PRICING_PAGE[locale]);
+      expect(pricesIn(html)).toEqual(
+        seededTiers().map((tier) => formatPrice(tier.priceEur as number, locale)),
+      );
+    });
+
+    it(`${locale}: each card pairs its price with its own period`, () => {
+      // The pairing is the acceptance criterion — „55 € for one month" — and a per-card
+      // assertion is what tells it from a page that happens to contain both numbers.
+      const rendered = cards(published.read(PRICING_PAGE[locale]));
+      expect(rendered.map((card) => card.attrs['data-tier'])).toEqual(
+        seededTiers().map((tier) => tier._id),
+      );
+      for (const [index, tier] of seededTiers().entries()) {
+        const card = rendered[index]!;
+        expect(valueOf(card.html, 'data-price'), tier._id).toBe(
+          formatPrice(tier.priceEur as number, locale),
+        );
+        expect(card.text, tier._id).toContain(periodName(tier.period as string, locale));
+        expect(card.text, tier._id).toContain((tier.name as Record<Locale, string>)[locale]);
+      }
+    });
+  }
+
+  it('writes the Croatian price with its no-break space and the English one without', () => {
+    for (const price of pricesIn(published.read(PRICING_PAGE.hr))) {
+      expect(price).toMatch(/^[\d.,]+ €$/);
+    }
+    for (const price of pricesIn(published.read(PRICING_PAGE.en))) {
+      expect(price).toMatch(/^€[\d.,]+$/);
+    }
+  });
+});
+
+describe('MUSE-50: an edited price moves the number on the page', () => {
+  it('edits to prices that really differ from the seed', () => {
+    // Otherwise everything below is satisfied by the literal this suite exists to forbid.
+    for (const tier of seededTiers()) {
+      expect(EDITED_PRICES[tier._id], tier._id).toBeDefined();
+      expect(EDITED_PRICES[tier._id]).not.toBe(tier.priceEur);
+    }
+  });
+
+  for (const locale of LOCALES) {
+    it(`${locale}: the rebuilt page prints the edited prices`, () => {
+      expect(pricesIn(repriced.read(PRICING_PAGE[locale]))).toEqual(
+        seededTiers().map((tier) => formatPrice(EDITED_PRICES[tier._id]!, locale)),
+      );
+    });
+  }
+
+  it('leaves the seeded prices nowhere in the rebuilt output — not one byte', () => {
+    const stale = published
+      .htmlFiles()
+      .flatMap((file) =>
+        seededPriceStrings()
+          .filter((price) => repriced.read(file).includes(price))
+          .map((price) => `${file} still prints ${price}`),
+      );
+    expect(stale).toEqual([]);
+  });
+
+  it('and the control: the committed seed really does publish them', () => {
+    // The other direction, so the absence above is a consequence of the edit rather than
+    // of the prices never having been on the page.
+    const found = seededPriceStrings().filter((price) =>
+      LOCALES.some((locale) => published.read(PRICING_PAGE[locale]).includes(price)),
+    );
+    expect(found.sort()).toEqual([...seededPriceStrings()].sort());
+  });
+});
+
+describe('MUSE-59: the ordering trap — the route without the documents', () => {
+  /**
+   * **Why this test is the one that justifies the pull request's warning.**
+   *
+   * `getPricingTiers()` leaves `minimum` at 1, so until the `pricingTier` documents are in
+   * the live dataset the route fails `npm run build` — and the build is what every pull
+   * request, the deploy and the scheduled rebuild run. The failure has to name the type,
+   * because "a page is blank" and "the dataset has not been seeded" are not the same
+   * problem and only one of them is fixed by an import.
+   */
+  it('fails the build, naming `pricingTier` and what it needed', () => {
+    expect(withoutTiers).toContain('pricingTier');
+    expect(withoutTiers).toContain('at least 1');
+  });
+
+  it('fails as a content error rather than as a transport one', () => {
+    // `TRANSIENT_BUILD_FAILURE` is what `deploy.yml` retries on (MUSE-21). An unseeded
+    // dataset will not seed itself on the third attempt, so it must not look transient.
+    expect(withoutTiers).not.toContain('TRANSIENT_BUILD_FAILURE');
+  });
+});

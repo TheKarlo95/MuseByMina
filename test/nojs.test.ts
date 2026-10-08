@@ -75,19 +75,27 @@ describe('the built site ships no JavaScript files and no CMS client', () => {
     }
   });
 
-  it('renders exactly the pages it rendered before the CMS existed', () => {
+  it('renders exactly the pages the site publishes', () => {
     // The routes the site publishes, spelled out. MUSE-20 moved the words of these pages
     // into the CMS and added none, which is what makes a migration a migration — and a
     // page that silently stopped building (a content error swallowed somewhere) would
     // otherwise look like a pass everywhere else in this file.
+    //
+    // MUSE-59 added the first new page since: `/pricing`, with the `pricingTier`
+    // documents that make it buildable. A page arriving here is the one case where
+    // editing this list is correct, and it has to be a line in a diff rather than a list
+    // derived from `ROUTES` — the claim is "the build emitted these and nothing else",
+    // and deriving it from the registry would make it agree with itself.
     expect(build.htmlFiles()).toEqual([
       '404.html',
       'contact/index.html',
       'en/contact/index.html',
       'en/index.html',
+      'en/pricing/index.html',
       'en/privacy/index.html',
       'en/schedule/index.html',
       'index.html',
+      'pricing/index.html',
       'privacy/index.html',
       'schedule/index.html',
     ]);

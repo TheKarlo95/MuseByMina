@@ -21,25 +21,27 @@ import TrialForm from './TrialForm.astro';
  * with the package already chosen.
  *
  * ---------------------------------------------------------------------------
- * **There is no `/pricing` route, and this component is not reachable yet.**
+ * **`/pricing` is a route as of MUSE-59, and this is what it took.**
  *
- * Deliberate, and the reason is not caution. The dataset holds no `pricingTier`
- * document, because **there are no agreed prices** — and `getPricingTiers()` defaults to
- * `minimum: 1`, so a route pointing here would fail every build on `main`: the pull
- * request checks, the deploy, and the scheduled rebuild MUSE-21 added. A wrong price is
- * also the worst thing this site could invent. MUSE-36 is open right now because
- * plausible placeholder content — a timetable naming instructors who do not teach here —
- * escaped a data file and is live; a price is the same failure plus a commercial claim
- * somebody budgets around.
+ * MUSE-22 built this component and deliberately left it unreachable: the dataset held no
+ * `pricingTier` document, because there were no agreed prices, and `getPricingTiers()`
+ * leaves `minimum` at 1 — so a route pointing here would have failed every build on
+ * `main`, the pull request checks, the deploy and MUSE-21's scheduled rebuild with it.
  *
- * So the plumbing lands here, tested, and the follow-up adds three things together:
- * `src/pages/pricing.astro` and `src/pages/en/pricing.astro`, `/pricing` in `ROUTES` and
- * in `PRIMARY_NAV`, and the real `pricingTier` and `page` documents in the Studio. The
- * route and the content have to arrive in one commit or the build breaks; see the pull
- * request.
+ * What ended that was content, not code: Mina confirmed **two** periods, 55 € for one
+ * month and 100 € for two, and nothing else — no drop-in rate, no third package.
+ * `test/pricing.test.ts` holds that as a frozen list, because a wrong price is the worst
+ * thing this site could invent: it is MUSE-36's failure (plausible placeholder content
+ * that reached production and stayed) plus a commercial claim somebody budgets around.
  *
- * `test/pricing.test.ts` renders this component directly through Astro's container API
- * for the same reason, and says so.
+ * The ordering that got it here is worth knowing, because the next routed page needs it
+ * too: the `pricingTier` and `page` documents were imported into the live dataset
+ * **before** the branch adding the route was merged. The two cannot land in one push,
+ * and `npm run sanity:seed` is a write to Mina's content.
+ *
+ * `test/pricing.test.ts` still renders this component through Astro's container API for
+ * the dataset shapes a seed cannot hold at once — two tiers ticked as featured, none,
+ * a draft — and asserts the real page against `dist` beside it.
  * ---------------------------------------------------------------------------
  *
  * Shape is design system §7.2, *Pricing tier*: cards on `--surface-raised`; the featured
@@ -69,8 +71,15 @@ const { tiers, warning } = resolveFeatured(await getPricingTiers());
  * express, so `resolveFeatured` picks deterministically and never throws — the full
  * argument is in `src/lib/pricing.ts`. What it cannot do is tell anybody, so that
  * happens here, once, in the build log, naming the documents. The place it also belongs
- * is the Studio, as an async `Rule.custom` on `pricingTier.featured`; that is a schema
- * change and belongs with the commit that ships the page.
+ * is the Studio, as an async `Rule.custom` on `pricingTier.featured`.
+ *
+ * MUSE-59 shipped the page and did **not** add that rule, which is a decision rather
+ * than an omission: it is a schema change, so it costs a regenerated `schema.json`, a
+ * regenerated type file, a new stamp and a Studio redeploy, and it guards a state that
+ * cannot exist in the dataset today — neither seeded tier is featured, so there is no
+ * second box to tick by accident. It becomes worth doing the day somebody ticks the
+ * first one. Until then the build log is the whole of the report, and that is enough,
+ * because the page it describes still renders correctly.
  */
 if (warning !== undefined) console.warn(`[pricing] ${warning}`);
 
@@ -263,10 +272,22 @@ const packages = tiers.map((tier) => ({
   }
   @media (min-width: 768px) {
     .tiers {
-      /* `auto-fit` with a floor rather than three fixed columns: Croatian runs 20–25%
-         longer than English (§10), so the cards size to their content and a fourth tier
-         wraps instead of squeezing the other three. */
-      grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+      /* `auto-fit` with a floor and a ceiling rather than three fixed columns: Croatian
+         runs 20–25% longer than English (§10), so the cards size to their content between
+         those two bounds and a fourth tier wraps instead of squeezing the other three.
+
+         The ceiling is what MUSE-59 added, and it is about the real data rather than
+         about taste. §7.2 describes three cards; the studio confirmed **two** periods, and
+         with `1fr` two tracks split 1280px into a pair of 600px cards holding a name, a
+         price, one line and a button — a price list that reads as though a third card
+         failed to load. A ceiling plus `justify-content: center` keeps a tier the same
+         size whether there are two of them or four, which is also what makes the row
+         comparable: a card that is wider because there are fewer of them is a card the
+         eye weighs differently. Not a `width` on the card — §10's rule is that the
+         content decides the size, and a track range is a floor and a ceiling, not a
+         width. */
+      grid-template-columns: repeat(auto-fit, minmax(15rem, 24rem));
+      justify-content: center;
       gap: var(--space-6);
     }
   }

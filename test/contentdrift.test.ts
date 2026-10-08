@@ -196,6 +196,22 @@ const CMS_OWNS: { path: string; why: string }[] = [
       'not exist and it was live for the life of the project (MUSE-36). A clock time ' +
       'reappearing under `src/` is that bug restarting.',
   },
+  {
+    path: 'pricingTier.name',
+    why:
+      'what Mina calls a package — the `<h3>` on each card and the value the enrolment ' +
+      "form submits (`packageValue`). The component's own copy table holds four " +
+      'structural words and no package name, which is the shape MUSE-22 shipped on ' +
+      'purpose; a name reappearing in code is that decision being undone.',
+  },
+  {
+    path: 'pricingTier.features[]',
+    why:
+      'what a package includes, and in the two-month tier’s case the sentence that says ' +
+      'the price is a discount. The one place on the site a „what you get" line may live, ' +
+      'because it is a claim about what the studio sells — and the field MUSE-36 would ' +
+      'have been filled with fiction if it had been written in code.',
+  },
 ];
 
 /**
@@ -252,6 +268,15 @@ const MAY_APPEAR_IN_CODE: { path: string; why: string }[] = [
   {
     path: 'scheduleSlot.day',
     why: 'the same, for `WEEKDAYS`.',
+  },
+  {
+    path: 'pricingTier.period',
+    why:
+      'a closed set, like the levels and the weekdays — `PRICE_PERIODS` is the Studio’s ' +
+      'half and `PERIOD_NAME` in `src/lib/pricing.ts` is the page’s, keyed by the same ' +
+      'identifiers. The stored value is `month`, and the *word* („mjesečno" / "per ' +
+      'month") is formatting, which CLAUDE.md keeps in code for the same reason ' +
+      '`formatTime` is there. The identifier is supposed to be written down.',
   },
   {
     path: 'class.name',

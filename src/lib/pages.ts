@@ -60,6 +60,10 @@ export interface SiteRoute {
 export const ROUTES: SiteRoute[] = [
   { route: '/', studioLabel: 'Početna' },
   { route: '/schedule', studioLabel: 'Raspored' },
+  // Inserted rather than appended (MUSE-59): the order here is the order `llms.txt` lists
+  // the site in and the order the Studio's dropdown offers, and it is the order a reader
+  // meets the pages — what is on, what it costs, how to come.
+  { route: '/pricing', studioLabel: 'Cjenik' },
   { route: '/contact', studioLabel: 'Kontakt' },
   { route: '/privacy', studioLabel: 'Izjava o privatnosti' },
 ];
