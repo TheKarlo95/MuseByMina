@@ -1,0 +1,46 @@
+# What Prettier does not own in this repository (MUSE-58).
+#
+# Every entry below is a file a formatter run would *damage*, not merely churn, and each
+# one is asserted to still be ignored by `test/format.test.ts` — so an entry that stops
+# mattering is a red test rather than a line nobody re-reads.
+#
+# `src/lib/sanity/sanity.types.ts` is deliberately **not** here. It is generated, and
+# `sanity typegen` resolves `prettier.config.mjs` for it, which `.prettierignore` cannot
+# reach; it is pinned by an `overrides` entry there instead and left checkable, because a
+# full `prettier --check` on it is what proves the pin still matches the generator.
+
+# Builds, caches and dependency trees.
+dist/
+.astro/
+.sanity/
+node_modules/
+
+# Another checkout of this repository, agent-owned and transient.
+.claude/worktrees/
+
+# Generated artefacts. `sanity/schema.json` and `sanity/schema.stamp.json` are fingerprinted
+# by `scripts/check-sanity.mjs`; reformatting either fails `npm run build` for no reason.
+package-lock.json
+sanity/schema.json
+sanity/schema.stamp.json
+
+# `.astro` has no parser installed. Prettier answers "No parser could be inferred" for all
+# 22 of them, which makes `prettier --write .` *fail* rather than skip — so they are named
+# here instead. The fix would be `prettier-plugin-astro`, which is not in the lockfile: it
+# appears only as an optional peer of the Astro language tools and is not installed, so
+# adding it is a new dependency, and the quote convention in the half that matters (the
+# frontmatter) is already checked without it by `scripts/check-format.mjs`. If the plugin is
+# ever added, `test/format.test.ts` fails and says to widen the rule to the markup half.
+*.astro
+
+# Prose. Where a paragraph wraps is a judgement, and `CLAUDE.md` is edited by every branch
+# at once — a reflow of it conflicts with all of them. `npm run format:check` still holds
+# these to tabs, line endings and trailing whitespace.
+*.md
+
+# `src/styles/tokens.css` is a hand-aligned column of brand values whose hex is uppercase to
+# match the design system document it is transcribed from (`muse-design-system.md` §colour).
+# Prettier collapses the alignment and lowercases all of it: 343 lines of one file, erasing
+# the only thing that makes the table readable against its source. CSS formatting is not
+# worth that, and the design system has its own gate in `npm run ds`.
+*.css

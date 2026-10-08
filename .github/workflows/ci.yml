@@ -201,6 +201,21 @@ jobs:
       - run: npm ci
       - run: node scripts/check-tokens.mjs
 
+      # The formatting convention (MUSE-58), hosted here rather than in a sixth check.
+      #
+      # This job is the only one in this file that needs neither a build nor a browser, so
+      # its wall clock is `npm ci` and almost nothing else. The scan takes 1.3 seconds and
+      # disappears into that; a job of its own would have paid for a runner and a second
+      # `npm ci` to run the fastest check in the repository, which is exactly the trade the
+      # ticket said not to make.
+      #
+      # It is not `prettier --check`. That cannot pass without reformatting the tree, which
+      # is the defect MUSE-58 exists to prevent — see `prettier.config.mjs`. What this
+      # asserts is the invariant the tree actually holds, and it names the offending
+      # `file:line`.
+      - name: The formatting convention is stated and still holds
+        run: npm run format:check
+
   # The one MUSE-21 failure mode that no alert inside the deploy workflow can reach.
   #
   # **GitHub disables a scheduled workflow after 60 days of repository inactivity**, and its

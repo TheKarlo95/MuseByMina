@@ -1,0 +1,427 @@
+/**
+ * The formatting convention, asserted — MUSE-58.
+ *
+ * `prettier.config.mjs` states the convention, which is enough to stop a `prettier --write`
+ * from overriding it. This is the other half: something that reads the rule, so that "the
+ * config exists but nothing enforces it" does not become the next ticket. It names the
+ * offending `file:line`, and it runs in well under a second, which is why it can live as a
+ * step in `ci.yml`'s cheapest job rather than as a sixth check.
+ *
+ * ## Why this is not `prettier --check`
+ *
+ * Because `prettier --check` cannot pass on this tree, and making it pass would mean
+ * reformatting the tree — the exact defect MUSE-58 was filed about. Measured: no
+ * `printWidth` leaves the tree alone; at the best value Prettier still rewraps 43 of 78
+ * TypeScript and `.mjs` files, and 35 files are clean at no width at all because they were
+ * wrapped by hand. A gate that demands a tree-wide reformat invalidates every open branch
+ * at once and produces a diff nobody can review.
+ *
+ * So the gate is the *invariant the tree actually holds*, which is also precisely the
+ * defect: **where the quote character is a free choice, this repository picks single.** All
+ * 348 of MUSE-45's requoted lines were literals of exactly that kind. The scan finds zero
+ * violations on the tree as it stands, so nothing has to be rewritten for it to go green —
+ * and wrapping, which the tree disagrees with itself about, is not its business.
+ *
+ * ## Why "free choice" rather than "whatever Prettier would write"
+ *
+ * Prettier's quote rule minimises escapes: a literal containing an apostrophe and no double
+ * quote is written with double quotes. That part of the rule is a tie-break, and four
+ * literals in the tree resolve it the other way from Prettier — e.g.
+ * `test/rebuild.test.ts`'s `'names the next rebuild in the reader\'s own timezone'`. Both
+ * spellings are defensible, none of them is the MUSE-45 defect, and rewriting four lines in
+ * four files to satisfy a checker is how a guard starts costing more than it catches. They
+ * are left alone, and `prettier --write` will conform them the next time those lines are
+ * touched, which is the ticket's own instruction. A literal whose contents force the
+ * question is therefore skipped here; one that leaves it open is not.
+ *
+ * The preferred quote is **read from the resolved Prettier config**, per file, rather than
+ * hardcoded — so this check and `prettier.config.mjs` cannot drift, and the `overrides`
+ * entry that pins the generated Sanity types to double quotes is honoured automatically.
+ *
+ * ## The four rules
+ *
+ *   1. `quotes`        — free-choice string literals use the configured quote. `.ts`,
+ *                        `.mjs`, and the frontmatter half of `.astro`.
+ *   2. `whitespace`    — no tabs, no CRLF, no trailing blanks, a final newline.
+ *                        Every text file, including the ones in `.prettierignore`: the
+ *                        files Prettier does not own still need a stated minimum.
+ *   3. `generatedTypes`— a full `prettier --check` on `src/lib/sanity/sanity.types.ts`,
+ *                        which proves the `overrides` pin still matches what
+ *                        `sanity typegen` emits. See `prettier.config.mjs`.
+ *   4. `astroParser`   — `prettier-plugin-astro` is still absent, which is what makes rule
+ *                        1's frontmatter-only scope correct rather than a gap.
+ *
+ * Rules read **syntax**, not text, for the reason MUSE-34 wrote down at length in
+ * `test/helpers/source-guard.ts`: a substring scan over source reports prose and misses
+ * code. A double quote in a comment or inside a template literal is not a string literal
+ * and cannot trip rule 1 — which is the only reason this file, and the paragraphs above it,
+ * can discuss quote characters at all.
+ *
+ * ## The `.astro` boundary, and why it stops at the fence
+ *
+ * The frontmatter is unambiguous to extract: every `.astro` file here opens with a line that
+ * is exactly `---` and has exactly one more, which the scan asserts rather than assumes, and
+ * the region between them is TypeScript. The markup half is not: finding its `<script>`
+ * blocks by pattern matches the ones *described in frontmatter comments* too — `TrialForm`
+ * has five — which is this repository's recurring failure mode, a guard that reports prose.
+ * Doing it properly needs `@astrojs/compiler`, and the payoff would be small: with no Astro
+ * parser installed, no formatter can rewrite an `.astro` file, so the markup half is outside
+ * the defect class entirely. Rule 4 is what makes that reasoning expire on its own.
+ */
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import ts from 'typescript';
+import * as prettier from 'prettier';
+
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+/** Generated by `sanity typegen`, which resolves `prettier.config.mjs`. Rule 3. */
+export const GENERATED_TYPES = 'src/lib/sanity/sanity.types.ts';
+
+/** The plugin whose absence scopes rule 1 to `.astro` frontmatter. Rule 4. */
+export const ASTRO_PLUGIN = 'prettier-plugin-astro';
+
+/** Extensions rule 1 can parse, and the `ScriptKind` each one is. */
+const PARSED = new Map([
+  ['.ts', ts.ScriptKind.TS],
+  ['.mts', ts.ScriptKind.TS],
+  ['.cts', ts.ScriptKind.TS],
+  ['.tsx', ts.ScriptKind.TSX],
+  ['.mjs', ts.ScriptKind.JS],
+  ['.cjs', ts.ScriptKind.JS],
+  ['.js', ts.ScriptKind.JS],
+]);
+
+/**
+ * Extensions rule 2 reads as text. Anything not listed is treated as an asset and skipped —
+ * fonts, images, and the two exported `.svg` lockups, which are tool output that nobody
+ * edits by hand and which both arrive without a final newline. `filesByKind` reports the
+ * extensions it skipped, so a new text format arriving in the tree is visible rather than
+ * silently unchecked.
+ */
+const TEXT = new Set([
+  ...PARSED.keys(),
+  '.astro',
+  '.css',
+  '.md',
+  '.json',
+  '.ndjson',
+  '.yml',
+  '.yaml',
+  '.html',
+  '.txt',
+  '.gitignore',
+  '.prettierignore',
+]);
+
+/**
+ * One violation, in the form a failure message can be read out of.
+ *
+ * @typedef {object} Offence
+ * @property {string} file Repo-relative, forward slashes.
+ * @property {number} line 1-based, so it can be pasted after a colon. 0 for whole-file.
+ * @property {string} rule Which of the four found it.
+ * @property {string} what What was found, in the words of the rule that found it.
+ */
+
+/* ------------------------------------------------------------------ discovery */
+
+/**
+ * `.gitignore`, as patterns: comments and blanks dropped, slashes trimmed.
+ *
+ * Exclusions come from `.gitignore` rather than from a list of directories to sweep, for
+ * MUSE-42's reason: a scan list has to be kept exhaustive and silently stops being so,
+ * while a stale *exclusion* only ever causes the scan to read more than it has to.
+ *
+ * `test/seo.test.ts` has its own copy of this walker for the host check. They are not
+ * shared, deliberately: extracting one would mean editing a suite that several branches
+ * have open, and the two have different failure directions — that one must over-read, this
+ * one must find every source file. If they ever disagree about a path, neither is wrong.
+ *
+ * @returns {string[]}
+ */
+function ignorePatterns() {
+  return readFileSync(join(ROOT, '.gitignore'), 'utf8')
+    .split('\n')
+    .map((line) => line.replace(/#.*$/, '').trim())
+    .map((line) => line.replace(/^\/+|\/+$/g, ''))
+    .filter(Boolean);
+}
+
+/** @type {(text: string) => string} */
+const escapeRe = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * @param {string} rel
+ * @param {string[]} patterns
+ * @returns {boolean}
+ */
+function isIgnored(rel, patterns) {
+  if (rel === '.git' || rel.startsWith('.git/')) return true;
+  return patterns.some((pattern) => {
+    if (pattern.includes('/')) return rel === pattern || rel.startsWith(`${pattern}/`);
+    const glob = new RegExp(`^${pattern.split('*').map(escapeRe).join('[^/]*')}$`);
+    return rel.split('/').some((segment) => glob.test(segment));
+  });
+}
+
+/** Every file in the repository `.gitignore` does not disclaim, repo-relative. */
+/** @returns {string[]} */
+export function repoFiles() {
+  const patterns = ignorePatterns();
+  /** @type {(dir: string) => string[]} */
+  const descend = (dir) =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = join(dir, entry.name);
+      const rel = relative(ROOT, full).replace(/\\/g, '/');
+      if (isIgnored(rel, patterns)) return [];
+      return entry.isDirectory() ? descend(full) : [rel];
+    });
+  return descend(ROOT).sort();
+}
+
+/** @type {(file: string) => string} */
+const extensionOf = (file) => {
+  const base = file.slice(file.lastIndexOf('/') + 1);
+  const dot = base.lastIndexOf('.');
+  return dot <= 0 ? base : base.slice(dot);
+};
+
+/**
+ * The tree split by what each rule can read, so "unchecked" is a reportable set rather
+ * than an absence. `skipped` is every extension rule 2 treats as binary.
+ */
+/**
+ * @param {string[]} [files]
+ * @returns {{ parsed: string[], text: string[], skipped: string[] }}
+ */
+export function filesByKind(files = repoFiles()) {
+  /** @type {string[]} */
+  const parsed = [];
+  /** @type {string[]} */
+  const text = [];
+  /** @type {Set<string>} */
+  const skipped = new Set();
+  for (const file of files) {
+    const ext = extensionOf(file);
+    if (PARSED.has(ext)) parsed.push(file);
+    if (ext === '.astro') parsed.push(file);
+    if (TEXT.has(ext)) text.push(file);
+    else skipped.add(ext);
+  }
+  return { parsed, text, skipped: [...skipped].sort() };
+}
+
+/* -------------------------------------------------------------- rule 1: quotes */
+
+/**
+ * The regions of a file rule 1 reads, each as standalone source plus the 1-based line it
+ * starts on. For an `.astro` file that is the frontmatter and nothing else; for everything
+ * else it is the whole file.
+ *
+ * Each region is parsed on its own rather than blanked in place, so a parse cannot desync
+ * on the surrounding markup — the trap `source-guard.ts` warns about with scanners.
+ */
+/**
+ * @param {string} file
+ * @param {string} source
+ * @returns {{ line: number, source: string }[]}
+ */
+export function parsedRegions(file, source) {
+  if (!file.endsWith('.astro')) return [{ line: 1, source }];
+
+  const lines = source.split('\n');
+  const fences = lines.flatMap((line, i) => (line === '---' ? [i] : []));
+  if (fences.length !== 2 || fences[0] !== 0) {
+    // Asserted rather than assumed: if the fence shape ever stops being this, the scan
+    // has to fail loudly instead of reading the wrong half of the file.
+    throw new Error(
+      `${file}: expected an .astro file to open with a '---' line and hold exactly one ` +
+        `more, found ${fences.length} at lines [${fences.map((i) => i + 1).join(', ')}]`,
+    );
+  }
+  return [{ line: 2, source: lines.slice(1, fences[1]).join('\n') }];
+}
+
+/** Does this literal's value force the quote character, or is it a free choice? */
+/** @type {(value: string) => boolean} */
+const freeChoice = (value) => !value.includes("'") && !value.includes('"');
+
+/**
+ * Rule 1 over one file. `preferred` is the quote character the resolved Prettier config
+ * asks for, so the rule is the config's and not this file's opinion.
+ */
+/**
+ * @param {string} file
+ * @param {string} source
+ * @param {string} preferred
+ * @returns {Offence[]}
+ */
+export function quoteOffences(file, source, preferred) {
+  const kind = PARSED.get(extensionOf(file)) ?? ts.ScriptKind.TS;
+  const other = preferred === "'" ? '"' : "'";
+  /** @type {Offence[]} */
+  const found = [];
+
+  for (const region of parsedRegions(file, source)) {
+    const tree = ts.createSourceFile(file, region.source, ts.ScriptTarget.Latest, true, kind);
+    /** @type {(node: ts.Node) => void} */
+    const visit = (node) => {
+      if (ts.isStringLiteral(node) && freeChoice(node.text)) {
+        const start = node.getStart(tree);
+        if (region.source[start] === other) {
+          found.push({
+            file,
+            line: region.line + ts.getLineAndCharacterOfPosition(tree, start).line,
+            rule: 'quotes',
+            what:
+              `the string ${other}${node.text}${other} is a free choice of quote and the ` +
+              `repository writes those with ${preferred}`,
+          });
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(tree);
+  }
+  return found;
+}
+
+/* ---------------------------------------------------------- rule 2: whitespace */
+
+/**
+ * Rule 2 over one file's text. Byte-level, and the reason it covers ignored files too.
+ *
+ * Each of the four was measured unanimous across all 104 text files before being asserted.
+ * A fifth — *exactly* one final newline, which is what Prettier writes — was measured and
+ * **rejected**: `test/lang.test.ts` and `test/pricing.test.ts` end on a blank line, and
+ * conforming two files is a rewrite this ticket does not make. `prettier --write` will take
+ * the blank line when either file is next formatted.
+ */
+/**
+ * @param {string} file
+ * @param {string} source
+ * @returns {Offence[]}
+ */
+export function whitespaceOffences(file, source) {
+  /** @type {Offence[]} */
+  const found = [];
+  /** @type {(line: number, what: string) => number} */
+  const at = (line, what) => found.push({ file, line, rule: 'whitespace', what });
+
+  if (source.includes('\r')) {
+    at(source.slice(0, source.indexOf('\r')).split('\n').length, 'a CR — line endings are LF');
+  }
+  source.split('\n').forEach((line, i) => {
+    if (/^\t| \t/.test(line)) at(i + 1, 'a tab in the indentation — indentation is spaces');
+    if (/[ \t]+$/.test(line)) at(i + 1, 'trailing whitespace');
+  });
+  if (source.length > 0 && !source.endsWith('\n')) {
+    at(source.split('\n').length, 'no final newline');
+  }
+  return found;
+}
+
+/* ------------------------------------------------------------- rules 3 and 4 */
+
+/** Is the Astro plugin resolvable from here? Rule 4's whole question. */
+/** @returns {boolean} */
+export function astroPluginPresent() {
+  try {
+    import.meta.resolve(ASTRO_PLUGIN);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* ----------------------------------------------------------------- the whole run */
+
+/** Every offence in the repository, rules 1 to 4, in file order. */
+/** @returns {Promise<Offence[]>} */
+export async function offences() {
+  const files = repoFiles();
+  const { parsed, text } = filesByKind(files);
+  /** @type {Offence[]} */
+  const found = [];
+
+  for (const file of text) {
+    found.push(...whitespaceOffences(file, readFileSync(join(ROOT, file), 'utf8')));
+  }
+
+  for (const file of parsed) {
+    const config = (await prettier.resolveConfig(join(ROOT, file))) ?? {};
+    const preferred = config.singleQuote === false ? '"' : "'";
+    found.push(...quoteOffences(file, readFileSync(join(ROOT, file), 'utf8'), preferred));
+  }
+
+  if (!files.includes(GENERATED_TYPES)) {
+    found.push({
+      file: GENERATED_TYPES,
+      line: 0,
+      rule: 'generatedTypes',
+      what:
+        'is missing, so the pin that keeps `sanity typegen` and prettier.config.mjs ' +
+        'agreeing is unchecked. Run `npm run sanity:types`.',
+    });
+  } else {
+    const path = join(ROOT, GENERATED_TYPES);
+    const clean = await prettier.check(readFileSync(path, 'utf8'), {
+      ...((await prettier.resolveConfig(path)) ?? {}),
+      filepath: path,
+    });
+    if (!clean) {
+      found.push({
+        file: GENERATED_TYPES,
+        line: 0,
+        rule: 'generatedTypes',
+        what:
+          'is generated prettier output and no longer matches what prettier.config.mjs ' +
+          'would produce, so the next `npm run sanity:types` will rewrite all of it and ' +
+          "ci.yml's `sanity` job will report an un-regenerated schema. Fix the " +
+          '`overrides` entry in prettier.config.mjs to match @sanity/codegen, not the ' +
+          'other way round — see the note there.',
+      });
+    }
+  }
+
+  if (astroPluginPresent()) {
+    found.push({
+      file: 'package.json',
+      line: 0,
+      rule: 'astroParser',
+      what:
+        `declares ${ASTRO_PLUGIN}, so prettier can now rewrite .astro files whole. The ` +
+        'quote rule only reads their frontmatter and `*.astro` is in .prettierignore — ' +
+        'widen both, or the markup half is formatted by nothing. See scripts/check-format.mjs.',
+    });
+  }
+
+  return found.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+}
+
+/** `file:line — what`, one per line. */
+/** @type {(found: Offence[]) => string[]} */
+export const listed = (found) =>
+  found.map(({ file, line, rule, what }) => `${file}:${line} [${rule}] ${what}`);
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const found = await offences();
+  const { parsed, text, skipped } = filesByKind();
+  if (found.length === 0) {
+    console.log(
+      `Formatting convention holds: ${parsed.length} parsed, ${text.length} read as text` +
+        `${skipped.length ? `, skipped as binary: ${skipped.join(' ')}` : ''}.`,
+    );
+    process.exit(0);
+  }
+  console.error(`${found.length} formatting offence${found.length === 1 ? '' : 's'}:\n`);
+  for (const line of listed(found)) console.error(`  ${line}`);
+  console.error(
+    '\nThe convention is stated in prettier.config.mjs. `npm run format -- <file>` applies' +
+      ' it to one file; do not run it over the tree — see MUSE-58.',
+  );
+  process.exit(1);
+}
