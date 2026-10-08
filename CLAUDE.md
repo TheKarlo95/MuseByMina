@@ -579,9 +579,9 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   the committed stamp, `SOURCE_GLOBS` and `studio.yml`'s `paths:`.
 - **The seed is both the migration and the test fixture.** `content/seed.ndjson`
   holds every document that exists — the `siteSettings` singleton, the `page` documents,
-  the timetable (MUSE-36) and the two `pricingTier` documents (MUSE-59) —
-  and `npm run sanity:seed` imports it, replacing by `_id`, so the migration is
-  reviewable and re-runnable. `vitest.config.ts` points every test build at that same file
+  the timetable (MUSE-36), the two `pricingTier` documents (MUSE-59) and the `studioStory`
+  singleton (MUSE-60) — and `npm run sanity:seed` imports it, replacing by `_id`, so the
+  migration is reviewable and re-runnable. `vitest.config.ts` points every test build at that same file
   (`MUSE_CONTENT_FIXTURE`) and `src/lib/sanity/fixture.ts` evaluates the *real* queries
   against it with `groq-js`. **The suite never touches the network**, and there is no second
   copy of the content to drift. The deploy has no such variable and fetches live; there is no
@@ -665,20 +665,44 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   notice), every exemption asserted still live, and a failure that names `file:line`. The
   same file rebuilds the site from an edited address and demands all five surfaces move,
   which is the only assertion a literal fails while it still happens to match.
-- **A component can be built before its page can be routed** (MUSE-23). `/aboutus` is
-  built and deliberately not published: its `studioStory` and `instructor` documents do
-  not exist, the read path fails the build naming a missing document, and a routed page
-  would therefore stop `main` building — every PR, every deploy, every scheduled rebuild.
-  `MUSE_PREVIEW_ROUTES=aboutus npm run build` injects `/aboutus-preview` so the component
-  can still be asserted on against `dist`, which is the only way to check CSS — Astro's
-  container API renders markup without the stylesheet pipeline. `src/lib/preview.ts` is
-  the registry, the entry points live under `test/` so `test/seo.test.ts`'s page list
-  cannot see them, and unset the variable injects nothing. **Delete the entry with the
-  ticket that routes the page**; an entry that outlives its ticket is a page nobody
-  shipped.
+- **A component can be built before its page can be routed** (MUSE-23), and
+  `MUSE_PREVIEW_ROUTES=<name> npm run build` injects `/<name>-preview` so it can still be
+  asserted on against `dist` — the only way to check CSS, since Astro's container API
+  renders markup without the stylesheet pipeline. `src/lib/preview.ts` is the registry,
+  the entry points live under `test/` so `test/seo.test.ts`'s page list cannot see them,
+  and unset the variable injects nothing. **Delete the entry with the ticket that routes
+  the page**; an entry that outlives its ticket is a page nobody shipped.
+
+  **The registry is empty, and that is the healthy state** (MUSE-60). `aboutus` was the
+  only entry there has ever been and MUSE-60 routed the page. Note what that costs and
+  what replaced it: "every entry point is under `test/`" is a *loop over the registry*, so
+  it now passes without asserting anything — the shape of green test this repo keeps
+  re-filing. `test/aboutus.test.ts` keeps it for the next entry and leans on the half that
+  still has a subject, which is that `requestedPreviews('aboutus')` **throws** naming the
+  name, so a stale variable is an error rather than a build that silently injects nothing.
+  The guard on no workflow and no npm script *assigning* the variable is a claim about the
+  variable rather than the registry and is unaffected.
+- **`/aboutus` ships placeholder prose, and it is placeholder where a human can see it**
+  (MUSE-60). The owner asked for a few generated sentences so the page could ship. That is
+  a stopgap, and it is only a stopgap because of three things, none of which is optional:
+  the text is in **`content/seed.ndjson`** rather than in `AboutUs.astro`, so Mina replaces
+  it by typing over it; it **asserts nothing checkable** — no founding year, no student
+  count, no award, no claim about anybody's training; and the Studio field descriptions say
+  `PRIVREMENI TEKST` in Croatian, which is the only instruction she reads. Replacing it is
+  a Studio edit and needs no ticket. **Silent** placeholder text is what MUSE-36 is about;
+  placeholder text is allowed.
+
+  `studioStory.foundedOn` came off the required list with it, and that is the same
+  decision rather than a relaxation: MUSE-23 made the origin story dated on purpose, no
+  founding date for this studio is recorded anywhere, and a `required()` date could only
+  have been satisfied by picking a plausible day. The page omits the line; the decoder
+  still refuses a value that is present and is not a calendar date, and `shape.ts` asserts
+  the field *as* optional, because a field with no assertion is a field nothing watches.
+  **No bio is written for Mina or Antonio and none should be** — see the optional-field
+  note below, which is the same argument on the same page.
 - **Routing a page is two pull-request-shaped halves, and the dataset goes first**
-  (MUSE-59, the ticket `/aboutus` is still waiting for). The build fetches live, so the
-  route and the documents cannot land in the same push: the moment `/pricing` was in
+  (MUSE-59, MUSE-60). The build fetches live, so the route and the documents cannot land
+  in the same push: the moment `/pricing` was in
   `ROUTES`, every build without a `page` document and two `pricingTier` documents in the
   **live dataset** failed — each PR, the deploy, the scheduled rebuild. So the branch
   prepares `content/seed.ndjson` *and* the route together, says in the PR body that it
@@ -688,6 +712,17 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   removed must fail naming `pricingTier`, and must not carry `TRANSIENT_BUILD_FAILURE`,
   because MUSE-21's retry would otherwise spend three attempts on a dataset that will not
   seed itself.
+
+  **MUSE-60 ran the same sequence for `/aboutus` and found why it matters beyond a red
+  build.** The live dataset already held a `studioStory` — created outside any seed,
+  carrying `foundedOn: "2025-01-01"`, a founding date nobody has confirmed, and
+  paragraphs reading „PLACEHOLDER … nije istinit". It published nothing only because
+  the route did not exist. Had the route landed without the seed import, the build
+  would not have failed on *that* document — it would have rendered it. So the half of
+  the rule that reads as bureaucratic is the load-bearing half: **the dataset is
+  authoritative at build time, and a document nobody reviewed is a page nobody
+  reviewed.** `npm run sanity:seed:check` is how you find that out before merging, and
+  it is worth reading rather than glancing at.
 - **`/pricing` publishes two periods: 55 € for one month, 100 € for two** — confirmed by
   the studio, and the whole of it. No drop-in rate, no student discount, no third package;
   `test/pricing.test.ts`'s `CONFIRMED_TIERS` is the receipt and a third document in the
