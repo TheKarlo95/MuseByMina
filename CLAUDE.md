@@ -40,6 +40,8 @@ npm run typecheck  # astro check
 npm test           # vitest — builds the site and asserts on dist
 npm run a11y       # axe, every page, both themes — serves dist itself
 npm run ds         # design-system compliance
+npm run format:check   # the formatting convention — fast, names file:line
+npm run format -- <file>   # apply it to **one file**; never to the tree (MUSE-58)
 npm run shots      # screenshots of all theme states to /tmp/muse-shots
 
 npm run sanity:types   # re-extract the schema and regenerate types — commit the result
@@ -447,6 +449,40 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   file it was removed from. What that rule cannot reach is written out beside it and
   asserted: a measurement that never waited at all, a fixed-interval poll spelled with
   `setTimeout`, and a correct wait given too small a budget.
+
+- **The formatting convention is stated in `prettier.config.mjs`, and `prettier --write`
+  over the tree is still wrong** (MUSE-58). Nothing stated it before, and Prettier's
+  default is `singleQuote: false` — so a bare `npx prettier --write <file>` did not follow
+  this repository, it overrode it: MUSE-45's pull request arrived as 538/319 for a 96-line
+  change, 348 added lines pure requoting, all five checks green. Every value in the config
+  was **measured** against the tree, so only the two settings that differ from Prettier's
+  defaults are written down; the rest would be a value to re-measure when a default moves.
+  Run it on **one file**, the one you touched (`npm run format -- <file>`).
+
+  **`prettier --check` is not the gate and must not become one.** The tree is not
+  Prettier-formatted: 49 of the 96 files Prettier owns are byte-identical under the config,
+  47 differ in wrapping only, and 35 are clean at *no* print width because they were
+  wrapped by hand. Making that check pass means reformatting the tree, which is a diff
+  nobody can review and invalidates every open branch at once — this ticket committing the
+  defect it exists to prevent. `npm run format:check` (`scripts/check-format.mjs`) asserts
+  the invariant the tree actually holds instead, which is also the whole of MUSE-45's
+  damage: **where the quote character is a free choice, this repository picks single.** It
+  takes the preferred quote from the resolved config rather than restating it, reads syntax
+  so a quote in prose cannot trip it, names `file:line`, runs in 1.3 s, and lives as a step
+  in `ci.yml`'s `designsystem` job — the only one needing neither a build nor a browser —
+  rather than as a sixth check. Files conform the rest of the way as they are touched.
+
+  Two things in there that look cosmetic and are not. **`sanity typegen` resolves
+  `prettier.config.mjs`** for its own output and `resolveConfig` cannot see
+  `.prettierignore`, so `src/lib/sanity/sanity.types.ts` is pinned by an `overrides` entry
+  to the Prettier *defaults* its generator emits; without it the next
+  `npm run sanity:types` rewrites all 146 lines and `ci.yml`'s `sanity` job goes red on a
+  branch that never touched the schema. And `*.css` is ignored because Prettier flattens
+  `tokens.css`'s hand-aligned table and lowercases hex that is transcribed from the design
+  system document; `*.md` because prose wrapping is a judgement and this file is edited by
+  every branch at once; `*.astro` because no Astro parser is installed, which is asserted
+  still true — add `prettier-plugin-astro` and `test/format.test.ts` fails telling you to
+  widen the quote rule past the frontmatter fence.
 
 ## Sanity (MUSE-19, MUSE-20)
 
