@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { ICONS } from '../src/lib/icon';
 import { buildSite, PAGES_DEPLOY, type Build } from './helpers/build';
 
 /**
@@ -47,14 +48,49 @@ describe('the built site ships no JavaScript files and no CMS client', () => {
     //
     // `webp` joined the list in MUSE-64, with the brand lockup — the first image the
     // site has ever shipped. One entry and one file: `test/lockup.test.ts` holds the
-    // count, and `scripts/budget.mjs` holds what it may weigh. Note what this list
-    // deliberately does *not* say: there is no `png`, `jpg` or `svg` here, so the source
-    // raster reaching `dist` by being pointed at in `public/` is a failure of this line
-    // as well as of that suite.
+    // count, and `scripts/budget.mjs` holds what it may weigh.
+    //
+    // `png` joined it in MUSE-40, with the tab icons, and that entry gave something up:
+    // this line used to say *no* `png`, `jpg` or `svg`, so a source raster reaching
+    // `dist` — pointed at from `public/`, or copied there by hand — failed here as well
+    // as wherever else it was wrong. A favicon has to be a PNG (`webp` is not a
+    // dependable icon format, and an apple-touch-icon must not be one), so the
+    // extension can no longer carry that claim and the test below carries it instead:
+    // the output's PNGs are *exactly* the registered icons, content-hashed by Vite.
+    // Keep the two together — the allow-list alone is now a weaker statement than it
+    // reads as.
     const extensions = [
       ...new Set(build.allFiles().map((file) => file.replace(/^.*\./, ''))),
     ].sort();
-    expect(extensions).toEqual(['css', 'html', 'txt', 'webp', 'woff2', 'xml']);
+    expect(extensions).toEqual(['css', 'html', 'png', 'txt', 'webp', 'woff2', 'xml']);
+  });
+
+  /**
+   * Every PNG in the output is a registered icon, emitted through the asset graph.
+   *
+   * The direction matters. `test/icon.test.ts` asserts that each icon in `ICONS` reaches
+   * the output, which says nothing about a *sixth* PNG arriving beside them — a source
+   * raster dropped into a recreated `public/`, an unused export, `logo/` copied wholesale.
+   * This is the other direction, and it is the half the extension allow-list used to
+   * provide for free.
+   *
+   * The content hash is part of the claim, not decoration: a file Vite emitted has one,
+   * and a file that was copied verbatim out of `public/` does not. That is precisely the
+   * distinction MUSE-35 was about.
+   */
+  it('emits no PNG that is not a registered icon from the asset graph', () => {
+    const stems = new Set(ICONS.map((icon) => icon.file.replace(/\.png$/, '')));
+
+    const unexpected = build
+      .allFiles()
+      .filter((file) => file.endsWith('.png'))
+      .filter((file) => {
+        // `_astro/muse-icon-plum-32.GZ5LHn06.png` — name, hash, extension.
+        const emitted = /^_astro\/(.+)\.[A-Za-z0-9_-]{8}\.png$/.exec(file);
+        return emitted === null || !stems.has(emitted[1]!);
+      });
+
+    expect(unexpected).toEqual([]);
   });
 
   it('mentions no Sanity client, query or configuration anywhere in the output', () => {
