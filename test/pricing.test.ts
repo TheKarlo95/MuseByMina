@@ -300,6 +300,14 @@ afterAll(() => {
   process.env[FIXTURE_ENV] = SEED_FIXTURE;
 });
 
+/**
+ * Enough entity decoding for what Astro escapes on output.
+ *
+ * **`&nbsp;` is deliberately not in here.** Decoding it would make `42&nbsp;€` and
+ * `42 €` the same string, and telling those two apart is a thing this file asserts:
+ * the rule is that the no-break space reaches the page as the character. An undecoded
+ * entity survives as the literal text `&nbsp;` and fails the price equality by name.
+ */
 const ENTITIES: Record<string, string> = {
   amp: '&',
   lt: '<',
@@ -307,7 +315,6 @@ const ENTITIES: Record<string, string> = {
   quot: '"',
   apos: "'",
   '#39': "'",
-  nbsp: ' ',
 };
 
 function decode(text: string): string {
@@ -372,8 +379,9 @@ function valueOf(html: string, attribute: string): string | undefined {
 /**
  * `value` → label for every `<option>` in `html`, in document order.
  *
- * The value is optional in the pattern because Astro emits `value=""` as the bare
- * attribute `value`, and the blank "no package chosen" option is the first one.
+ * The opening tag is matched first and the value picked out of it, rather than matched
+ * in one pattern: Astro emits `value=""` as the bare attribute `value`, and the blank
+ * "no package chosen" option is the first one in the list.
  */
 function options(html: string): [string, string][] {
   return [...html.matchAll(/(<option\b[^>]*>)([\s\S]*?)<\/option>/g)].map((m) => [
