@@ -100,31 +100,24 @@ export interface LevelOption {
   /** Submitted value. Language-independent, so the studio inbox reads the same. */
   value: string;
   label: string;
-}
-
-/**
- * The submitted value for each level — a wire format, not a display name.
- *
- * These are the strings the studio inbox and `test/contact.test.ts` already read,
- * so they stay as they are. The *labels* were a second copy of the level names
- * (`Početni` on the Croatian form while `/schedule` said `Beginner`), which is
- * what MUSE-11 removed: only `LEVEL_NAME` spells a level now.
- */
-const LEVEL_VALUE: Record<Level, string> = {
-  beginner: 'pocetni',
   /**
-   * `improver` rather than a Croatian word (MUSE-36).
+   * Which level this option *is*, when it is one — the `data-level-name` contract.
    *
-   * The other three were chosen before MUSE-6 settled on English level names and the
-   * studio inbox has been receiving them since, so they stay. There is no settled
-   * Croatian word for an Improver, and coining one here — `napredniji`? `srednji-1`? —
-   * would be a word nobody at the studio uses sitting in an email nobody can map back to
-   * a class. The level key is the honest wire value.
+   * `TrialForm.astro` renders it onto the `<option>`, which is what brings the labels
+   * inside MUSE-11's single-source guard: layers 1–2 of `test/home.test.ts` check every
+   * element that declares a level and are blind to every element that does not, and
+   * before MUSE-18 `grep -c data-level-name` on `/contact` returned 0. So relabelling
+   * this select to `Novice` / `Expert` passed the whole suite — demonstrated on the
+   * deployed site, which is why the attribute is here rather than a note asking the next
+   * author to remember.
+   *
+   * Optional because the field is shared with the package `<select>` (MUSE-22), whose
+   * options are `pricingTier` documents and are not levels — and because the blank
+   * "not sure yet" option is not one either. An option without a level simply opts out
+   * of the check, which is correct: there is no map to check it against.
    */
-  improver: 'improver',
-  intermediate: 'srednji',
-  advanced: 'napredni',
-};
+  level?: Level;
+}
 
 /**
  * The level `<select>`: "not sure yet" first, then the levels in `LEVELS` order.
@@ -132,11 +125,41 @@ const LEVEL_VALUE: Record<Level, string> = {
  * The blank default is deliberate (MUSE-7) — asking a beginner to self-assess is
  * the fastest way to lose them — and it is the only option with wording of its
  * own, because it is not a level.
+ *
+ * ---
+ *
+ * **The submitted value is the level key** (MUSE-18), and there is no longer a table
+ * mapping one to the other.
+ *
+ * There was: `{ beginner: 'pocetni', improver: 'improver', intermediate: 'srednji',
+ * advanced: 'napredni' }` — three Croatian slugs chosen before MUSE-6 settled on English
+ * level names, plus the enum key, which MUSE-36 added when the real timetable brought a
+ * fourth level. One list in two conventions, and the reason is worth keeping: nothing
+ * guarded the wire format, so the author of the fourth entry had no way to see what the
+ * other three were doing. A parallel table of strings with no single source above it is
+ * the thing MUSE-11 removed for the display name and this is the same thing one field
+ * over.
+ *
+ * So the key is the value. `LEVELS` is the vocabulary the Studio's dropdown, the GROQ
+ * projection, the grid's row order and the homepage doors already speak, so
+ * `level=intermediate` in the inbox maps back to a class on the timetable without a
+ * translation step — and `test/home.test.ts` can assert the rendered `value` equals the
+ * rendered `data-level-name`, which is only checkable because they are the same string.
+ *
+ * Changing a wire format is normally expensive and this was the one moment it is free:
+ * `PUBLIC_FORM_ENDPOINT` is unset (MUSE-12 is parked), so no submission has ever carried
+ * `pocetni` anywhere. A payload is now:
+ *
+ *   { name: 'Ana Horvat', email: 'ana@example.com', phone: '+385 91 234 5678',
+ *     level: 'intermediate', message: '…', _gotcha: '' }
+ *
+ * with `level: ''` — not absent — for the visitor who left "not sure yet" alone, which
+ * is the single most likely case and the reason the blank option exists.
  */
 function levelOptions(locale: Locale, notSure: string): readonly LevelOption[] {
   return [
     { value: '', label: notSure },
-    ...LEVELS.map((level) => ({ value: LEVEL_VALUE[level], label: LEVEL_NAME[locale][level] })),
+    ...LEVELS.map((level) => ({ value: level, label: LEVEL_NAME[locale][level], level })),
   ];
 }
 

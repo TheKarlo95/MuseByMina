@@ -7,8 +7,15 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { buildSite, PAGES_DEPLOY, type Build } from './helpers/build';
 import { claimOutDir } from './helpers/scratch';
 import { seedDocs, seededSchedule } from './helpers/seed';
+import { FORM_COPY } from '../src/lib/forms';
 import { LOCALES, type Locale } from '../src/lib/i18n';
-import { LEVELS, LEVEL_NAME, WEEKDAY_NAME, type Level } from '../src/lib/schedule';
+import {
+  LEVELS,
+  LEVEL_NAME,
+  LEVEL_PREREQUISITE,
+  WEEKDAY_NAME,
+  type Level,
+} from '../src/lib/schedule';
 
 /**
  * MUSE-11 — the homepage and `/schedule` named the same class two different
@@ -34,14 +41,38 @@ import { LEVELS, LEVEL_NAME, WEEKDAY_NAME, type Level } from '../src/lib/schedul
  *      restated here as a literal so that reversing it has to be deliberate, and
  *      no retired Croatian level word survives anywhere in `dist`. Layer 1 is
  *      satisfied by two pages being *consistently* wrong; this is what pins the
- *      value. It also sweeps the trial form's `<option>`s and the schedule's
- *      filter chips, which carry level names without being either page's doors.
+ *      value.
  *   4. **the guard** — no file under `src/` other than `src/lib/schedule.ts` may
- *      contain a level name as a literal. Layers 1–3 are satisfied by a
- *      hardcoded copy that happens to agree today; this is the one that fails
- *      the moment a second copy exists, which is the third acceptance criterion.
+ *      write a level name, or a level's prerequisite, as its own string. Layers
+ *      1–3 are satisfied by a hardcoded copy that happens to agree today; this is
+ *      the one that fails the moment a second copy exists, which is the third
+ *      acceptance criterion.
  *
  * Layer 4 reads sources; 1–3 read the built HTML, as the rest of the suite does.
+ *
+ * ---
+ *
+ * **MUSE-18 — what layer 3 does *not* do, and what replaced the claim that it did.**
+ *
+ * This docstring used to say layer 3 "also sweeps the trial form's `<option>`s and
+ * the schedule's filter chips". Both halves were wrong. It sweeps `dist` for the
+ * three *retired Croatian words* and nothing else, so relabelling either to an
+ * arbitrary new string — `Novice`, `Expert` — passed all four layers; and the
+ * filter chips no longer exist at all, MUSE-36 having deleted `STYLES` and the
+ * style filter.
+ *
+ * The fix is not a fifth layer. The form's level options now carry
+ * `data-level-name`, the same markup contract the doors and the schedule's slots
+ * carry, so layers 1–2 cover them for free — and `the trial form's level options`
+ * below asserts the attribute is *present*, because layers 1–2 can only check the
+ * elements that opt in, and an element that quietly stops opting in is the hole
+ * this ticket was about. The option's submitted `value` is now the level key, so
+ * there is one string per level in the whole system rather than a display name and
+ * a parallel wire format that drifted (`pocetni` / `improver` / `srednji`).
+ *
+ * What covers a level name rendered by some *future* component that forgets the
+ * attribute is layer 4: it cannot spell the name in the first place, so it has to
+ * read `LEVEL_NAME`, and reading `LEVEL_NAME` is what the attribute documents.
  */
 
 // --------------------------------------------------------------------------
@@ -79,6 +110,11 @@ const HOME: Record<Locale, string> = { hr: 'index.html', en: 'en/index.html' };
 const SCHEDULE_PAGE: Record<Locale, string> = {
   hr: 'schedule/index.html',
   en: 'en/schedule/index.html',
+};
+/** The page MUSE-18 measured: `grep -c data-level-name` returned 0 here. */
+const CONTACT_PAGE: Record<Locale, string> = {
+  hr: 'contact/index.html',
+  en: 'en/contact/index.html',
 };
 
 /** The locale a built page renders in, from where it was written. */
@@ -133,7 +169,8 @@ function text(html: string): string {
  * The markup contract MUSE-11 introduces: an element that displays a level's
  * name carries `data-level-name="<level key>"` and shows nothing else. One
  * self-describing unit, so a single matcher finds them on any page — the doors
- * on the homepage, the accordion rows and grid blocks on `/schedule`.
+ * on the homepage, the accordion rows and grid blocks on `/schedule`, and since
+ * MUSE-18 the `<option>`s of the trial form's level select.
  */
 function levelNames(html: string): { level: string; shown: string }[] {
   const found: { level: string; shown: string }[] = [];
@@ -184,6 +221,37 @@ function doors(html: string): Door[] {
 
 const HH_MM = /\b((?:[01]\d|2[0-3]):[0-5]\d)\b/;
 
+interface LevelOptionEl {
+  /** `value` as submitted. */
+  value: string;
+  /** `data-level-name`, or `undefined` when the option does not declare a level. */
+  level: string | undefined;
+  /** What the visitor reads. */
+  label: string;
+}
+
+/**
+ * The options of the trial form's level `<select>`, in document order.
+ *
+ * Read off `name="level"` rather than off a class, because the submitted name is the
+ * thing the form provider sees and therefore the thing that cannot be renamed silently.
+ * The package `<select>` on `/pricing` is a different field and is not matched.
+ */
+function levelSelectOptions(html: string): LevelOptionEl[] {
+  const select = /<select\b[^>]*\bname="level"[^>]*>([\s\S]*?)<\/select>/.exec(html);
+  if (!select) return [];
+  return [...select[1]!.matchAll(/<option\b([^>]*)>([\s\S]*?)<\/option>/g)].map((m) => {
+    const attrs = m[1]!;
+    const value = /\bvalue="([^"]*)"/.exec(attrs);
+    const level = /\bdata-level-name="([^"]*)"/.exec(attrs);
+    return {
+      value: value ? decode(value[1]!) : '',
+      level: level ? decode(level[1]!) : undefined,
+      label: text(m[2]!),
+    };
+  });
+}
+
 // --------------------------------------------------------------------------
 // Source helpers — layer 4.
 // --------------------------------------------------------------------------
@@ -191,8 +259,8 @@ const HH_MM = /\b((?:[01]\d|2[0-3]):[0-5]\d)\b/;
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 /**
- * The one file allowed to spell a level name, and the one allowed to spell a
- * style name. Everything else under `src/` has to go through the map.
+ * The one file allowed to spell a level's name or its prerequisite. Everything
+ * else under `src/` has to go through the map.
  */
 const SINGLE_SOURCE = 'src/lib/schedule.ts';
 
@@ -222,6 +290,37 @@ function displayNames<K extends string>(
   keys: readonly K[],
 ): string[] {
   return [...new Set(LOCALES.flatMap((locale) => keys.map((key) => map[locale][key])))];
+}
+
+/**
+ * Does `source` spell `name` out as a string of its own?
+ *
+ * **Why this is not `source.includes(name)`** (MUSE-18). It was, and `Advanced` is an
+ * ordinary English word: the day somebody writes „Advanced booking" into a page the
+ * guard fails for a reason that has nothing to do with level names, and the obvious
+ * way out is to weaken it — which costs the whole mechanism. CSS (`.advanced` is
+ * lowercase, but `[data-level="Advanced"]` would not be) and `//` comments are in
+ * scope for the same reason.
+ *
+ * So the name has to be the *whole* of something rather than a substring of it: the
+ * match requires a quote, a backtick or a tag boundary on both sides. That is every
+ * way a level name can reach a page as its own string —
+ *
+ *   `'Advanced'`   `"Advanced"`   \`Advanced\`   `label="Advanced"`   `>Advanced</span>`
+ *
+ * — and it is not satisfied by `'Advanced booking from 1 June'`, by
+ * `// Advanced booking is a separate flow`, or by `>Advanced booking<`. What it gives
+ * up is a level name *concatenated* into a longer string (`` `${x} Advanced` ``). That
+ * is a deliberate trade and the narrow end of it: a level name is a badge, rendered on
+ * its own, and the two render sites that exist both put it in its own element. A level
+ * name mid-sentence is prose about a level rather than a second copy of its name.
+ *
+ * Surrounding whitespace and newlines are allowed, so a name on its own line inside a
+ * template or an element still matches.
+ */
+function spellsOut(source: string, name: string): boolean {
+  const token = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`['"\`>]\\s*${token}\\s*['"\`<]`).test(source);
 }
 
 /**
@@ -377,6 +476,93 @@ describe('level names are English in both locales (MUSE-6)', () => {
 });
 
 /**
+ * MUSE-18 — the trial form's level `<select>`, which the guard could not see.
+ *
+ * Layers 1–2 check every element carrying `data-level-name` and are blind to every
+ * element that does not, so coverage is a property of the *markup* and has to be
+ * asserted as one. `/contact` carried four `<option>`s with no attribute, and
+ * relabelling them `Novice` / `Expert` passed all four layers — measured on the
+ * deployed site, not theorised.
+ *
+ * Three things are pinned here. That the select exists and is found at all, so this
+ * suite cannot pass by matching nothing. That every option which *is* a level
+ * declares which level it is — the sentence layers 1–2 then enforce. And that the
+ * submitted `value` is the level key, which is the other half of the ticket: the
+ * values were `pocetni` / `improver` / `srednji` / `napredni`, one list in two
+ * conventions, because the display name and the wire format were separate tables
+ * and only one of them had a guard.
+ *
+ * The blank "not sure yet" option is the one option that is deliberately *not* a
+ * level (MUSE-7 — a beginner who cannot self-assess is the most likely person to
+ * fill this form in), so it carries no attribute and is asserted to carry none:
+ * marking it would make layer 2 demand that prose equal a level name.
+ */
+describe('the trial form’s level options are covered by the same mechanism', () => {
+  /** Every built page that renders the form. Not a list — the form moves between pages. */
+  function pagesWithLevelSelect(): string[] {
+    return build.htmlFiles().filter((file) => levelSelectOptions(build.read(file)).length > 0);
+  }
+
+  it('finds the level select on /contact in both locales, and on more than one page', () => {
+    for (const locale of LOCALES) {
+      expect(
+        levelSelectOptions(build.read(CONTACT_PAGE[locale])).length,
+        `no level <select name="level"> on ${CONTACT_PAGE[locale]}`,
+      ).toBe(LEVELS.length + 1);
+    }
+    // `/` and `/pricing` render the same component; a single hit would mean the
+    // matcher found the one page somebody remembered rather than the contract.
+    expect(pagesWithLevelSelect().length, 'the form is rendered on one page only').toBeGreaterThan(
+      2,
+    );
+  });
+
+  it('marks every level option with data-level-name, on every page that has the form', () => {
+    for (const file of pagesWithLevelSelect()) {
+      const [notSure, ...levels] = levelSelectOptions(build.read(file));
+
+      expect(notSure!.value, `${file}: the first option is not the blank one`).toBe('');
+      expect(notSure!.level, `${file}: the "not sure yet" option claims to be a level`)
+        .toBeUndefined();
+
+      expect(
+        levels.map((option) => option.level),
+        `${file}: a level option carries no data-level-name, so the guard cannot see it`,
+      ).toEqual([...LEVELS]);
+    }
+  });
+
+  it('submits the level key as the option value, so there is one string per level', () => {
+    for (const file of pagesWithLevelSelect()) {
+      for (const option of levelSelectOptions(build.read(file)).slice(1)) {
+        expect(option.value, `${file}: the ${option.level} option submits "${option.value}"`).toBe(
+          option.level,
+        );
+        expect(LEVELS, `${file}: "${option.value}" is not a level key`).toContain(option.value);
+      }
+    }
+  });
+
+  it('keeps the blank option’s wording translated, since it is prose and not a level', () => {
+    const [hr, en] = LOCALES.map((locale) => levelSelectOptions(build.read(CONTACT_PAGE[locale]))[0]!);
+    expect(hr!.label.trim(), 'the blank option lost its wording').not.toBe('');
+    expect(en!.label, 'the "not sure yet" option is not translated').not.toBe(hr!.label);
+  });
+
+  it('reads the option labels out of LEVEL_NAME rather than a second table', () => {
+    // Layer 2 asserts this against the markup. This asserts it against the module the
+    // form reads, which is where both locales drifting *together* would start — the
+    // case `formcopy.test.ts` cannot see, because it only compares HR with EN.
+    for (const locale of LOCALES) {
+      const options = FORM_COPY[locale].levels;
+      expect(options.slice(1).map((option) => option.label)).toEqual(
+        LEVELS.map((level) => LEVEL_NAME[locale][level]),
+      );
+    }
+  });
+});
+
+/**
  * AC3 — Given the suite, then a test fails if a level name is hardcoded in a
  * component rather than read from `LEVEL_NAME`.
  *
@@ -385,6 +571,9 @@ describe('level names are English in both locales (MUSE-6)', () => {
  * edit instead of going stale. The retired Croatian words are added on top,
  * because they are what MUSE-11 actually found and a reversal of MUSE-6 must not
  * quietly re-permit them in a component.
+ *
+ * `spellsOut` rather than `includes` since MUSE-18 — see the note there for what
+ * that gives up and why the substring version could not survive.
  */
 describe('AC3: the guard — a level name may not be hardcoded outside LEVEL_NAME', () => {
   const groups = [
@@ -393,6 +582,29 @@ describe('AC3: the guard — a level name may not be hardcoded outside LEVEL_NAM
       source: SINGLE_SOURCE,
       map: 'LEVEL_NAME',
       names: [...displayNames(LEVEL_NAME, LEVELS), ...RETIRED_HR_LEVEL_NAMES],
+    },
+    /**
+     * `LEVEL_PREREQUISITE` — the same guarantee, one field over (MUSE-18).
+     *
+     * `Home.astro` held a verbatim second copy of
+     * `LEVEL_PREREQUISITE[locale].intermediate` in its door copy: „Plešeš oko godinu
+     * dana." / "About a year of dancing.", byte-identical, on a page that renders a
+     * level beside it. Exactly the shape MUSE-11 had just fixed for the *name*, and
+     * nothing watched the prerequisite — so the fix is the same guard rather than a
+     * note asking the next author to look.
+     *
+     * It needs no layer-1/2 counterpart. A prerequisite is a sentence, not a badge:
+     * there is no second rendering of the same datum to compare against, and the
+     * `data-level-name` contract exists because a *name* is a one-word element whose
+     * provenance is otherwise unknowable. Here the guard over the source is the whole
+     * mechanism — the string cannot be written twice, so there is nothing to
+     * reconcile.
+     */
+    {
+      kind: 'prerequisite',
+      source: SINGLE_SOURCE,
+      map: 'LEVEL_PREREQUISITE',
+      names: displayNames(LEVEL_PREREQUISITE, LEVELS),
     },
     /**
      * There was a `style` group here, over `STYLE_NAME`, and MUSE-36 deleted the map
@@ -419,7 +631,7 @@ describe('AC3: the guard — a level name may not be hardcoded outside LEVEL_NAM
         if (file === group.source) continue;
         const source = stripBlockComments(readFileSync(join(ROOT, file), 'utf8'));
         for (const name of group.names) {
-          if (source.includes(name)) offenders.push(`${file} → "${name}"`);
+          if (spellsOut(source, name)) offenders.push(`${file} → "${name}"`);
         }
       }
 
@@ -435,6 +647,47 @@ describe('AC3: the guard — a level name may not be hardcoded outside LEVEL_NAM
     // A derived forbidden set is only a guard while it has something in it.
     expect(groups.length, 'the guard has no groups left to check').toBeGreaterThan(0);
     for (const group of groups) expect(group.names.length).toBeGreaterThanOrEqual(3);
+  });
+
+  /**
+   * MUSE-18 — the matcher stopped being a substring search, and a narrower matcher is
+   * a weaker guard unless somebody measures where the new edge is.
+   *
+   * So the edge is a test. `caught` is every way a level name reaches a page as its
+   * own string, including the two the real offenders used — an object-literal value in
+   * `forms.ts` and a text node in `Home.astro`. `ignored` is the prose the substring
+   * version failed on, which is the only reason this changed.
+   */
+  it('still catches every way a level name can be written out', () => {
+    const caught = [
+      `  label: 'Advanced',`,
+      `  label: "Advanced",`,
+      '  label: `Advanced`,',
+      `<p class="cardName">Advanced</p>`,
+      `<span>\n  Advanced\n</span>`,
+      `<option value="napredni">Advanced</option>`,
+      `aria-label="Advanced"`,
+      `{'Advanced'}`,
+      `[data-level="Advanced"] { color: red; }`,
+      `  intermediate: 'Plešeš oko godinu dana.',`,
+    ];
+    for (const sample of caught) {
+      expect(spellsOut(sample, 'Advanced') || spellsOut(sample, 'Plešeš oko godinu dana.'), sample)
+        .toBe(true);
+    }
+  });
+
+  it('no longer fails on ordinary prose that happens to contain the word', () => {
+    const ignored = [
+      `  lede: 'Advanced booking opens on 1 June.',`,
+      `// Advanced booking is a separate flow — see MUSE-99.`,
+      `<p>Advanced booking opens on 1 June.</p>`,
+      `.advancedToggle { display: none; }`,
+      `const advanced = levels.at(-1);`,
+    ];
+    for (const sample of ignored) {
+      expect(spellsOut(sample, 'Advanced'), sample).toBe(false);
+    }
   });
 });
 

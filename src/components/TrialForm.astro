@@ -166,8 +166,16 @@ const privacyHref = localeUrl('/privacy', locale);
                     data-msg-required={requiredMessage(copy, field.name)}
                     data-msg-toolong={copy.tooLong}
                   >
+                    {/*
+                      `data-level-name` is the site-wide contract (MUSE-11), and these
+                      options are the render site it never reached (MUSE-18): an element
+                      showing a level's name declares which level it is, so the suite
+                      checks it against `LEVEL_NAME` without matching on copy. `undefined`
+                      on the blank option and on every package, so Astro omits the
+                      attribute and they opt out — neither is a level.
+                    */}
                     {optionsFor(field).map((option) => (
-                      <option value={option.value}>{option.label}</option>
+                      <option value={option.value} data-level-name={option.level}>{option.label}</option>
                     ))}
                   </select>
                   <span class="chev" aria-hidden="true" />
