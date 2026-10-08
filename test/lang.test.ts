@@ -386,6 +386,32 @@ describe('a stored choice is obeyed rather than merely noticed (MUSE-33)', () =>
     }
   });
 
+  it('honours a hand-typed ?lang=EN, and the plain visit after it', async () => {
+    // MUSE-39, end to end in one browser. Matching was case-sensitive, so `EN` fell
+    // through as unrecognised — correct under the rule that an unusable value is no
+    // instruction, but invisible: somebody hand-editing a shared link got no English and
+    // no reason why. The second visit is what proves the *write* was folded too: if `EN`
+    // had been stored verbatim it would be read back as unrecognised and the browser's
+    // Croatian preference would decide instead.
+    const visitor = await session(CROATIAN_LOCALE);
+    try {
+      await visitor.open(urlFor('/', `?lang=EN${TRIAL}`));
+      expect(new URL(visitor.page.url()).pathname).toBe(pagePath('/en'));
+      expect(await visitor.page.getAttribute('html', 'lang')).toBe('en');
+      // Carried, selected, and scrolled to — the fold changes nothing else about the hop.
+      expect(new URL(visitor.page.url()).hash).toBe(TRIAL);
+      expect((await geometryOf(visitor.page, FORM)).visible).toBe(true);
+      // Canonical lowercase, not the spelling that arrived.
+      expect(await storedLang(visitor.page)).toBe('en');
+
+      await visitor.open(urlFor('/'));
+      expect(new URL(visitor.page.url()).pathname).toBe(pagePath('/en'));
+      expect(await storedLang(visitor.page)).toBe('en');
+    } finally {
+      await visitor.close();
+    }
+  });
+
   it('falls back to browser detection for a stored value naming no locale', async () => {
     // A key left by an older build, a typo, or another tab's bug must not strand the
     // visitor: an unusable instruction is no instruction.
@@ -396,6 +422,31 @@ describe('a stored choice is obeyed rather than merely noticed (MUSE-33)', () =>
       const { page, close } = await visit(urlFor('/'), { locale, storedLang: 'klingon' });
       try {
         expect(new URL(page.url()).pathname, locale).toBe(pagePath(landing));
+      } finally {
+        await close();
+      }
+    }
+  });
+
+  it('obeys a stored choice spelled in another case, without rewriting it', async () => {
+    // MUSE-39. A key left by a hand, by another tab, or by a build predating the fold.
+    // Asserted against a browser preferring the other language, which is the only way to
+    // tell "obeyed the stored value" apart from "did nothing".
+    for (const [stored, locale, landing, htmlLang] of [
+      ['EN', CROATIAN_LOCALE, '/en', 'en'],
+      ['Hr', FOREIGN_LOCALE, '/', 'hr-HR'],
+    ] as const) {
+      const { page, close } = await visit(urlFor('/', TRIAL), { locale, storedLang: stored });
+      try {
+        const where = `stored=${stored} browser=${locale}`;
+        expect(new URL(page.url()).pathname, where).toBe(pagePath(landing));
+        expect(await page.getAttribute('html', 'lang'), where).toBe(htmlLang);
+        // The fragment still survives the hop, same as for a lowercase value.
+        expect(new URL(page.url()).hash, where).toBe(TRIAL);
+        expect((await geometryOf(page, FORM)).visible, where).toBe(true);
+        // Read, not rewritten: the script's one write is the `?lang=` branch, which
+        // folds before storing, so nothing uppercase can originate there.
+        expect(await storedLang(page), where).toBe(stored);
       } finally {
         await close();
       }

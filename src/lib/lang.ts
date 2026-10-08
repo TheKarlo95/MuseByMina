@@ -138,6 +138,18 @@ export interface LangRouting {
  * something that is not an answer being treated as one. Unrecognised values therefore fall
  * through to the next signal, and nothing unrecognised is ever stored.
  *
+ * **Case is not meaning.** `?lang=EN` is somebody asking for English, so the value is
+ * folded before it is matched (MUSE-39) — requested and stored alike, since the same
+ * question applies to a key a hand or another tab may have written. This does not widen
+ * what counts as an answer, which is why it cannot undo the rule above: a folded value
+ * either names a locale or still does not, and `de` folds to `de`. `navigator.languages`
+ * was already matched case-insensitively; this is the other two signals catching up. The
+ * canonical lowercase spelling is what gets stored and what indexes `URLS`, so the fold
+ * reaches the write as well as the match and no uppercase value can originate here. A
+ * mixed-case key that is already there is obeyed and left alone rather than rewritten:
+ * there is one write in this script, and adding a second to a read-only branch would buy
+ * nothing a fold at the point of reading does not already give.
+ *
  * ## Deliberately narrow, and why `detect` exists
  *
  * A redirect that fires on the wrong page is far worse than one that never fires, so the
@@ -176,10 +188,13 @@ export interface LangRouting {
  *
  * The concatenation is written out by hand rather than calling `carryLocation`: this is a
  * blocking inline script in `<head>`, and importing a module would mean shipping and
- * awaiting one, which is precisely what it exists not to do. The two live in the same file
- * so they cannot drift apart unnoticed, and the `?lang=` rewrite is deliberately absent
- * here because this script only ever navigates toward a locale the URL is already asking
- * for, or that nothing at the destination will reconsider. `test/lang.test.ts` and
+ * awaiting one, which is precisely what it exists not to do. The script below is a
+ * template literal, so nothing inside it — comments included — may contain a backtick or
+ * a `${`; both are a syntax error in *this* file rather than in the generated script,
+ * which is at least loud. The two live in the same file so they cannot drift apart
+ * unnoticed, and the `?lang=` rewrite is deliberately absent here because this script
+ * only ever navigates toward a locale the URL is already asking for, or that nothing at
+ * the destination will reconsider. `test/lang.test.ts` and
  * `test/localeswitch.test.ts` drive both halves in a real browser.
  */
 export function langInitScript({ urlFor, locale, detect }: LangRouting): string {
@@ -193,8 +208,25 @@ export function langInitScript({ urlFor, locale, detect }: LangRouting): string 
     var KEY = ${JSON.stringify(LANG_STORAGE_KEY)};
     var DETECT = ${detect ? 'true' : 'false'};
 
-    // A locale this script can act on, which is also the only way URLS[value] is read.
-    function known(value) { return LOCALES.indexOf(value) !== -1; }
+    // The locale a value names, in canonical form — or null when it names none. This is
+    // also the only way URLS[...] and localStorage are ever written or read.
+    //
+    // Case-folded before matching (MUSE-39). The lang parameter is one a human hand-types
+    // or hand-edits out of a shared link, and ?lang=EN falling through as unrecognised was
+    // a failure with no symptom: no English, and no indication why. Folding cannot
+    // reintroduce MUSE-33's bug, because a folded value either names a locale or still
+    // does not -- "de" folds to "de" and is nobody's language here.
+    //
+    // It hands back the canonical spelling rather than a boolean so the fold reaches the
+    // write as well as the match: whatever case arrives, only lowercase is stored.
+    //
+    // toLowerCase, not toLocaleLowerCase -- the latter folds a capital I to the dotless
+    // Turkish form under a Turkish locale, which would make ?lang=EN work everywhere
+    // except in Turkey.
+    function named(value) {
+      var folded = typeof value === 'string' ? value.toLowerCase() : '';
+      return LOCALES.indexOf(folded) === -1 ? null : folded;
+    }
 
     // The one navigation this script can perform: this same route in another locale,
     // query and fragment carried over byte for byte. Already there is not a navigation.
@@ -203,8 +235,12 @@ export function langInitScript({ urlFor, locale, detect }: LangRouting): string 
       location.replace(URLS[locale] + location.search + location.hash);
     }
 
-    var requested = new URLSearchParams(location.search).get(${JSON.stringify(LANG_PARAM)});
-    if (known(requested)) {
+    var param = new URLSearchParams(location.search).get(${JSON.stringify(LANG_PARAM)});
+    var requested = named(param);
+    if (requested !== null) {
+      // The canonical spelling, never the one that arrived: this is the only write in the
+      // script, so nothing but lowercase can be in the key however it was asked for
+      // (MUSE-39).
       // Its own try: a blocked localStorage must not cost the viewer the redirect.
       try { localStorage.setItem(KEY, requested); } catch (e) {}
       go(requested);
@@ -215,8 +251,8 @@ export function langInitScript({ urlFor, locale, detect }: LangRouting): string 
     if (!DETECT) return;
 
     var stored = null;
-    try { stored = localStorage.getItem(KEY); } catch (e) {}
-    if (known(stored)) { go(stored); return; }
+    try { stored = named(localStorage.getItem(KEY)); } catch (e) {}
+    if (stored !== null) { go(stored); return; }
 
     var langs = navigator.languages || [navigator.language || ''];
     for (var i = 0; i < langs.length; i++) {

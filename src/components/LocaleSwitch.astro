@@ -12,19 +12,51 @@ const route = routeKey(Astro.url.pathname);
 const label = locale === 'hr' ? 'Jezik' : 'Language';
 ---
 
+{/*
+  The locale being read is a label, not a link (MUSE-39).
+
+  MUSE-33 stamped `?lang=` onto every href so that a switcher link names the language it
+  leads to — which is right, and is what makes middle-click and "copy link address" land
+  in the right language. It stamped the own-locale href too, so `/en/schedule/`'s EN entry
+  pointed at `/en/schedule/?lang=en`: activating the language you were already reading
+  reloaded the document, and `aria-current` sat on a link that did not point at the current
+  address, which is the one thing that attribute asserts.
+
+  The ticket offered the alternative of keeping the `<a>` and pointing it at the current
+  URL unchanged, which keeps the markup symmetrical. It is not taken, for three reasons:
+
+    - A link to the URL you are already at is *not* inert. With no fragment to match,
+      following it is a same-URL navigation and the browser re-requests the document;
+      making it do nothing would need a `preventDefault` click handler, and a click
+      handler is exactly what MUSE-16 and MUSE-33 spent two tickets moving behaviour out
+      of. Here it would have to intercept the keyboard too, and still leave middle-click
+      opening a pointless second tab.
+    - `aria-current` would then be load-bearing in two directions at once: the href has to
+      track `location` on every `hashchange` for the attribute to stay honest, so the
+      accuracy MUSE-39 is about would depend on a rewrite firing.
+    - There is nothing for the link to offer. It is one of two entries in a labelled
+      group, so a screen reader still reads "HR, EN, current page" — what it no longer
+      does is announce a second link to where the visitor already is, or spend a tab
+      stop on it.
+
+  `page` rather than `true`: `true` is the generic fallback for a set with no better
+  token, and this is one page out of a set of pages, which is what `Header.astro`'s nav
+  already says. `hreflang` is deliberately not carried over — it is defined for `a`,
+  `area` and `link`, and the page's own `<head>` is where the alternates are declared.
+*/}
 <div class="group" role="group" aria-label={label} data-locale-switch>
   {
-    LOCALES.map((l) => (
-      <a
-        href={localeUrl(route, l)}
-        hreflang={l}
-        lang={l}
-        data-locale={l}
-        aria-current={l === locale ? 'true' : undefined}
-      >
-        {LOCALE_LABEL[l]}
-      </a>
-    ))
+    LOCALES.map((l) =>
+      l === locale ? (
+        <span lang={l} data-locale={l} aria-current="page">
+          {LOCALE_LABEL[l]}
+        </span>
+      ) : (
+        <a href={localeUrl(route, l)} hreflang={l} lang={l} data-locale={l}>
+          {LOCALE_LABEL[l]}
+        </a>
+      ),
+    )
   }
 </div>
 
@@ -32,6 +64,9 @@ const label = locale === 'hr' ? 'Jezik' : 'Language';
   import { isLocale } from '../lib/i18n';
   import { carryLocation } from '../lib/lang';
 
+  // Links only, which since MUSE-39 is the *other* locale's entry and nothing else: the
+  // one for the locale being read is a `<span>`, so there is no own-locale href for a
+  // rewrite to reach and no `?lang=` pointing at the address the visitor is already at.
   const links = [
     ...document.querySelectorAll<HTMLAnchorElement>('[data-locale-switch] a'),
   ];
@@ -88,7 +123,9 @@ const label = locale === 'hr' ? 'Jezik' : 'Language';
     display: inline-flex;
     align-items: center;
   }
-  .group a {
+  /* Both entries are laid out identically; only one of them is a link (MUSE-39). */
+  .group a,
+  .group span {
     /* 44px tap target without inflating the type — design system §7.1 */
     min-width: 44px;
     min-height: 44px;
@@ -106,10 +143,12 @@ const label = locale === 'hr' ? 'Jezik' : 'Language';
   .group a:hover {
     color: var(--band-accent);
   }
-  .group a[aria-current='true'] {
+  .group [aria-current='page'] {
     color: var(--band-accent);
   }
-  .group a + a {
+  /* Child-wise rather than `a + a`: the own-locale entry is first on Croatian pages
+     and second on English ones, so the divider cannot be anchored to a tag name. */
+  .group > * + * {
     border-left: 1px solid var(--band-line);
   }
 </style>
