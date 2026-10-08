@@ -9,7 +9,8 @@ import { INERT_ROUTE_WARNING, ROUTES } from '../src/lib/pages';
 import { getSiteSettings } from '../src/lib/sanity';
 import { inDevServer } from '../src/lib/sanity/dev';
 import { FIXTURE_ENV } from '../src/lib/sanity/fixture';
-import { buildFailure, buildSite, canonicalOf, PAGES_DEPLOY, type Build } from './helpers/build';
+import { buildFailure, buildSite, PAGES_DEPLOY, type Build } from './helpers/build';
+import { fetchMeasuredPage } from './helpers/measured';
 import { astroDev, claimOutDir, type DevServer } from './helpers/scratch';
 import { seedDocs, type SeedDoc } from './helpers/seed';
 
@@ -170,7 +171,14 @@ beforeAll(async () => {
   after = await text(offline, '/schedule', 'hr');
 
   // The live arm, with nothing to answer it: what `npm run dev` does on a train today.
-  unreachable = await astroDev({ ...UNREACHABLE, [FIXTURE_ENV]: '' }, 'devcontent-live');
+  //
+  // `pagesRender: false` because this is the one dev server in the repository whose pages
+  // are *expected* not to render — the 500 below is its assertion — so `astroDev`'s own
+  // probe, which proves a handed-out URL names a real page (MUSE-62), has nothing to prove
+  // here and would fail the suite that wants the failure.
+  unreachable = await astroDev({ ...UNREACHABLE, [FIXTURE_ENV]: '' }, 'devcontent-live', {
+    pagesRender: false,
+  });
   const failed = await fetch(pageUrl(unreachable, '/schedule', 'hr'));
   expect(failed.status).toBe(500);
 
@@ -239,24 +247,19 @@ function occurrences(haystack: string, needle: string): number {
  * `<link rel="canonical">` is the right needle because it comes from `localeUrl` and
  * `Astro.site` inside the page itself (MUSE-9), so it names where the page believes it
  * lives, independently of how it was reached.
+ *
+ * The comparison itself is **not written here any more**: `fetchMeasuredPage`
+ * (`test/helpers/measured.ts`) owns it, because `test/fonts.test.ts` needed the same claim
+ * and a second copy is a second place it can be weakened (MUSE-62). It compares against
+ * the path that was *requested* rather than against `localeUrl`'s answer, which is the
+ * comparison that means something — the page saying which page it is — and is why the
+ * test process's own base being `/` does not matter.
  */
 async function text(server: DevServer, route: string, locale: Locale): Promise<string> {
   const requested = pageUrl(server, route, locale);
-  const where = `${requested}\n--- astro dev output ---\n${server.output()}`;
-  const response = await fetch(requested);
-  expect(response.status, where).toBe(200);
-  const html = await response.text();
-
-  /**
-   * Compared against the path that was *requested*, not against `localeUrl`'s answer: the
-   * canonical is built inside the page from the real deploy base, and the test process's
-   * base is `/`. Requested-vs-declared is also the comparison that means something here —
-   * it is the page saying which page it is.
-   */
-  const canonical = canonicalOf(html);
-  expect(canonical, `no canonical on ${where}`).toBeDefined();
-  expect(new URL(canonical!).pathname, `served a different page than ${requested}`).toBe(
-    new URL(requested).pathname,
+  const { html } = await fetchMeasuredPage(
+    requested,
+    `astro dev\n--- astro dev output ---\n${server.output()}`,
   );
   return html;
 }

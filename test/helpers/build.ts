@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
+import { attr } from './measured';
 import { astroBuild, buildLog } from './scratch';
 
 /**
@@ -9,6 +10,14 @@ import { astroBuild, buildLog } from './scratch';
  * Re-exported because `SCRATCH` was part of this module's surface (MUSE-9).
  */
 export { SCRATCH } from './scratch';
+
+/**
+ * The canonical reader, and the attribute reader under it, moved to `./measured.ts`
+ * (MUSE-62) — that module is the one that says what a canonical is *for*, and it cannot
+ * import from here, since `./scratch.ts` imports it and this module imports `./scratch.ts`.
+ * Re-exported because `canonicalOf` was part of this module's surface.
+ */
+export { canonicalOf } from './measured';
 
 /** A deploy target, exactly as CI passes it to `npm run build`. */
 export interface Deploy {
@@ -174,10 +183,6 @@ const ASSET_RELS = new Set([
   'mask-icon',
   'manifest',
 ]);
-
-function attr(tag: string, name: string): string | undefined {
-  return new RegExp(`\\b${name}="([^"]*)"`).exec(tag)?.[1];
-}
 
 /**
  * Every subresource URL in a built page, read off the markup.
@@ -376,15 +381,6 @@ export interface PageRef {
   source: string;
   /** The attribute value as emitted. */
   url: string;
-}
-
-/** The `<link rel="canonical">` href a page declares, if any. */
-export function canonicalOf(html: string): string | undefined {
-  for (const m of html.matchAll(/<link\b[^>]*>/g)) {
-    if ((attr(m[0], 'rel') ?? '').toLowerCase() !== 'canonical') continue;
-    return attr(m[0], 'href');
-  }
-  return undefined;
 }
 
 /**

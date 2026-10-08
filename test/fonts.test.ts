@@ -16,6 +16,7 @@ import {
   PAGES_DEPLOY,
   styleBlocks,
 } from './helpers/build';
+import { assertMeasuredPage, fetchMeasuredPage } from './helpers/measured';
 import { astroDev, type DevServer } from './helpers/scratch';
 import { servePages, type Host } from './helpers/serve';
 
@@ -45,6 +46,30 @@ import { servePages, type Host } from './helpers/serve';
  *
  * `test/assets.test.ts` keeps the complementary static claim: every `url()` in the
  * emitted CSS resolves to a file that is actually in the output.
+ *
+ * ## Why every page read here goes through `fetchMeasuredPage`
+ *
+ * Because for the life of this suite in CI, the dev third of it measured `404.astro`
+ * (MUSE-62). `DevServer.base` was parsed out of the server's printed greeting, the
+ * character class excluded whitespace, quotes and backslashes but not `ESC`, and Astro's
+ * human-readable banner is colour-coded — so the base came out `/MuseByMina/%1B[31m/`,
+ * `astro dev` answered every page with the error page, and **no assertion below could
+ * tell**: the error page loads the same stylesheet, declares the same six faces and
+ * carries the same two preloads. "Which faces did the CSS engine ask for" gave the right
+ * answer about the wrong document, in the one suite whose whole reason to exist is seeing
+ * what `dist` cannot.
+ *
+ * It was CI-only, deterministically: Astro 7 switches to JSON log lines when it detects an
+ * agent, and in that form the next character is a backslash — which the class did exclude.
+ * Every local run by every agent got the right base. To reproduce, unset the agent markers
+ * **and** force colour; see CLAUDE.md.
+ *
+ * So every page this suite reads is read through `fetchMeasuredPage`, and every page it
+ * opens in a browser is checked with `assertMeasuredPage` — the canonical the page itself
+ * declares, against the path that was asked for. MUSE-48's landing assertion cannot stand
+ * in for it: that compares requested with landed, and here the URL was wrong before it was
+ * requested and the server answered it directly. Not body text, either — every page
+ * contains „Muse by Mina", which is how eight copies of one page pass for eight pages.
  *
  * ## Why there is no `BASE=/` dev server
  *
@@ -147,7 +172,7 @@ afterAll(async () => {
  */
 async function stylesheetsFor(env: Environment, route: string): Promise<string[]> {
   const pageUrl = env.url(route);
-  const html = await (await fetch(pageUrl)).text();
+  const { html } = await fetchMeasuredPage(pageUrl, env.name);
 
   const linked = await Promise.all(
     linkHrefs(html, 'stylesheet').map(async (href) => {
@@ -171,7 +196,7 @@ async function declaredFaces(env: Environment, route: string): Promise<string[]>
 /** Absolute URLs of every woff2 the page asks the browser to preload. */
 async function preloadedFaces(env: Environment, route: string): Promise<string[]> {
   const pageUrl = env.url(route);
-  const html = await (await fetch(pageUrl)).text();
+  const { html } = await fetchMeasuredPage(pageUrl, env.name);
   return linkHrefs(html, 'preload')
     .filter((href) => href.endsWith('.woff2'))
     .map((href) => new URL(href, pageUrl).href);
@@ -209,7 +234,7 @@ async function facesNeededWithoutPreloads(
   // That is the double-download MUSE-35's QA nearly filed as a preload mismatch, and the
   // reason this file's own comment about the Croatian homepage's diacritics was describing
   // a page no run had ever loaded.
-  const { page, close } = await openCheckPage(browser, env, route, {
+  const { page, close, measured } = await openCheckPage(browser, env, route, {
     waitUntil: 'load',
     prepare: async (opened, url) => {
       await opened.route(url, async (interception) => {
@@ -228,6 +253,9 @@ async function facesNeededWithoutPreloads(
   });
 
   try {
+    // The document the browser actually parsed, not the URL it was handed: `page.content()`
+    // is the DOM it ended up with, preloads stripped and canonical untouched (MUSE-62).
+    assertMeasuredPage(measured.url, await page.content(), env.name);
     await page.evaluate(() => document.fonts.ready);
     return [...requested].sort();
   } finally {
@@ -260,10 +288,11 @@ describe.each(ENVIRONMENTS.map((name, index) => ({ name, index })))(
     });
 
     it('reports every face loaded, and none failed, in a real browser', async () => {
-      const { page, close } = await openCheckPage(browser, env(), CONTENT_ROUTE, {
+      const { page, close, measured } = await openCheckPage(browser, env(), CONTENT_ROUTE, {
         waitUntil: 'load',
       });
       try {
+        assertMeasuredPage(measured.url, await page.content(), env().name);
         // `document.fonts` only loads a face the page has text for, so a subset
         // covering characters this page happens not to use stays `unloaded` however
         // healthy it is. Asking for each one explicitly makes "all six" a claim about
