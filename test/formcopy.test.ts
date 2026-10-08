@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { FORM_COPY, FORM_FIELDS, requiredMessage } from '../src/lib/forms';
 import { LOCALES } from '../src/lib/i18n';
+import { LEVELS } from '../src/lib/schedule';
 
 /**
  * MUSE-7 — "every user-facing string needs both HR and EN".
@@ -101,12 +102,14 @@ describe('the form copy table', () => {
   it('labels the levels the same way in both, and translates the one that is prose', () => {
     // These labels used to be required to *differ*, which was the pre-MUSE-6 rule.
     // A level renders English in both locales, and since MUSE-11 both locales read it
-    // from `LEVEL_NAME` — so the three level labels are the same words on purpose,
-    // and the Croatian form no longer says `Početni` while `/schedule` says `Beginner`.
+    // from `LEVEL_NAME` — so the level labels are the same words on purpose, and the
+    // Croatian form no longer says `Početni` while `/schedule` says `Beginner`.
     const [hrNotSure, ...hrLevels] = HR.levels;
     const [enNotSure, ...enLevels] = EN.levels;
 
-    expect(hrLevels.length, 'the three levels are missing from the select').toBe(3);
+    // One option per level, read off `LEVELS` rather than counted: MUSE-36 added a
+    // fourth, and a hardcoded 3 here is a second place the set of levels is written.
+    expect(hrLevels.length, 'the levels are missing from the select').toBe(LEVELS.length);
     expect(enLevels.map((l) => l.label)).toEqual(hrLevels.map((l) => l.label));
 
     // "Još ne znam" / "Not sure yet" is not a level. It is prose, so it is translated.

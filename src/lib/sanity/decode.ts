@@ -1,5 +1,5 @@
 import type { Locale } from '../i18n';
-import { LEVELS, STYLES, WEEKDAYS, type ClassEntry } from '../schedule';
+import { LEVELS, WEEKDAYS, type ClassEntry } from '../schedule';
 
 /**
  * Turning a GROQ answer into something a page may render — or failing loudly.
@@ -99,6 +99,29 @@ export function optionalText(doc: unknown, path: string, where: Where): string |
     fail(at(where, path), 'a non-empty string, or nothing at all', value);
   }
   return value;
+}
+
+/**
+ * A non-empty list of non-empty strings — what a dereferenced array of names arrives as.
+ *
+ * The failure it exists to name is specific to MUSE-36's instructor array. GROQ projects
+ * `instructors[]->name` as `null` when the field is absent, as `[]` when the array is
+ * empty, and as `[null]` when a member points at a document that has been deleted — three
+ * different shapes that a template rendering `instructors.join(' i ')` turns into the same
+ * thing: a class with nobody teaching it. Each of them fails here instead, naming the
+ * document and the index.
+ */
+export function textList(doc: unknown, path: string, where: Where): string[] {
+  const value = read(doc, path);
+  if (!Array.isArray(value) || value.length === 0) {
+    fail(at(where, path), 'a list with at least one entry', value);
+  }
+  return value.map((entry, index) => {
+    if (typeof entry !== 'string' || entry.trim() === '') {
+      fail(at(where, `${path}[${index}]`), 'a non-empty string', entry);
+    }
+    return entry;
+  });
 }
 
 export function integer(doc: unknown, path: string, where: Where): number {
@@ -409,10 +432,11 @@ export function decodePage(row: unknown): PageMetaDoc {
 /**
  * A schedule row, decoded straight into the existing `ClassEntry`.
  *
- * The `ClassEntry` extension is not decoration: it is the compile-time half of the
- * promise that moving the schedule into the CMS (MUSE-36) is a prop change.
- * `Schedule.astro` already takes `ClassEntry[]`, so if this ever stops producing one,
- * the type error arrives before the page does.
+ * The `ClassEntry` extension is not decoration: `Schedule.astro` and `Home.astro` both
+ * take `ClassEntry[]`, so if this ever stops producing one, the type error arrives before
+ * the page does. It was the compile-time half of the promise that moving the schedule
+ * into the CMS (MUSE-36) would be a prop change; it is now what holds the two pages to
+ * one shape.
  */
 export interface ScheduleEntry extends ClassEntry {
   id: string;
@@ -433,9 +457,8 @@ export function decodeScheduleEntry(row: unknown): ScheduleEntry {
     day: oneOf(row, 'day', where, WEEKDAYS),
     start,
     durationMin: integer(row, 'durationMin', where),
-    style: oneOf(row, 'style', where, STYLES),
     level: oneOf(row, 'level', where, LEVELS),
-    instructor: text(row, 'instructor', where),
+    instructors: textList(row, 'instructors', where),
   };
 }
 
@@ -443,12 +466,13 @@ export interface DanceClass {
   id: string;
   slug: string;
   name: Record<Locale, string>;
-  style: (typeof STYLES)[number];
   level: (typeof LEVELS)[number];
-  description: Record<Locale, string>;
+  /** Optional as of MUSE-36 — nothing renders it, so nothing may demand it. */
+  description?: Record<Locale, string>;
   durationMin: number;
-  instructor: string;
-  image: ImageRef;
+  instructors: string[];
+  /** Optional as of MUSE-36, for the reason `Instructor.portrait` is. */
+  image?: ImageRef;
 }
 
 export function decodeClass(row: unknown): DanceClass {
@@ -457,12 +481,11 @@ export function decodeClass(row: unknown): DanceClass {
     id: where.id,
     slug: text(row, 'slug', where),
     name: localised(row, 'name', where),
-    style: oneOf(row, 'style', where, STYLES),
     level: oneOf(row, 'level', where, LEVELS),
-    description: localised(row, 'description', where),
+    description: optionalLocalised(row, 'description', where),
     durationMin: integer(row, 'durationMin', where),
-    instructor: text(row, 'instructor', where),
-    image: image(row, 'image', where),
+    instructors: textList(row, 'instructors', where),
+    image: optionalImage(row, 'image', where),
   };
 }
 
@@ -471,7 +494,15 @@ export interface Instructor {
   name: string;
   slug: string;
   role: Record<Locale, string>;
-  bio: Record<Locale, string>;
+  /**
+   * Optional as of MUSE-36, for the reason `portrait` is.
+   *
+   * No bios exist. Mina and Antonio are two real people with a real timetable, and a
+   * `required()` bio could only be satisfied by writing a paragraph about how long one of
+   * them has danced — inventing a claim about a named person to get past a validator,
+   * which is the move this whole ticket exists to undo.
+   */
+  bio?: Record<Locale, string>;
   /**
    * Optional as of MUSE-23, for the reason `phone` is: no photography of this studio
    * exists, so a required portrait could only be satisfied by uploading something that is
@@ -502,7 +533,7 @@ export function decodeInstructor(row: unknown): Instructor {
     name: text(row, 'name', where),
     slug: text(row, 'slug', where),
     role: localised(row, 'role', where),
-    bio: localised(row, 'bio', where),
+    bio: optionalLocalised(row, 'bio', where),
     portrait: optionalImage(row, 'portrait', where),
     instagram: optionalText(row, 'instagram', where),
   };

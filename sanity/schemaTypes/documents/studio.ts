@@ -1,22 +1,30 @@
 import { defineArrayMember, defineField, defineType } from 'sanity';
 
-import {
-  HH_MM_PATTERN,
-  LEVEL_OPTIONS,
-  STYLE_OPTIONS,
-  WEEKDAY_OPTIONS,
-} from '../enums';
+import { HH_MM_PATTERN, LEVEL_OPTIONS, WEEKDAY_OPTIONS } from '../enums';
 import { imageField } from '../objects/image';
 
 /**
  * The studio itself: how it started, who teaches, what is taught, and when.
  *
  * `class` and `scheduleSlot` are split because the existing `ClassEntry` in
- * `src/lib/schedule.ts` is a *rendering* of both: a class carries the style, level,
- * length, description and photograph; a slot carries a weekday and a start time. One
- * class usually runs on several days, and merging them would make Mina retype the
- * description once per weekly occurrence — which is how the Tuesday copy ends up
- * different from the Thursday copy.
+ * `src/lib/schedule.ts` is a *rendering* of both: a class carries the level, length,
+ * description, photograph and the people who teach it; a slot carries a weekday and a
+ * start time. One class usually runs on several days, and merging them would make Mina
+ * retype the description once per weekly occurrence — which is how the Tuesday copy ends
+ * up different from the Thursday copy.
+ *
+ * MUSE-36 changed three things in here, all of them for the same reason: the real
+ * timetable arrived and the invented one had shaped the schema.
+ *
+ *   - **`class.style` is gone.** The studio does not teach by style; the three values
+ *     were invented with the thirteen invented rows.
+ *   - **`instructors` is an array** on both `class` and `scheduleSlot`. Mina and Antonio
+ *     teach every group class together, and lady styling — a class that is coming — is
+ *     Mina alone. A single reference cannot say either thing.
+ *   - **`description`, `image` and `bio` became optional.** A required field with no
+ *     consumer and no real value can only be filled in with fiction, which is how the
+ *     invented schedule got here; the same argument made `siteSettings.phone` optional
+ *     in MUSE-20 and `instructor.portrait` optional in MUSE-23.
  */
 
 /**
@@ -116,14 +124,26 @@ export const instructor = defineType({
       description: 'Jedna kratka linija ispod imena, npr. „Voditeljica studija”.',
       validation: (Rule) => Rule.required(),
     }),
+    /**
+     * **Optional as of MUSE-36**, for the reason `portrait` below is.
+     *
+     * No bios exist. Mina and Antonio are real instructors with a real timetable and
+     * nobody has written a paragraph about either of them, so a `required()` bio could
+     * only be satisfied by writing one on their behalf — a sentence about how long a real
+     * person has danced, invented to get past a validator. That is precisely the move
+     * that put thirteen invented classes on the live site.
+     *
+     * `/aboutus` renders the paragraph when it is there and the name alone when it is
+     * not. Make it `required()` once the bios exist, not before.
+     */
     defineField({
       name: 'bio',
       title: 'O instruktoru',
       type: 'localeText',
       description:
         'Nekoliko rečenica — koliko dugo pleše, što predaje, odakle je. Piši kao da ' +
-        'odgovaraš nekome tko se tek upisuje, bez nabrajanja titula.',
-      validation: (Rule) => Rule.required(),
+        'odgovaraš nekome tko se tek upisuje, bez nabrajanja titula. Nije obavezno — ' +
+        'dok teksta nema, na stranici je samo ime i uloga.',
     }),
     /**
      * **Optional, decided in MUSE-23, and the reason is the same one that made
@@ -196,8 +216,9 @@ export const danceClass = defineType({
       title: 'Naziv sata',
       type: 'localeString',
       description:
-        'Kako se sat zove na stranici, npr. „Bachata za početnike”. Razina i stil se ' +
-        'prikazuju zasebno, pa ih ne treba ponavljati u nazivu.',
+        'Kako se sat zove na stranici. Razina se prikazuje zasebno, pa je ne treba ' +
+        'ponavljati u nazivu — redovni satovi se zovu samo „Bachata”, a nazivom se ' +
+        'razlikuje ono što nije redovni sat, npr. „Lady styling”.',
       validation: (Rule) => Rule.required(),
     }),
     defineField({
@@ -210,57 +231,78 @@ export const danceClass = defineType({
       validation: (Rule) => Rule.required().error('Slug je obavezan.'),
     }),
     defineField({
-      name: 'style',
-      title: 'Stil',
-      type: 'string',
-      description:
-        'Tradicionalna, moderna ili sensual. Popis je fiksan — stranica ima filtere i ' +
-        'kartice vezane na te tri vrijednosti.',
-      options: { list: [...STYLE_OPTIONS], layout: 'radio' },
-      validation: (Rule) => Rule.required().error('Stil je obavezan.'),
-    }),
-    defineField({
       name: 'level',
       title: 'Razina',
       type: 'string',
       description:
-        'Beginner, Intermediate ili Advanced. Namjerno engleski na oba jezika — tako ' +
-        'piše i na rasporedu i na obrascu za probni sat.',
+        'Beginner, Improver, Intermediate ili Advanced. Namjerno engleski na oba ' +
+        'jezika — tako piše i na rasporedu i na obrascu za probni sat.',
       options: { list: [...LEVEL_OPTIONS], layout: 'radio' },
       validation: (Rule) => Rule.required().error('Razina je obavezna.'),
     }),
+    /**
+     * **Optional as of MUSE-36.** Nothing renders it today.
+     *
+     * The three style cards on the homepage were its only consumer and they went with
+     * `class.style`; the schedule row shows the name, the level, the teachers and the
+     * length. So a `required()` description would be four paragraphs written to satisfy a
+     * validator, about four classes whose only published facts are the ones above.
+     * Whichever page first shows it — a class page, most likely — can require it then.
+     */
     defineField({
       name: 'description',
       title: 'Opis',
       type: 'localeText',
       description:
         'Dvije do tri rečenice: što se na satu radi i za koga je. Ne piši imena figura — ' +
-        'osobi koja se tek upisuje to ne znači ništa.',
-      validation: (Rule) => Rule.required(),
+        'osobi koja se tek upisuje to ne znači ništa. Nije obavezno; raspored ga ne ' +
+        'prikazuje.',
     }),
     defineField({
       name: 'durationMin',
       title: 'Trajanje (minuta)',
       type: 'number',
-      description: 'Redovni satovi su 60. Workshop može biti dulji.',
-      initialValue: 60,
+      description: 'Redovni satovi su 90. Workshop može biti dulji.',
+      initialValue: 90,
       validation: (Rule) =>
         Rule.required().integer().min(15).max(300).error('Trajanje je 15–300 minuta.'),
     }),
+    /**
+     * **An array, because two people teach one class** (MUSE-36).
+     *
+     * Mina and Antonio lead every group class together, so a single reference could only
+     * ever have published one of the two names — and the justification is not today's
+     * data. Lady styling is a named, confirmed, coming class that Mina teaches alone, so
+     * the number of instructors per class is already known to vary. A field whose shape
+     * is known to be wrong is worth changing before it holds content, not after.
+     *
+     * Order matters: the page renders the names in the order they are listed here,
+     * joined with „i" / "and" by `formatNames` in `src/lib/schedule.ts`.
+     */
     defineField({
-      name: 'instructor',
-      title: 'Instruktor',
-      type: 'reference',
-      to: [{ type: 'instructor' }],
+      name: 'instructors',
+      title: 'Instruktori',
+      type: 'array',
+      of: [defineArrayMember({ type: 'reference', to: [{ type: 'instructor' }] })],
       description:
-        'Tko redovno vodi ovaj sat. Pojedini termin može imati zamjenu — to se upisuje na terminu.',
-      validation: (Rule) => Rule.required().error('Instruktor je obavezan.'),
+        'Tko redovno vodi ovaj sat. Dodaj sve koji ga vode — na stranici se ispisuju u ' +
+        'ovom redoslijedu, npr. „Mina i Antonio”. Pojedini termin može imati zamjenu — ' +
+        'to se upisuje na terminu.',
+      validation: (Rule) =>
+        Rule.required().min(1).error('Dodaj barem jednog instruktora.'),
     }),
+    /**
+     * **Optional as of MUSE-36**, for the reason `instructor.portrait` is: there is no
+     * photography of this studio, and the one page that rendered a class photograph —
+     * the homepage style cards — is gone with the styles.
+     */
     imageField({
       name: 'image',
       title: 'Fotografija sata',
       ratio: '4:5',
-      purpose: 'Slika na kartici stila na početnoj stranici.',
+      purpose:
+        'Slika sata. Nije obavezno — dok fotografije nema, nijedna stranica je ne traži.',
+      required: false,
     }),
     defineField({
       name: 'order',
@@ -281,10 +323,15 @@ export const danceClass = defineType({
     },
   ],
   preview: {
-    select: { title: 'name.hr', style: 'style', level: 'level', media: 'image' },
-    prepare: ({ title, style, level, media }) => ({
+    select: { title: 'name.hr', level: 'level', minutes: 'durationMin', media: 'image' },
+    prepare: ({ title, level, minutes, media }) => ({
       title: String(title ?? 'Sat bez naziva'),
-      subtitle: [style, level].filter(Boolean).join(' · '),
+      // The level was one of two facts in the subtitle and the style was the other, so
+      // with the style gone the length takes its place — otherwise four „Bachata” rows
+      // would be told apart by one word.
+      subtitle: [level, minutes ? `${String(minutes)} min` : undefined]
+        .filter(Boolean)
+        .join(' · '),
       media,
     }),
   },
@@ -302,7 +349,7 @@ export const scheduleSlot = defineType({
       title: 'Sat',
       type: 'reference',
       to: [{ type: 'class' }],
-      description: 'Odaberi sat. Stil, razina, trajanje i opis dolaze s njega.',
+      description: 'Odaberi sat. Razina, trajanje i instruktori dolaze s njega.',
       validation: (Rule) => Rule.required().error('Termin mora pokazivati na sat.'),
     }),
     defineField({
@@ -325,13 +372,24 @@ export const scheduleSlot = defineType({
           .regex(HH_MM_PATTERN, { name: 'HH:MM' })
           .error('Upiši vrijeme kao HH:MM u 24-satnom formatu, npr. 19:00 ili 09:30.'),
     }),
+    /**
+     * The override, an array for the same reason `class.instructors` is (MUSE-36).
+     *
+     * It replaces the class's list rather than adding to it — "this slot is taught by
+     * these people" — because the case it exists for is one person standing in for two,
+     * which an additive field could not express. Empty means "whoever teaches the class",
+     * and `min(1)` keeps a half-finished edit from meaning "nobody".
+     */
     defineField({
-      name: 'instructor',
-      title: 'Zamjena za instruktora',
-      type: 'reference',
-      to: [{ type: 'instructor' }],
+      name: 'instructors',
+      title: 'Zamjena za instruktore',
+      type: 'array',
+      of: [defineArrayMember({ type: 'reference', to: [{ type: 'instructor' }] })],
       description:
-        'Ostavi prazno i prikazuje se instruktor sa sata. Ispuni samo ako ovaj termin trajno vodi netko drugi.',
+        'Ostavi prazno i prikazuju se instruktori sa sata. Ispuni samo ako ovaj termin ' +
+        'trajno vodi netko drugi — tada se prikazuju samo ovdje navedeni.',
+      validation: (Rule) =>
+        Rule.min(1).error('Ostavi prazno, ili dodaj barem jednog instruktora.'),
     }),
     defineField({
       name: 'active',

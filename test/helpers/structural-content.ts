@@ -292,11 +292,11 @@ export const STUDIO_STORY_DOC: FixtureDoc = {
 /**
  * Three instructors, because the `coalesce` fallback needs three to be unambiguous.
  *
- * `INSTRUCTOR_A` regularly teaches `CLASS_ONE`, `INSTRUCTOR_B` regularly teaches
- * `CLASS_TWO`, and `INSTRUCTOR_C` teaches neither — they exist only as the slot-level
- * override on `SLOT_TWO`. With two instructors the override and the fallback can resolve
- * to the same name by coincidence; with three, every branch of
- * `coalesce(instructor->name, class->instructor->name)` has its own answer.
+ * `INSTRUCTOR_A` regularly teaches `CLASS_ONE`, `INSTRUCTOR_B` and `INSTRUCTOR_A` together
+ * teach `CLASS_TWO`, and `INSTRUCTOR_C` teaches no class — they exist only as the
+ * slot-level override on `SLOT_TWO`. With two instructors the override and the fallback
+ * can resolve to the same name by coincidence; with three, every branch of
+ * `coalesce(instructors[]->name, class->instructors[]->name)` has its own answer.
  *
  * `order` is set on B alone. The query sorts by `coalesce(order, 999) asc, name asc`, so
  * the expected order is B, A, C — which is *not* alphabetical. A `coalesce` that stopped
@@ -328,7 +328,8 @@ export const INSTRUCTOR_B: FixtureDoc = {
 };
 
 /**
- * **The instructor with no photograph**, which is every instructor today (MUSE-23).
+ * **The instructor with no photograph and no bio**, which is every instructor today
+ * (MUSE-23 for the portrait, MUSE-36 for the bio).
  *
  * `portrait` became optional in MUSE-23 for the reason `phone` did in MUSE-20: no
  * photography of this studio exists, so a `required()` portrait could only be satisfied by
@@ -336,9 +337,14 @@ export const INSTRUCTOR_B: FixtureDoc = {
  * a placeholder frame, and a placeholder frame nothing ever renders is a placeholder frame
  * nobody has checked — so one of the three fixture instructors goes without.
  *
+ * `bio` followed in MUSE-36, when Mina and Antonio became the first two real `instructor`
+ * documents and nobody had written a paragraph about either of them. The same argument
+ * applies to the fixture: with all three rows carrying a bio, `bio` and a typo of it both
+ * project a value on every row and `INSTRUCTORS_QUERY` could not tell them apart.
+ *
  * C rather than a fourth document: `FULL_COUNTS` and the `coalesce(order, 999)` ordering
  * assertions are about three instructors, and a fourth would make them fail for a reason
- * that has nothing to do with portraits. C also teaches no class, so dropping its portrait
+ * that has nothing to do with portraits. C also teaches no class, so dropping its fields
  * cannot reach `CLASSES_QUERY`.
  */
 export const INSTRUCTOR_C: FixtureDoc = {
@@ -347,7 +353,6 @@ export const INSTRUCTOR_C: FixtureDoc = {
   name: 'Instructor C',
   slug: slug('instructor-c'),
   role: localeString('role C'),
-  bio: localeText('bio C'),
 };
 
 /**
@@ -356,17 +361,22 @@ export const INSTRUCTOR_C: FixtureDoc = {
  * `order` is on CLASS_TWO alone and its `name.hr` sorts *after* CLASS_ONE's, so
  * `coalesce(order, 999) asc, name.hr asc` puts TWO first and plain `name.hr asc` would
  * put ONE first. The expected order therefore distinguishes the two.
+ *
+ * **One teaches alone and one is taught by two people** (MUSE-36). `instructors` is an
+ * array, and an array projection has two things a single reference did not: a length and
+ * an order. `CLASS_TWO` lists B **before** A, which is not alphabetical — so a projection
+ * that sorted, de-duplicated or flattened the list is visible, and so is one that returns
+ * only the first member.
  */
 export const CLASS_ONE: FixtureDoc = {
   _id: 'class-one',
   _type: 'class',
   name: { _type: 'localeString', hr: 'Sat A', en: 'Class A' },
   slug: slug('class-one'),
-  style: 'traditional',
   level: 'beginner',
   description: localeText('class one'),
   durationMin: 60,
-  instructor: reference('instructor-a'),
+  instructors: [reference('instructor-a')],
   image: imageOf('ClassOne', [0.51, 0.52, 0.53, 0.54], [0.05, 0.06, 0.07, 0.08]),
 };
 
@@ -375,11 +385,10 @@ export const CLASS_TWO: FixtureDoc = {
   _type: 'class',
   name: { _type: 'localeString', hr: 'Sat B', en: 'Class B' },
   slug: slug('class-two'),
-  style: 'sensual',
   level: 'advanced',
   description: localeText('class two'),
   durationMin: 90,
-  instructor: reference('instructor-b'),
+  instructors: [reference('instructor-b'), reference('instructor-a')],
   image: imageOf('ClassTwo', [0.61, 0.62, 0.63, 0.64], [0.01, 0.02, 0.03, 0.04]),
   order: 0,
 };
@@ -401,13 +410,21 @@ export const SLOT_ONE: FixtureDoc = {
   active: true,
 };
 
+/**
+ * The override, and it **replaces** the class's two teachers with one (MUSE-36).
+ *
+ * `CLASS_TWO` is taught by B and A; this slot is taught by C alone. That is the case the
+ * field exists for — one person standing in — and it is the shape a merging
+ * implementation could not produce: a projection that concatenated the two lists would
+ * answer three names, and one that took the class's list regardless would answer two.
+ */
 export const SLOT_TWO: FixtureDoc = {
   _id: 'slot-two',
   _type: 'scheduleSlot',
   class: reference('class-two'),
   day: 'thu',
-  start: '18:00',
-  instructor: reference('instructor-c'),
+  start: '18:30',
+  instructors: [reference('instructor-c')],
   active: true,
 };
 
@@ -724,7 +741,7 @@ export const FULL_COUNTS: Record<string, number> = {
  *
  * The single most important row in this file. GROQ answers `class->_id` with `null` and
  * HTTP 200 — not an error — so without a decoder this publishes a schedule row with no
- * name, no style, no level and no teacher, and the build exits 0.
+ * name, no level and no teacher, and the build exits 0.
  */
 export const SLOT_DANGLING_CLASS: FixtureDoc = {
   _id: 'slot-dangling-class',
@@ -735,17 +752,24 @@ export const SLOT_DANGLING_CLASS: FixtureDoc = {
   active: true,
 };
 
-/** A class whose regular teacher has been deleted, so the `coalesce` has nothing to fall back to. */
+/**
+ * A class one of whose teachers has been deleted.
+ *
+ * The array makes this worse than it was, which is why it is modelled as a *partial*
+ * loss (MUSE-36): `instructors[]->name` over `[deleted, A]` answers `[null, 'Instructor
+ * A']`, so the list is still non-empty and a page that joined it would publish „ i
+ * Instructor A" — a real teacher next to a blank. `textList` in
+ * `src/lib/sanity/decode.ts` names the index instead.
+ */
 export const CLASS_DANGLING_INSTRUCTOR: FixtureDoc = {
   _id: 'class-dangling-instructor',
   _type: 'class',
   name: { _type: 'localeString', hr: 'Sat C', en: 'Class C' },
   slug: slug('class-dangling-instructor'),
-  style: 'moderna',
-  level: 'intermediate',
+  level: 'improver',
   description: localeText('class three'),
   durationMin: 75,
-  instructor: reference('instructor-that-was-deleted'),
+  instructors: [reference('instructor-that-was-deleted'), reference('instructor-a')],
   image: imageOf('ClassThree', [0.65, 0.66, 0.67, 0.68], [0.09, 0.1, 0.11, 0.12]),
 };
 

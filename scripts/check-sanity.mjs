@@ -40,10 +40,10 @@ const GENERATED_TYPES = 'src/lib/sanity/sanity.types.ts';
  * Everything the generated artefacts are derived from.
  *
  * `src/lib/schedule.ts` and `src/lib/pages.ts` are in here because the schema imports
- * its option lists from them — levels, styles, weekdays, the route list. That is the
- * content-versus-structure decision made mechanical: a fourth level added in
- * `schedule.ts` changes the Studio's dropdown and the generated string union, so it has
- * to invalidate the artefacts too.
+ * its option lists from them — levels, weekdays, the route list. That is the
+ * content-versus-structure decision made mechanical: the fourth level MUSE-36 added in
+ * `schedule.ts` changed the Studio's dropdown and the generated string union, and this is
+ * what made it invalidate the artefacts too.
  *
  * The first entry is the whole `sanity/` tree, deliberately coarse. It used to be
  * `sanity/schemaTypes` walked with an `.endsWith('.ts')` filter, and both halves of that
@@ -108,17 +108,8 @@ const READ_CONTRACT = {
     'shareImage',
   ],
   page: ['route', 'name', 'title', 'description'],
-  class: [
-    'name',
-    'slug',
-    'style',
-    'level',
-    'description',
-    'durationMin',
-    'instructor',
-    'image',
-  ],
-  scheduleSlot: ['class', 'day', 'start', 'instructor', 'active'],
+  class: ['name', 'slug', 'level', 'description', 'durationMin', 'instructors', 'image'],
+  scheduleSlot: ['class', 'day', 'start', 'instructors', 'active'],
   instructor: ['name', 'slug', 'role', 'bio', 'portrait'],
   pricingTier: ['name', 'priceEur', 'period', 'features', 'featured'],
   event: [

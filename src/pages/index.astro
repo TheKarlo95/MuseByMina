@@ -1,9 +1,13 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import Home from '../components/Home.astro';
-import { getPage, getSiteSettings } from '../lib/sanity';
+import { getPage, getSchedule, getSiteSettings } from '../lib/sanity';
 
-const [meta, settings] = await Promise.all([getPage('/'), getSiteSettings()]);
+const [meta, settings, entries] = await Promise.all([
+  getPage('/'),
+  getSiteSettings(),
+  getSchedule(),
+]);
 ---
 
 <BaseLayout
@@ -12,5 +16,5 @@ const [meta, settings] = await Promise.all([getPage('/'), getSiteSettings()]);
   description={meta.description.hr}
   detectLanguage
 >
-  <Home locale="hr" address={settings.address} />
+  <Home locale="hr" address={settings.address} entries={entries} />
 </BaseLayout>

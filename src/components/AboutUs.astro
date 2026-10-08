@@ -149,7 +149,18 @@ const t = {
               }
             </h3>
             <p class="role">{instructor.role[locale]}</p>
-            <p class="bio">{instructor.bio[locale]}</p>
+            {/*
+              The paragraph is omitted rather than filled in when there is none (MUSE-36).
+
+              `bio` became optional with the first two real instructor documents: Mina and
+              Antonio exist, they teach a real timetable, and nobody has written a
+              paragraph about either of them. A `required()` bio could only have been
+              satisfied by writing one on their behalf — the same move that put thirteen
+              invented classes on the live site. The card is already a name plus a role
+              plus a reserved 3:4 frame, all of which stand on their own, so the absence
+              costs the layout nothing.
+            */}
+            {instructor.bio && <p class="bio">{instructor.bio[locale]}</p>}
           </li>
         ))
       }

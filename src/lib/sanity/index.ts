@@ -231,12 +231,16 @@ export async function getPage(route: string): Promise<PageMetaDoc> {
 /**
  * The weekly schedule, as `ClassEntry[]` plus ids.
  *
- * Drops straight into `Schedule.astro`, which already takes its rows as a prop and only
- * defaults to `src/data/schedule.ts` — so the swap is the one-line change that file's
- * header comment predicts, and the grid, the filters, the Croatian session counts and
- * both layouts move with nothing. Not yet, though: the placeholder rows are invented
- * (MUSE-36) and the real timetable is entered in the Studio rather than migrated, which
- * is why MUSE-20 deliberately left this reader unused.
+ * Drops straight into `Schedule.astro` and `Home.astro`, which both take their rows as a
+ * prop — the one-line change `src/data/schedule.ts`'s header comment predicted, collected
+ * by MUSE-36: the grid, the filter, the Croatian session counts, the homepage doors and
+ * both layouts moved with nothing. That file is deleted and neither component has a
+ * default any more, so there is no fiction left for a build to fall back to.
+ *
+ * `minimum` is the strict default, which for this reader is the point: a `/schedule` with
+ * no rows is a page whose entire job is unperformed, so it fails the build naming the
+ * type rather than publishing an empty table. The summer-pause case is `active: false` on
+ * a slot, which hides a class and leaves the others — not an empty dataset.
  */
 export async function getSchedule({ minimum = 1 }: ListOptions = {}) {
   const rows = await runQuery<unknown>(SCHEDULE_QUERY);

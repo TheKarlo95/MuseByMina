@@ -145,8 +145,8 @@ describe('SCHEDULE_QUERY: a slot describes itself through the class it points at
     /**
      * AC1. The two visible slots point at *different* classes, which is what makes this
      * a test of the dereference rather than of a constant: `SLOT_TWO` must carry
-     * `class-two`'s name, style, level and duration, and `SLOT_ONE` must carry
-     * `class-one`'s. A projection that lost `->` would give both the same row, or none.
+     * `class-two`'s name, level and duration, and `SLOT_ONE` must carry `class-one`'s.
+     * A projection that lost `->` would give both the same row, or none.
      */
     const schedule = await from(full, () => getSchedule());
 
@@ -156,11 +156,10 @@ describe('SCHEDULE_QUERY: a slot describes itself through the class it points at
         classId: 'class-two',
         name: { hr: 'Sat B', en: 'Class B' },
         day: 'thu',
-        start: '18:00',
+        start: '18:30',
         durationMin: 90,
-        style: 'sensual',
         level: 'advanced',
-        instructor: 'Instructor C',
+        instructors: ['Instructor C'],
       },
       {
         id: 'slot-one',
@@ -169,35 +168,42 @@ describe('SCHEDULE_QUERY: a slot describes itself through the class it points at
         day: 'tue',
         start: '20:00',
         durationMin: 60,
-        style: 'traditional',
         level: 'beginner',
-        instructor: 'Instructor A',
+        instructors: ['Instructor A'],
       },
     ]);
   });
 
-  it('resolves the instructor `coalesce` down both branches', async () => {
+  it('resolves the instructors `coalesce` down both branches', async () => {
     /**
      * AC2, and the reason the fixture holds three instructors rather than two.
      *
-     * `coalesce(instructor->name, class->instructor->name)`:
+     * `coalesce(instructors[]->name, class->instructors[]->name)`:
      *
-     *   `slot-one` has no override        → `Instructor A`, class-one's regular teacher
-     *   `slot-two` overrides with C       → `Instructor C`, who teaches no class at all
+     *   `slot-one` has no override    → `[Instructor A]`, class-one's regular teacher
+     *   `slot-two` overrides with C   → `[Instructor C]`, who teaches no class at all
      *
      * With two instructors the override could resolve to the same name as the fallback
      * by coincidence and a broken `coalesce` would still look right. `Instructor C` is
-     * reachable *only* through the slot's own reference, and `Instructor B` — class-two's
-     * regular teacher — is the answer a `coalesce` with its arguments the wrong way round
-     * would give for `slot-two`.
+     * reachable *only* through the slot's own reference, and `Instructor B` — one of
+     * class-two's regular teachers — is the answer a `coalesce` with its arguments the
+     * wrong way round would give for `slot-two`.
+     *
+     * The **length** is asserted too (MUSE-36). `class-two` is taught by two people and
+     * the override by one, so an override that merged instead of replacing would answer
+     * three names, and one that was ignored would answer two.
      */
     const byId = new Map(
-      (await from(full, () => getSchedule())).map((entry) => [entry.id, entry.instructor]),
+      (await from(full, () => getSchedule())).map((entry) => [entry.id, entry.instructors]),
     );
 
-    expect(byId.get('slot-one'), 'no override: falls back to the class').toBe('Instructor A');
-    expect(byId.get('slot-two'), 'override: the slot wins').toBe('Instructor C');
-    expect([...byId.values()]).not.toContain('Instructor B');
+    expect(byId.get('slot-one'), 'no override: falls back to the class').toEqual([
+      'Instructor A',
+    ]);
+    expect(byId.get('slot-two'), 'override: the slot wins, and replaces').toEqual([
+      'Instructor C',
+    ]);
+    expect([...byId.values()].flat()).not.toContain('Instructor B');
   });
 
   it('drops a slot that is switched off', async () => {
@@ -211,8 +217,8 @@ describe('SCHEDULE_QUERY: a slot describes itself through the class it points at
 
 /* ---------------------------------------------------------------- CLASSES_QUERY */
 
-describe('CLASSES_QUERY: the class, its teacher and its photograph', () => {
-  it('projects every field, including the dereferenced instructor name', async () => {
+describe('CLASSES_QUERY: the class, its teachers and its photograph', () => {
+  it('projects every field, including the dereferenced instructor names', async () => {
     const classes = await from(full, () => getClasses());
 
     expect(classes).toEqual([
@@ -220,22 +226,23 @@ describe('CLASSES_QUERY: the class, its teacher and its photograph', () => {
         id: 'class-two',
         slug: 'class-two',
         name: { hr: 'Sat B', en: 'Class B' },
-        style: 'sensual',
         level: 'advanced',
         description: { hr: 'HR class two.', en: 'EN class two.' },
         durationMin: 90,
-        instructor: 'Instructor B',
+        // B **then** A, which is the authored order and not alphabetical (MUSE-36): a
+        // projection that sorted the list, or returned only its first member, is visible
+        // here rather than on the page.
+        instructors: ['Instructor B', 'Instructor A'],
         image: expectedImage(CLASS_TWO, 'image'),
       },
       {
         id: 'class-one',
         slug: 'class-one',
         name: { hr: 'Sat A', en: 'Class A' },
-        style: 'traditional',
         level: 'beginner',
         description: { hr: 'HR class one.', en: 'EN class one.' },
         durationMin: 60,
-        instructor: 'Instructor A',
+        instructors: ['Instructor A'],
         image: expectedImage(CLASS_ONE, 'image'),
       },
     ]);
@@ -282,12 +289,37 @@ describe('INSTRUCTORS_QUERY: name, slug, role, bio, portrait, Instagram', () => 
         name: 'Instructor C',
         slug: 'instructor-c',
         role: { hr: 'HR role C', en: 'EN role C' },
-        bio: { hr: 'HR bio C.', en: 'EN bio C.' },
-        // No photograph, which is the state every real instructor is in (MUSE-23).
+        // No bio and no photograph, which is the state every real instructor is in
+        // (MUSE-36, MUSE-23).
+        bio: undefined,
         portrait: undefined,
         instagram: undefined,
       },
     ]);
+  });
+
+  /**
+   * **An instructor with no bio is a card, not a build failure** (MUSE-36).
+   *
+   * The companion to the portrait case below, and the one that arrived with the first two
+   * real `instructor` documents: Mina and Antonio exist and teach a real timetable, and
+   * nobody has written a paragraph about either of them. A `required()` bio could only
+   * have been satisfied by writing one on their behalf.
+   *
+   * Asserted with a row on each side, which is the whole reason C goes without: with
+   * every row carrying a bio, `bio` and a typo of it both project a value everywhere and
+   * this query could not tell them apart.
+   */
+  it('accepts an instructor with no bio, and still projects the ones that have one', async () => {
+    const instructors = await from(full, () => getInstructors());
+
+    expect(instructors.filter((entry) => entry.bio === undefined).map((e) => e.id)).toEqual(
+      ['instructor-c'],
+    );
+    expect(instructors.find((entry) => entry.id === 'instructor-a')?.bio).toEqual({
+      hr: 'HR bio A.',
+      en: 'EN bio A.',
+    });
   });
 
   it('sorts by `coalesce(order, 999)` before the name', async () => {
@@ -740,7 +772,7 @@ describe('a dangling reference fails naming the document, not as a blank', () =>
   /**
    * AC3. This is the defect CLAUDE.md's whole premise is about, in its sharpest form:
    * **GROQ answers a dereference of a deleted document with `null` and HTTP 200.** Delete
-   * a class that a slot still points at and `class->name` is `null`, `class->style` is
+   * a class that a slot still points at and `class->name` is `null`, `class->level` is
    * `null`, `class->_id` is `null` — and a template that maps over the rows renders a
    * schedule row with no name, no level and no teacher. The build exits 0.
    *
@@ -765,18 +797,24 @@ describe('a dangling reference fails naming the document, not as a blank', () =>
     expect(error).not.toBeInstanceOf(SanityUnavailableError);
   });
 
-  it('fails when the class survives but its teacher has been deleted', async () => {
+  it('fails when the class survives but one of its teachers has been deleted', async () => {
     /**
-     * The subtler one, and the reason the `coalesce` needs its own case here. The slot
-     * is fine, the class is fine, every other projected field arrives — only
-     * `class->instructor->name` is `null`, so `coalesce` has nothing to return and the
-     * schedule row would publish with an empty teacher column.
+     * The subtler one, and the array made it subtler still (MUSE-36).
+     *
+     * The slot is fine, the class is fine, every other projected field arrives, and
+     * `instructors` is **not empty** — `instructors[]->name` over a deleted reference and
+     * a live one answers `[null, 'Instructor A']`. So `coalesce` returns a list, a
+     * `length` check passes, and a page joining the names would publish „ i Instructor
+     * A": a real teacher standing next to a blank, on the most-visited page on the site.
+     *
+     * The error therefore has to name the **index**, not just the field, or it sends
+     * whoever reads the log looking at a list that appears to be fine.
      */
     const run = from(danglingTeacher, () => getSchedule());
 
     await expect(run).rejects.toThrow(SanityContentError);
     await expect(run).rejects.toThrow(/slot-dangling-teacher/);
-    await expect(run).rejects.toThrow(/`instructor`/);
+    await expect(run).rejects.toThrow(/instructors\[0\]/);
   });
 });
 

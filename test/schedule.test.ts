@@ -7,8 +7,27 @@ import {
   PAGES_DEPLOY,
   type Build,
 } from './helpers/build';
-import { SCHEDULE } from '../src/data/schedule';
+import { seededSchedule, seedDocsOfType, type SeedRow } from './helpers/seed';
 import { classCount } from '../src/lib/schedule';
+
+/**
+ * **The timetable Mina supplied, as a photograph of a sheet of paper (MUSE-36).**
+ *
+ * The one literal in this file that is content rather than vocabulary, and it is here
+ * because it is the only thing in the repository that can disagree with the CMS. Every
+ * other assertion below compares the page against `sanity/seed/content.ndjson`; this
+ * compares the seed against the studio. Without it the suite would be satisfied by a
+ * page that renders the dataset perfectly, which is exactly what it was doing while
+ * thirteen invented classes were live.
+ *
+ * Four classes, two days, ninety minutes, two instructors on every one of them.
+ */
+const REAL_TIMETABLE = [
+  { day: 'mon', start: '19:30', durationMin: 90, level: 'beginner', instructors: ['Mina', 'Antonio'] },
+  { day: 'mon', start: '21:00', durationMin: 90, level: 'intermediate', instructors: ['Mina', 'Antonio'] },
+  { day: 'thu', start: '19:30', durationMin: 90, level: 'improver', instructors: ['Mina', 'Antonio'] },
+  { day: 'thu', start: '21:00', durationMin: 90, level: 'advanced', instructors: ['Mina', 'Antonio'] },
+] as const;
 
 /**
  * MUSE-6 — `/schedule`, the weekly class grid.
@@ -48,9 +67,13 @@ import { classCount } from '../src/lib/schedule';
  * The user-facing vocabulary, written out here on purpose.
  *
  * Importing these maps from `src/lib/schedule.ts` would make the locale criteria
- * untestable — the test would agree with the implementation by construction. The
- * raw `SCHEDULE` rows are imported, because *which* classes exist is placeholder
- * data headed for Sanity; what every row must render is what is being tested.
+ * untestable — the test would agree with the implementation by construction.
+ *
+ * *Which* classes exist is read off `sanity/seed/content.ndjson` instead
+ * (`./helpers/seed.ts`), because since MUSE-36 the rows are CMS content: the file the
+ * suite builds against is the file `npm run sanity:seed` imports, so "the page renders
+ * the dataset" and "the dataset is the real timetable" are two separate, checkable
+ * claims rather than one circular one.
  */
 const DAY_NAME = {
   hr: {
@@ -73,17 +96,33 @@ const DAY_NAME = {
   },
 } as const;
 
-/** Level badges are English in both locales (MUSE-6 decision) — see LEVEL_NAME. */
+/**
+ * Level badges are English in both locales (MUSE-6 decision) — see LEVEL_NAME.
+ *
+ * Four of them since MUSE-36: the studio teaches an *Improver* class between the
+ * beginner and the intermediate one, and the order here is the order the grid, the
+ * homepage doors and the Studio dropdown all take from `LEVELS`.
+ */
 const LEVEL_NAME = {
-  hr: { beginner: 'Beginner', intermediate: 'Intermediate', advanced: 'Advanced' },
-  en: { beginner: 'Beginner', intermediate: 'Intermediate', advanced: 'Advanced' },
+  hr: {
+    beginner: 'Beginner',
+    improver: 'Improver',
+    intermediate: 'Intermediate',
+    advanced: 'Advanced',
+  },
+  en: {
+    beginner: 'Beginner',
+    improver: 'Improver',
+    intermediate: 'Intermediate',
+    advanced: 'Advanced',
+  },
 } as const;
 
-/** Same three names the homepage already uses for the three flavours. */
-const STYLE_NAME = {
-  hr: { traditional: 'Tradicionalna', moderna: 'Moderna', sensual: 'Sensual' },
-  en: { traditional: 'Traditional', moderna: 'Moderna', sensual: 'Sensual' },
-} as const;
+/** The level keys, in grid order. Written out, like the names. */
+const LEVEL_KEYS = ['beginner', 'improver', 'intermediate', 'advanced'] as const;
+
+type LevelKey = (typeof LEVEL_KEYS)[number];
+type DayKey = keyof (typeof DAY_NAME)['hr'];
 
 /** AC4, verbatim from the ticket and from design system §7.2. */
 const EMPTY_STATE = {
@@ -263,9 +302,31 @@ function gridSlots(html: string, locale: Locale): Map<string, string> {
   return found;
 }
 
-/** `day|time` for every placeholder class, the key both views are checked against. */
+/** The published timetable, joined out of the seed. The oracle for everything below. */
+const ROWS: SeedRow[] = seededSchedule();
+
+/** `day|time` for every published class, the key both views are checked against. */
 function expectedKeys(): string[] {
-  return SCHEDULE.map((entry) => `${entry.day}|${entry.start}`).sort();
+  return ROWS.map((row) => `${row.day}|${row.start}`).sort();
+}
+
+/** The row at one `day|time` key. */
+function rowAt(key: string): SeedRow {
+  const found = ROWS.find((row) => `${row.day}|${row.start}` === key);
+  if (!found) throw new Error(`No seeded class at ${key}.`);
+  return found;
+}
+
+/**
+ * Every fact a rendered class has to carry: its name, its level, and each teacher.
+ *
+ * The instructors are checked one name at a time rather than as the joined phrase, so
+ * the assertion is about *who is named* and stays true of „Mina i Antonio" and of
+ * "Mina and Antonio" alike — the conjunction is `formatNames`'s business and is pinned
+ * separately below.
+ */
+function factsOf(row: SeedRow, locale: Locale): string[] {
+  return [row.name[locale], LEVEL_NAME[locale][row.level as LevelKey], ...row.instructors];
 }
 
 let build: Build;
@@ -275,6 +336,50 @@ beforeAll(async () => {
   build = buildSite(PAGES_DEPLOY);
   for (const locale of LOCALES) page[locale] = build.read(PAGE_FILE[locale]);
 }, 240_000);
+
+/**
+ * MUSE-36 — the acceptance criterion that matters more than any layout rule: every
+ * published row is a class that actually runs.
+ *
+ * Asserted against the CMS seed rather than against the page, because this is a claim
+ * about the *content*: the page can only be right if what it reads is right.
+ */
+describe('MUSE-36: the dataset is the studio timetable, not an invention', () => {
+  it('publishes exactly the four classes Mina supplied', () => {
+    expect(
+      seededSchedule().map(({ day, start, durationMin, level, instructors }) => ({
+        day,
+        start,
+        durationMin,
+        level,
+        instructors,
+      })),
+    ).toEqual(
+      [...REAL_TIMETABLE]
+        .map((row) => ({ ...row, instructors: [...row.instructors] }))
+        .sort((a, b) => `${a.day}|${a.start}`.localeCompare(`${b.day}|${b.start}`)),
+    );
+  });
+
+  it('names only instructors who exist', () => {
+    // Luka and Petra were in the invented data and are not people. The set of names the
+    // schedule can possibly show is the set of `instructor` documents, so it is checked
+    // against the documents rather than against a deny-list of the two wrong names.
+    const documented = seedDocsOfType('instructor').map((doc) => doc.name as string).sort();
+    expect(documented).toEqual(['Antonio', 'Mina']);
+
+    const shown = [...new Set(seededSchedule().flatMap((row) => row.instructors))].sort();
+    expect(shown).toEqual(documented);
+  });
+
+  it('gives every slot both of its teachers, not one of them', () => {
+    // The schema models an array because Mina and Antonio teach together — a single
+    // reference could only have published half of each row.
+    for (const row of seededSchedule()) {
+      expect(row.instructors, `${row.slotId} teachers`).toEqual(['Mina', 'Antonio']);
+    }
+  });
+});
 
 /**
  * The ticket's premise: `/schedule` is linked from the nav and the homepage hero
@@ -337,7 +442,7 @@ describe('AC1: a per-day accordion, each row carrying all four facts', () => {
   for (const locale of LOCALES) {
     it(`groups the classes by day as native <details> (${locale})`, () => {
       const blocks = detailsBlocks(main(page[locale]));
-      const days = new Set(SCHEDULE.map((e) => e.day));
+      const days = new Set(ROWS.map((row) => row.day));
 
       // One disclosure per day that has classes — not one per class, and not a
       // single disclosure wrapping everything.
@@ -357,28 +462,37 @@ describe('AC1: a per-day accordion, each row carrying all four facts', () => {
       );
     });
 
-    it(`gives each row its time, class name, level and instructor (${locale})`, () => {
+    it(`gives each row its time, class name, level and instructors (${locale})`, () => {
       const found = accordionSlots(main(page[locale]), locale);
 
-      for (const entry of SCHEDULE) {
-        const row = found.get(`${entry.day}|${entry.start}`)!;
-        const expected = [
-          STYLE_NAME[locale][entry.style],
-          LEVEL_NAME[locale][entry.level],
-          entry.instructor,
-        ];
-        for (const value of expected) {
-          expect(row, `${entry.day} ${entry.start} row is missing "${value}"`).toContain(
-            value,
-          );
+      for (const row of ROWS) {
+        const rendered = found.get(`${row.day}|${row.start}`)!;
+        for (const value of factsOf(row, locale)) {
+          expect(
+            rendered,
+            `${row.day} ${row.start} row is missing "${value}"`,
+          ).toContain(value);
         }
+      }
+    });
+
+    it(`states the length of every class, which is 90 minutes now (${locale})`, () => {
+      // 60 was the only duration that had ever existed before MUSE-36, in the data and
+      // in the page's own lede. Read off the dataset rather than restated, so the
+      // assertion is "the page says what the class is" and not "the page says 90".
+      const found = accordionSlots(main(page[locale]), locale);
+      for (const row of ROWS) {
+        expect(
+          found.get(`${row.day}|${row.start}`)!,
+          `${row.day} ${row.start} does not say how long the class is`,
+        ).toContain(`${row.durationMin} min`);
       }
     });
 
     it(`labels each day with its session count, pluralised (${locale})`, () => {
       // Design system §7.2: the collapsed row is day + session count + chevron.
       const byDay = new Map<string, number>();
-      for (const entry of SCHEDULE) byDay.set(entry.day, (byDay.get(entry.day) ?? 0) + 1);
+      for (const row of ROWS) byDay.set(row.day, (byDay.get(row.day) ?? 0) + 1);
 
       for (const block of detailsBlocks(main(page[locale]))) {
         const summary = text(/<summary\b[^>]*>([\s\S]*?)<\/summary>/.exec(block)![1]!);
@@ -413,11 +527,7 @@ describe('AC2: the same data as a day × time grid', () => {
       expect([...grid.keys()].sort()).toEqual([...accordion.keys()].sort());
       for (const [key, cell] of grid) {
         const row = accordion.get(key)!;
-        for (const value of [
-          STYLE_NAME[locale][SCHEDULE.find((e) => `${e.day}|${e.start}` === key)!.style],
-          LEVEL_NAME[locale][SCHEDULE.find((e) => `${e.day}|${e.start}` === key)!.level],
-          SCHEDULE.find((e) => `${e.day}|${e.start}` === key)!.instructor,
-        ]) {
+        for (const value of factsOf(rowAt(key), locale)) {
           expect(cell, `grid cell ${key} is missing "${value}"`).toContain(value);
           expect(row, `accordion row ${key} is missing "${value}"`).toContain(value);
         }
@@ -476,12 +586,15 @@ describe('AC3: the prerequisite is time danced, not jargon', () => {
       const prerequisites = {
         hr: {
           beginner: /bez iskustva/i,
+          // Improver sits between "never danced" and "about a year" (MUSE-36).
+          improver: /mjesec/i,
           // The ticket's own example.
           intermediate: /oko godinu dana/i,
           advanced: /godin/i,
         },
         en: {
           beginner: /no experience/i,
+          improver: /months/i,
           intermediate: /about a year/i,
           advanced: /years/i,
         },
@@ -489,12 +602,12 @@ describe('AC3: the prerequisite is time danced, not jargon', () => {
 
       for (const view of [accordionSlots, gridSlots]) {
         const found = view(main(page[locale]), locale);
-        for (const entry of SCHEDULE) {
-          const slot = found.get(`${entry.day}|${entry.start}`)!;
+        for (const row of ROWS) {
+          const slot = found.get(`${row.day}|${row.start}`)!;
           expect(
             slot,
-            `${view.name} ${entry.day} ${entry.start} (${entry.level}) states no time danced`,
-          ).toMatch(prerequisites[entry.level]);
+            `${view.name} ${row.day} ${row.start} (${row.level}) states no time danced`,
+          ).toMatch(prerequisites[row.level as keyof typeof prerequisites]);
         }
       }
     });
@@ -533,32 +646,73 @@ describe('AC4: the empty state', () => {
     }
   });
 
-  it('offers a filter for every level and style, so the state is reachable', () => {
-    // Filters by instructor are out of scope; level and style are what design
-    // system §7.5 names ("style and level filters above the schedule").
+  it('offers a filter for every level, and none for a style', () => {
+    // Level was one of the two dimensions design system §7.5 named; the other was
+    // style, and MUSE-36 deleted it — the studio has no style dimension, so the three
+    // chips filtered a field that was invented along with the rows. Asserted as an
+    // absence as well as a presence: a leftover style chip would filter on an attribute
+    // no class carries and so would match nothing at all.
     for (const locale of LOCALES) {
       const content = main(page[locale]);
-      for (const level of ['beginner', 'intermediate', 'advanced'] as const) {
+      for (const level of LEVEL_KEYS) {
         expect(content, `no ${level} filter (${locale})`).toMatch(
           new RegExp(`data-filter="level"[^>]*data-value="${level}"`),
         );
       }
-      for (const style of ['traditional', 'moderna', 'sensual'] as const) {
-        expect(content, `no ${style} filter (${locale})`).toMatch(
-          new RegExp(`data-filter="style"[^>]*data-value="${style}"`),
-        );
-      }
+      expect(content, `a style filter survives on /schedule (${locale})`).not.toContain(
+        'data-filter="style"',
+      );
     }
   });
 
-  it('has at least one filter pair that genuinely matches nothing', () => {
-    // Otherwise AC4 is unreachable and untestable in the browser. Asserted
-    // against the data rather than hoped for.
-    const pairs = new Set(SCHEDULE.map((e) => `${e.level}|${e.style}`));
-    const all = (['beginner', 'intermediate', 'advanced'] as const).flatMap((level) =>
-      (['traditional', 'moderna', 'sensual'] as const).map((style) => `${level}|${style}`),
-    );
-    expect(all.filter((pair) => !pairs.has(pair)).length).toBeGreaterThan(0);
+  it('offers a chip per level from the fixed set, not per level in the data', () => {
+    /**
+     * **What keeps the empty state reachable now that there is one filter dimension.**
+     *
+     * This used to be "at least one level+style pair matches nothing", which was true of
+     * the invented data (no advanced traditional class) and is meaningless with styles
+     * gone. The replacement is the property it was really standing in for: the chips are
+     * rendered from `LEVELS`, so the page offers one for every level **whether or not a
+     * class of that level runs**. Today all four do, so no single chip empties the
+     * schedule — but a class paused for the summer (`active: false` on its slot, which is
+     * what that field is for) leaves its chip in place with nothing behind it, and
+     * „Nema termina za odabrani filter." is what the visitor gets. That is a state Mina
+     * can reach from the Studio this afternoon, not a hypothetical.
+     *
+     * The grid's *empty cell* is the state reachable from today's data, and it is
+     * asserted separately below.
+     */
+    for (const locale of LOCALES) {
+      const offered = [
+        ...main(page[locale]).matchAll(/data-filter="level"[^>]*data-value="([^"]*)"/g),
+      ].map((m) => m[1]!);
+      expect(offered, `level chips (${locale})`).toEqual(['all', ...LEVEL_KEYS]);
+    }
+
+    // And the claim the comment rests on: the chip set does not shrink to the levels
+    // that happen to be in the dataset.
+    expect(LEVEL_KEYS.length).toBeGreaterThanOrEqual(new Set(ROWS.map((r) => r.level)).size);
+  });
+
+  it('leaves a cell of the grid empty, so the empty cell is a rendered state', () => {
+    /**
+     * Four levels across two days is eight level+day combinations and four classes, so
+     * most of that matrix is empty: selecting any one level leaves the other day's
+     * column with nothing in it, which is the grid's empty cell. Asserted against the
+     * data rather than hoped for — the same shape as the assertion it replaces.
+     *
+     * `scripts/schedule-ux.mjs` is where a browser confirms the cell is actually painted
+     * empty; a regex cannot see a filter run.
+     */
+    const taught = new Set(ROWS.map((row) => `${row.level}|${row.day}`));
+    const days = [...new Set(ROWS.map((row) => row.day))];
+    const all = LEVEL_KEYS.flatMap((level) => days.map((day) => `${level}|${day}`));
+
+    expect(days.length, 'the grid has fewer than two day columns').toBeGreaterThan(1);
+    expect(
+      all.filter((pair) => !taught.has(pair)),
+      'every level runs on every day, so no filter can empty a grid cell',
+    ).not.toEqual([]);
   });
 });
 
@@ -591,7 +745,7 @@ describe('AC5: 24-hour times and locale-correct day names', () => {
     it(`names the days in ${locale} and in no other locale`, () => {
       const content = text(main(page[locale]));
       const other: Locale = locale === 'hr' ? 'en' : 'hr';
-      const days = new Set(SCHEDULE.map((e) => e.day));
+      const days = new Set(ROWS.map((row) => row.day as DayKey));
 
       for (const day of days) {
         expect(content, `${DAY_NAME[locale][day]} missing`).toContain(DAY_NAME[locale][day]);
@@ -602,13 +756,98 @@ describe('AC5: 24-hour times and locale-correct day names', () => {
       }
     });
 
-    it(`names the levels in ${locale}, from the fixed set of three`, () => {
+    it(`names the levels in ${locale}, from the fixed set of four`, () => {
       const content = text(main(page[locale]));
-      for (const level of ['beginner', 'intermediate', 'advanced'] as const) {
+      for (const level of LEVEL_KEYS) {
         expect(content).toContain(LEVEL_NAME[locale][level]);
       }
     });
+
+    it(`writes a half-hour start as a half hour (${locale})`, () => {
+      // 19:30 is the first `:30` start the site has ever had — every invented class
+      // began on the hour, so nothing had exercised the grid's row derivation, the
+      // `<time datetime>` or `formatTime` against one.
+      const halfHours = ROWS.filter((row) => row.start.endsWith(':30'));
+      expect(halfHours.length, 'no half-hour class to check').toBeGreaterThan(0);
+
+      for (const row of halfHours) {
+        const shown = times(main(page[locale])).filter((t) => t.shown === row.start);
+        // Once in the accordion's own row, once in the grid's time gutter.
+        expect(shown.length, `${row.start} is not rendered as a time`).toBeGreaterThan(0);
+        for (const { datetime } of shown) expect(datetime).toBe(row.start);
+      }
+    });
   }
+});
+
+/**
+ * MUSE-36 — two instructors on one class, read as a sentence in each language.
+ *
+ * The schema models an array because Mina alone teaches lady styling, a class that is
+ * coming and has a different instructor set. What a visitor sees of that decision is one
+ * phrase, and a phrase joined with a comma („Mina, Antonio") or with the wrong
+ * conjunction is the kind of thing only a reader notices — MUSE-14 was found by looking.
+ */
+describe('both teachers, named together, in each language', () => {
+  const CONJOINED = { hr: 'Mina i Antonio', en: 'Mina and Antonio' } as const;
+
+  for (const locale of LOCALES) {
+    it(`joins the two names with the ${locale} conjunction`, () => {
+      const content = text(main(page[locale]));
+      expect(content, `${locale} never says "${CONJOINED[locale]}"`).toContain(
+        CONJOINED[locale],
+      );
+      // A list is not a comma-separated dump, and not the other language's word for "and".
+      expect(content).not.toContain('Mina, Antonio');
+      expect(content).not.toContain(CONJOINED[locale === 'hr' ? 'en' : 'hr']);
+    });
+
+    it(`names both teachers on every single class (${locale})`, () => {
+      for (const view of [accordionSlots, gridSlots]) {
+        const found = view(main(page[locale]), locale);
+        for (const row of ROWS) {
+          const slot = found.get(`${row.day}|${row.start}`)!;
+          for (const name of row.instructors) {
+            expect(slot, `${view.name} ${row.day} ${row.start} omits ${name}`).toContain(
+              name,
+            );
+          }
+        }
+      }
+    });
+  }
+
+  it('publishes no instructor who does not exist', () => {
+    // The two invented names the page carried until this ticket. Checked over the whole
+    // built site, not just `/schedule`, because the homepage reads the same data.
+    for (const file of build.htmlFiles()) {
+      // Script bodies survive tag-stripping as text, and a bundled module may legitimately
+      // contain any string — so they come out before the sweep, as `home.test.ts` does.
+      const content = text(
+        build.read(file).replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, ' '),
+      );
+      for (const ghost of ['Luka', 'Petra']) {
+        expect(content, `${file} still names ${ghost}`).not.toMatch(
+          new RegExp(`(?<![\\p{L}\\p{N}])${ghost}(?![\\p{L}\\p{N}])`, 'u'),
+        );
+      }
+    }
+  });
+
+  it('tells a visitor how long a class is, and does not still say 60 minutes', () => {
+    // The lede said „Satovi traju 60 minuta." on both pages. Every class is 90.
+    const lengths = new Set(ROWS.map((row) => row.durationMin));
+    expect(lengths.size, 'classes of differing length — the lede cannot state one').toBe(1);
+    const minutes = [...lengths][0]!;
+
+    expect(text(main(page.hr))).toContain(`${minutes} minuta`);
+    expect(text(main(page.en))).toContain(`${minutes} minutes`);
+    for (const locale of LOCALES) {
+      expect(text(main(page[locale])), `${locale} lede`).not.toMatch(
+        /\b60\s*(?:min|minut)/i,
+      );
+    }
+  });
 });
 
 /**

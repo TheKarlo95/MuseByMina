@@ -59,9 +59,14 @@ export const PAGES_QUERY = defineQuery(`
  * The weekly schedule, flattened into the shape `src/lib/schedule.ts` already renders.
  *
  * A slot carries the day and the time; everything else is dereferenced off the class it
- * points at, so the Tuesday and Thursday rows of one class cannot describe it
- * differently. `instructor` falls back from the slot's override to the class's regular
- * teacher — one `coalesce` here rather than a conditional in two layouts.
+ * points at, so the Monday and Thursday rows of one class cannot describe it differently.
+ *
+ * `instructors` falls back from the slot's override to the class's regular teachers — one
+ * `coalesce` here rather than a conditional in two layouts. It is an **array** on both
+ * sides since MUSE-36: Mina and Antonio teach every group class together, so a single
+ * reference published half of each row. `instructors[]->name` on an absent field is
+ * `null`, which is what makes the `coalesce` work; on an array that is present it is the
+ * names in the order they were listed, and the order is what the page renders.
  */
 export const SCHEDULE_QUERY = defineQuery(`
   *[_type == "scheduleSlot" && active == true] | order(start asc){
@@ -70,23 +75,30 @@ export const SCHEDULE_QUERY = defineQuery(`
     start,
     "classId": class->_id,
     "name": class->name{ hr, en },
-    "style": class->style,
     "level": class->level,
     "durationMin": class->durationMin,
-    "instructor": coalesce(instructor->name, class->instructor->name)
+    "instructors": coalesce(instructors[]->name, class->instructors[]->name)
   }
 `);
 
+/**
+ * The classes themselves, independently of when they run.
+ *
+ * `description` and `image` are both **optional** as of MUSE-36 and project `undefined`
+ * for a class that has neither — which is every class today: the homepage style cards
+ * were the only thing that rendered either, and they went with `class.style`. See the
+ * note on the fields in `sanity/schemaTypes/documents/studio.ts` for why neither can be
+ * required while no photography and no class copy exist.
+ */
 export const CLASSES_QUERY = defineQuery(`
   *[_type == "class"] | order(coalesce(order, 999) asc, name.hr asc){
     _id,
     "slug": slug.current,
     name{ hr, en },
-    style,
     level,
     description{ hr, en },
     durationMin,
-    "instructor": instructor->name,
+    "instructors": instructors[]->name,
     image{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop }
   }
 `);
@@ -94,16 +106,18 @@ export const CLASSES_QUERY = defineQuery(`
 /**
  * The people who teach. `/aboutus` is the only page that renders them (MUSE-23).
  *
- * `portrait` and `instagram` are both **optional** in the schema, so both project
- * `undefined` for a document that has neither — which is every real instructor today,
- * because no photography of this studio exists. The page has a placeholder frame for the
- * first and renders a plain name instead of a link for the second; see the notes on
- * `instructor` in `sanity/schemaTypes/documents/studio.ts` for why neither is required.
+ * `bio`, `portrait` and `instagram` are all **optional** in the schema, so each projects
+ * `undefined` for a document that lacks it — which is every real instructor today: no
+ * photography of this studio exists and nobody has written a bio. The page renders a
+ * placeholder frame for the portrait, the name alone where there is no Instagram, and the
+ * name and role alone where there is no paragraph; see the notes on `instructor` in
+ * `sanity/schemaTypes/documents/studio.ts` for why none of the three can be required.
  *
- * That makes them the two fields in this query a typo could hide: an absent optional field
- * and a misspelled projection of it are the same `undefined`. `test/projections.test.ts`
- * covers it by giving exactly one fixture instructor an Instagram URL and exactly one no
- * portrait at all, so there is always a row that can disagree.
+ * That makes them the three fields in this query a typo could hide: an absent optional
+ * field and a misspelled projection of it are the same `undefined`.
+ * `test/projections.test.ts` covers it by giving exactly one fixture instructor an
+ * Instagram URL and exactly one no portrait at all, so there is always a row that can
+ * disagree.
  */
 export const INSTRUCTORS_QUERY = defineQuery(`
   *[_type == "instructor"] | order(coalesce(order, 999) asc, name asc){
