@@ -35,7 +35,7 @@ import { LEVELS, LEVEL_NAME, type Level } from './schedule';
  */
 export const FORM_ENDPOINT: string = (import.meta.env.PUBLIC_FORM_ENDPOINT ?? '').trim();
 
-export type FieldName = 'name' | 'email' | 'phone' | 'level' | 'message';
+export type FieldName = 'name' | 'email' | 'phone' | 'level' | 'message' | 'package';
 
 export interface FieldDef {
   /** Submitted name, element id suffix, and the key into every copy map below. */
@@ -62,6 +62,32 @@ export const FORM_FIELDS: readonly FieldDef[] = [
   { name: 'level', kind: 'select', required: false },
   { name: 'message', kind: 'textarea', required: false, maxlength: 2000 },
 ];
+
+/**
+ * **"Which package?" — the one field `/pricing` needs and the other two pages must not
+ * grow** (MUSE-22).
+ *
+ * Deliberately *not* in `FORM_FIELDS`. `TrialForm.astro` renders it only when it is
+ * handed a non-empty `packages` list, which is only on the pricing page: on `/` and
+ * `/contact` there is nothing to choose from, and a `<select>` with one blank option is
+ * a question the visitor cannot answer. `test/pricing.test.ts` renders the form with no
+ * packages and asserts the field is absent, and it is the only thing that would catch
+ * the mistake: `test/trialform.test.ts` subtracts every string in this table from what
+ * `/contact` renders, so `packageAny` leaking onto that page is subtracted away and its
+ * suite stays green. Measured, not assumed.
+ *
+ * **Extending the existing form rather than forking it** is the ticket's instruction and
+ * the right call anyway: the validation, the honeypot, the single `role="alert"`, the
+ * `method="dialog"` that makes the no-JavaScript 405 unreachable (MUSE-15) and the
+ * failure copy that carries no diagnostics are all one implementation, and a second form
+ * would be a second copy of all of it that drifts.
+ *
+ * Optional, and first in the list. Optional because somebody can enrol without having
+ * settled on a package and should not be stopped; first because it is the thing they
+ * just clicked, and a form that opens by confirming the choice reads as continuing an
+ * action rather than starting a new one.
+ */
+export const PACKAGE_FIELD: FieldDef = { name: 'package', kind: 'select', required: false };
 
 /**
  * Formspark drops any submission whose `_gotcha` is non-empty, and the component
@@ -112,6 +138,15 @@ export interface FormCopy {
   optional: string;
   hints: Partial<Record<FieldName, string>>;
   levels: readonly LevelOption[];
+  /**
+   * The blank first option of the package `<select>` — "no package chosen".
+   *
+   * The packages themselves are `pricingTier` documents and are passed in; this is the
+   * only wording the field needs, and it is the counterpart of `levels[0]`: the one
+   * option that is not one of the things being offered, so it is the one with prose of
+   * its own.
+   */
+  packageAny: string;
   submit: string;
   sending: string;
   /** The single alert raised when validation stopped a submit. */
@@ -178,14 +213,17 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
       phone: 'Broj telefona',
       level: 'Razina',
       message: 'Poruka',
+      package: 'Paket',
     },
     optional: 'neobavezno',
     hints: {
       phone: 'Ako ti je draže da te nazovemo.',
       level: 'Ne znaš? Ostavi kako je i predložit ćemo ti.',
       message: 'Dolaziš s nekim? Imaš pitanje? Napiši nam.',
+      package: 'Možeš promijeniti ili ostaviti neodabrano.',
     },
     levels: levelOptions('hr', 'Još ne znam'),
+    packageAny: 'Bez odabranog paketa',
     submit: 'Pošalji prijavu',
     sending: 'Šaljem…',
     invalid: 'Provjeri označena polja i pošalji ponovno.',
@@ -224,14 +262,17 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
       phone: 'Phone number',
       level: 'Level',
       message: 'Message',
+      package: 'Package',
     },
     optional: 'optional',
     hints: {
       phone: 'If you would rather we called you.',
       level: 'Not sure? Leave it as it is and we will suggest one.',
       message: 'Coming with someone? Got a question? Tell us.',
+      package: 'You can change this, or leave it unset.',
     },
     levels: levelOptions('en', 'Not sure yet'),
+    packageAny: 'No package chosen',
     submit: 'Send my request',
     sending: 'Sending…',
     invalid: 'Check the marked fields and send again.',
