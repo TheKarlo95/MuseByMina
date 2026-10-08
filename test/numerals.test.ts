@@ -360,9 +360,11 @@ describe('the rule is the typography layer, not the component', () => {
  * No control on the site renders a digit we wrote, and controls are set in Jost/Inter,
  * whose figures are lining already — so the bug draws nothing today. That is exactly the
  * shape of MUSE-14, which survived the life of the project because a fallback font
- * happened to have lining figures. `/pricing` is built and waiting on content (MUSE-22);
- * the day its package `<option>` reads „55 € / mjesec" instead of a tier name, or a CTA
- * reads "Book for 55 €", the digits are inside a control and in the display face at once.
+ * happened to have lining figures. `/pricing` was built and waiting on content when this
+ * was written (MUSE-22); MUSE-59 routed it, so the sweep below now opens it, and the day
+ * its package `<option>` reads „55 € / mjesec" instead of a tier name, or a CTA reads
+ * "Book for 55 €", the digits are inside a control and in the display face at once. The
+ * prices themselves are measured at the end of this file.
  *
  * ## Why this measures glyphs rather than the computed value
  *

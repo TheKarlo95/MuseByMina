@@ -103,9 +103,9 @@ export function formatPrice(amountEur: number, locale: Locale): string {
  * `test/pricing.test.ts` asserts the two agree — so a period Mina can pick is always a
  * period the page can name, in both languages, without a second copy of the list living
  * here. (The dependency points the wrong way round compared with `LEVELS` and
- * `WEEKDAYS`, which the schema imports *from* `src/lib/`. Inverting it belongs with the
- * change that ships the page; it would mean editing `sanity/` and regenerating three
- * artefacts for no behavioural difference.)
+ * `WEEKDAYS`, which the schema imports *from* `src/lib/`. MUSE-59 shipped the page and
+ * left it inverted: it would mean editing `sanity/` and regenerating three artefacts for
+ * no behavioural difference, and the agreement is asserted either way round.)
  *
  * Wording, not content: this is the site saying "per class" in the page's language, the
  * same way `STUDIO.country` says „Hrvatska"/"Croatia". What a package costs and what it
@@ -174,11 +174,14 @@ export function packageValue(tier: { name: Record<Locale, string> }): string {
 /**
  * **Every word the pricing page says that is not a price.**
  *
- * Four strings. Deliberately four: this ticket landed with the dataset empty and no
- * prices agreed, so the component had to be built without inventing any content for it
- * — no package names, no "what's included" lines, no "most popular" claim, no lede. All
- * of that is Mina's and comes from `pricingTier`. What is left here is chrome, and each
- * of the four is a word for something structural rather than a claim about anything:
+ * Four strings. Deliberately four: MUSE-22 landed with the dataset empty and no prices
+ * agreed, so the component had to be built without inventing any content for it — no
+ * package names, no "what's included" lines, no "most popular" claim, no lede. MUSE-59
+ * then filled the dataset and routed the page **without adding a fifth**, which is the
+ * half worth noticing: the page a visitor reads says „Cjenik", two package names, two
+ * prices, two periods and one line each, and every one of those but the first came out
+ * of `pricingTier`. All of it is Mina's. What is left here is chrome, and each of the
+ * four is a word for something structural rather than a claim about anything:
  *
  *   - `title` is the page's own name.
  *   - `featuredTab` says what the tab *is* — the Studio's checkbox is „Istaknuti paket",
@@ -264,7 +267,8 @@ export interface FeaturedChoice<T extends FeaturableTier> {
  * the only hard part is knowing which document to open. It is surfaced by the caller —
  * `Pricing.astro` logs it during the build. The place it *should* also appear is the
  * Studio itself, as an async `Rule.custom` on `pricingTier.featured` that counts the
- * others; that is a schema change, and it belongs to the commit that ships the page.
+ * others; that is a schema change, and MUSE-59 shipped the page without it on purpose —
+ * see the note beside the `console.warn` in `Pricing.astro` for the trade.
  */
 export function resolveFeatured<T extends FeaturableTier>(
   tiers: readonly T[],

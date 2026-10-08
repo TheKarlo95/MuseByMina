@@ -247,15 +247,21 @@ describe('AC2: exactly one tier is featured — which the schema cannot enforce'
 /* ======================================================= the rendered component */
 
 /**
- * **`/pricing` is not a route, so the component is rendered rather than the page.**
+ * **The component, rendered on its own — for the datasets one seed cannot hold at once.**
  *
- * This commit deliberately ships no `src/pages/pricing.astro`: there are no real prices,
- * the dataset holds no `pricingTier` document, and `getPricingTiers()` fails the build
- * naming the type when there are none — which on `main` would stop every deploy *and*
- * the scheduled rebuild that landed in MUSE-21. So there is nothing to build and nothing
- * for `test/helpers/preview.ts` to serve.
+ * MUSE-22 wrote this half because there was no route: no real prices, no `pricingTier`
+ * document, and `getPricingTiers()` fails the build naming the type when there are none,
+ * which on `main` would have stopped every deploy and the scheduled rebuild MUSE-21
+ * added. MUSE-59 routed the page, and the `dist` assertions at the end of this file are
+ * the half that was missing.
  *
- * The two ways to test it anyway, and why this is the one:
+ * **This half stays, and not out of sentiment.** Four of its subjects cannot exist in
+ * `content/seed.ndjson`, because that file is imported into Mina's dataset: two tiers
+ * ticked as featured, no tier ticked, a third tier, and a `drafts.`-prefixed document
+ * that must not reach the page. Those are properties of *the component under a dataset*,
+ * and the only way to have one is to render it against a fixture.
+ *
+ * The two ways to do that, and why this is the one:
  *
  *   - **A throwaway route inside the test's own build.** Rejected. A suite cannot start
  *     its own build (`test/isolation.test.ts`, rule 4) and `astroBuild` runs in the
@@ -273,10 +279,10 @@ describe('AC2: exactly one tier is featured — which the schema cannot enforce'
  * no asset pipeline, so the component's scoped `<style>` is not in the output: nothing
  * below measures a colour, a border, a computed style or a layout. Those are checked
  * three other ways — `npm run ds` on the source, the two assertions on the style block
- * at the end of this file, and a screenshot taken by hand against a temporary local
- * route (recorded in the pull request). When `/pricing` becomes a route, the browser
- * assertions `test/trialform.test.ts` makes about `/contact` are what should cover it,
- * and these should stay as they are: they are about the *content* of the page.
+ * further down this file, and, now that `/pricing` is a route (MUSE-59), the browser:
+ * `npm run a11y` audits it in both locales and both themes, and `test/numerals.test.ts`
+ * screenshots its prices against the same element with old-style figures forced, which
+ * is the one rule here no source scan can settle.
  *
  * Every assertion is on the HTML a visitor's browser would receive, not on a value the
  * component returned.
