@@ -45,13 +45,24 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
 **None of the three browser gates needs a server, and none of them will attach to one.**
 Run `npm run build`, then run the gate: it serves `dist` from an in-process host on a port
 the kernel picks, and prints the fingerprint of the build it measured before the first
-result. `a11y` takes `ROUTES` and `shots` takes `ROUTE`/`OUT`, so either can be pointed at
-one page:
+result. `shots` takes `ROUTE`/`OUT`, so it can be pointed at one page:
 
 ```bash
-ROUTES=/,/en,/schedule,/en/schedule npm run a11y
+npm run a11y                                                 # every page in dist, both themes
 ROUTE=/schedule OUT=/tmp/muse-shots/schedule npm run shots   # reports h-overflow at 390px
 ```
+
+**`a11y` takes no route list**, and that is MUSE-55. It used to take `ROUTES`, defaulting
+to the two homepages, with a list in `ci.yml` that said "adding a page → add it" — so
+`/contact`'s trial form had axe coverage only because somebody remembered, and the error
+page had none at all and *could not*: `site.url('/404')` spells `/MuseByMina/404/`, which
+the host answers 404 for because it is not a directory, and the gate asserted 200 for
+every page. Both halves were right. So the set is now read off the build, and each page
+arrives carrying the URL the host serves it at **and the status the host answers** — both
+from `resolveRequest`. A page whose correct answer is not 200 is audited at it; a page
+answering anything *other* than its expected status is still a hard failure. The error
+page has no locale in its path and is bilingual, so it is audited once per locale, at
+`/MuseByMina/404` (200) and `/MuseByMina/en/404` (404).
 
 That is MUSE-52, and it is not a convenience. `astro preview` daemonises under this
 environment and **silently reuses a daemon on another port**; with several worktrees live

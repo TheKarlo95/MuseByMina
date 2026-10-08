@@ -1,16 +1,19 @@
 import { createHash } from 'node:crypto';
-import { cpSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { cpSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
+  auditTargets,
   fingerprint,
   openSite,
+  resolveRequest,
   serveBuild,
   serveDist,
   verifyServedBuild,
+  type AuditTarget,
   type DistServer,
 } from '../scripts/dist-origin.mjs';
 import { buildPreview, PREVIEW_BASE } from './helpers/preview';
@@ -366,6 +369,191 @@ describe('an explicit ORIGIN is checked against the local build', () => {
 });
 
 /**
+ * MUSE-55 — what the accessibility gate audits is read off the build, not listed.
+ *
+ * `npm run a11y` ran over `ROUTES`: two homepages by default and a comma-separated list
+ * in `ci.yml` whose own comment said "adding a page → add it". The error page was never
+ * on it and **could not be**, for two reasons that were each individually correct —
+ * `site.url('/404')` spells the slashed `/MuseByMina/404/`, which the host answers 404
+ * for because it is not a directory (MUSE-9), and the gate asserted 200 for everything,
+ * which it had been hardened into after reporting "8/8 clean" against a stale server that
+ * was 404ing every route.
+ *
+ * So the page no happy path links to, that every lost visitor meets, and that MUSE-38 had
+ * just turned into a bilingual page with two `<h1>`s and two exits, was the one page the
+ * gate never looked at. Its author audited it by hand and said so.
+ *
+ * Both halves are fixed here rather than one: the **set** comes off the output tree, and
+ * each page carries the **spelling** and the **status** the host model gives it. The bar
+ * the tests below have to clear is the ticket's — add a page to the build and it is
+ * audited with nothing edited; serve a page at an unexpected status and the run still
+ * fails loudly.
+ */
+describe('the audited set is derived from the build', () => {
+  let outDir = '';
+  const base = `${PREVIEW_BASE}/`;
+  /** The site's own locales. Spelled out, not imported from `src/lib/i18n.ts`: a copy
+   * here would be a second list, and `test/browserlocale.test.ts` already pins the one
+   * the gate passes in against that module. */
+  const LOCALES = ['hr', 'en'];
+  let targets: AuditTarget[] = [];
+
+  beforeAll(() => {
+    outDir = buildPreview('origin-targets');
+    targets = auditTargets(outDir, base, { locales: LOCALES, defaultLocale: 'hr' });
+  }, 240_000);
+
+  /** Every `.html` file in a build, as `/`-separated paths relative to it. */
+  function htmlFiles(dir: string): string[] {
+    const walk = (prefix: string): string[] =>
+      readdirSync(join(dir, prefix), { withFileTypes: true }).flatMap((entry) => {
+        const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+        return entry.isDirectory() ? walk(rel) : [rel];
+      });
+    return walk('').filter((rel) => rel.endsWith('.html')).sort();
+  }
+
+  it('audits every page the build contains, the error page included', () => {
+    // The first acceptance criterion, and the one that cannot be satisfied by a list:
+    // what gets audited is exactly what got built. `/contact` was absent from the gate
+    // for the life of MUSE-18 — axe had never seen the trial form's `<select>` — and
+    // nothing but this says it cannot go absent again.
+    const files = htmlFiles(outDir);
+    expect(files).toContain('404.html');
+    expect(files.length).toBeGreaterThan(5);
+    expect([...new Set(targets.map((t) => t.file))].sort()).toEqual(files);
+  });
+
+  it('requests the error page unslashed, which is the only spelling that reaches it', () => {
+    // Not a workaround for the trailing slash — a fact about GitHub Pages, recorded off
+    // the live deploy and pinned in `test/urls.test.ts`: `/MuseByMina/404` resolves
+    // extensionlessly to `404.html`, and `/MuseByMina/404/` does not, because it is not
+    // a directory. The slash rule is right and is untouched; what moved is that the
+    // spelling travels with the page instead of being assumed.
+    const paths = targets.map((t) => t.path);
+    expect(paths).toContain(`${base}404`);
+    expect(paths).not.toContain(`${base}404/`);
+  });
+
+  it('audits the bilingual error page once per locale, each at its own status', () => {
+    // The error page has no locale in its path and is bilingual by construction
+    // (MUSE-38), so there is no one locale to pin it to. Both are audited, each at the
+    // URL a visitor of that language actually arrives at — and `/en/404` is the live
+    // instance of "a page whose correct response is not 200", without which the
+    // expected-status machinery would be theory.
+    const error = targets.filter((t) => t.file === '404.html');
+    expect(error.map((t) => [t.route, t.path, t.status])).toEqual([
+      ['/404', `${base}404`, 200],
+      ['/en/404', `${base}en/404`, 404],
+    ]);
+  });
+
+  it('takes each status from the host model rather than expecting 200', () => {
+    // The assertion that must not be weakened into must-be-anything: every target states
+    // a status, and it is the one `resolveRequest` gives that URL.
+    expect(targets.every((t) => t.status === 200 || t.status === 404)).toBe(true);
+    expect(targets.filter((t) => t.status !== 200)).toHaveLength(1);
+    for (const target of targets) {
+      expect(resolveRequest(outDir, base, target.path), target.path).toEqual(
+        target.status === 200
+          ? { status: 200, file: target.file }
+          : { status: target.status, file: target.file },
+      );
+    }
+  });
+
+  it('spells a directory page with its slash and nothing else', () => {
+    const byRoute = new Map(targets.map((t) => [t.route, t.path]));
+    expect(byRoute.get('/')).toBe(base);
+    expect(byRoute.get('/en')).toBe(`${base}en/`);
+    expect(byRoute.get('/en/schedule')).toBe(`${base}en/schedule/`);
+    // And a route string is still what the locale pin and the log are built from
+    // (MUSE-48), so every target has to carry one.
+    expect(targets.every((t) => t.route.startsWith('/'))).toBe(true);
+  });
+
+  it('audits a page added to the build with no list edited', () => {
+    // The third acceptance criterion. A page under `src/pages/` becomes a directory with
+    // an `index.html` in the output, so this adds one to a copy of the tree rather than
+    // building a throwaway route — the derivation is about the output, and a build is the
+    // one thing a suite here may not start for itself.
+    const grown = claimOutDir('origin-targets-grown');
+    cpSync(outDir, grown, { recursive: true });
+    mkdirSync(join(grown, 'newpage'), { recursive: true });
+    writeFileSync(
+      join(grown, 'newpage/index.html'),
+      '<!doctype html><html lang="hr"><title>new</title><body><h1>new</h1></body></html>',
+    );
+
+    const after = auditTargets(grown, base, { locales: LOCALES, defaultLocale: 'hr' });
+    expect(after.map((t) => t.route)).toContain('/newpage');
+    expect(after.find((t) => t.route === '/newpage')?.path).toBe(`${base}newpage/`);
+    expect(after).toHaveLength(targets.length + 1);
+  });
+
+  it('refuses to derive a target for a URL nothing in the build answers', () => {
+    // The derivation's own failure mode: a spelling that resolves to a redirect or to
+    // nothing would be audited as a 301 hop or as a stub, which is how this class of bug
+    // stays invisible. An empty tree has no `404.html` either, so nothing can stand in.
+    const empty = claimOutDir('origin-targets-empty');
+    expect(auditTargets(empty, base, { locales: LOCALES, defaultLocale: 'hr' })).toEqual([]);
+  });
+
+  it('still compares the served bytes for a page whose status is not 200', async () => {
+    const server = await serveDist(outDir, base);
+    try {
+      const report = await verifyServedBuild({
+        origin: server.origin,
+        base,
+        outDir,
+        routes: targets,
+      });
+      // MUSE-52's guarantee is untouched by the status flexibility: the error page's URL
+      // is in the compared set, so a server holding a different 404 fails before a
+      // browser is opened.
+      expect(report.checked).toContain(`${base}en/404`);
+      expect(report.checked).toContain(`${base}404`);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('fails loudly when a page answers a status this build does not give it', async () => {
+    // The second acceptance criterion's other half. A tree with no error page answers
+    // 404-with-no-body where this build answers 200 with `404.html` — the same shape as
+    // the stale server that once reported "8/8 clean", and it must still be a hard
+    // failure now that 404 is a legitimate expectation elsewhere in the set.
+    const noErrorPage = claimOutDir('origin-targets-no-404');
+    cpSync(outDir, noErrorPage, {
+      recursive: true,
+      // A filter, not a deletion: nothing under `test/` may delete anything (MUSE-34).
+      filter: (from) => relative(outDir, from) !== '404.html',
+    });
+    expect(statSync(join(noErrorPage, 'index.html')).isFile()).toBe(true);
+
+    const server = await serveDist(noErrorPage, base);
+    try {
+      const error = await verifyServedBuild({
+        origin: server.origin,
+        base,
+        outDir,
+        routes: targets,
+      }).then(
+        () => null,
+        (e: unknown) => e as Error,
+      );
+      expect(error, 'a server missing the error page must not verify').toBeTruthy();
+      expect(error!.message).toContain(`${base}404`);
+      // Naming both sides, not just the fact of a mismatch.
+      expect(error!.message).toContain('404.html');
+      expect(error!.message).toContain('MUSE-52');
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+/**
  * The guards. The module above is only worth its tests if the scripts actually use it,
  * and if nothing puts the daemon back.
  */
@@ -381,11 +569,20 @@ describe('nothing can go back to trusting whatever is at ORIGIN', () => {
    * matches the module and none of its callers. `test/browserlocale.test.ts` asserts the
    * same set from the other side, and that Playwright stays out of these scripts, which is
    * what keeps the two discoveries describing the same files.
+   *
+   * Matched as an **import**, not as a mention — the same correction
+   * `test/browserlocale.test.ts` already carries, for the same reason and in the other
+   * direction. This read `includes('browser-checks.mjs')`, so a prose reference to that
+   * module anywhere under `scripts/` enrolled the file as a browser gate; MUSE-55 put one
+   * in `scripts/dist-origin.mjs` (explaining why it may *not* import it) and the guards
+   * below promptly failed on the module that resolves `ORIGIN` for everybody. A discovery
+   * that reads words rather than syntax is the shape MUSE-34 replaced wholesale.
    */
   function browserScripts(): string[] {
+    const imports = /from ['"][^'"]*browser-checks\.mjs['"]/;
     return readdirSync(SCRIPTS)
       .filter((f) => f.endsWith('.mjs') && f !== 'browser-checks.mjs')
-      .filter((f) => readFileSync(join(SCRIPTS, f), 'utf8').includes('browser-checks.mjs'))
+      .filter((f) => imports.test(readFileSync(join(SCRIPTS, f), 'utf8')))
       .sort();
   }
 
@@ -435,6 +632,34 @@ describe('nothing can go back to trusting whatever is at ORIGIN', () => {
     expect(commands).toContain('npm run a11y');
     expect(commands).not.toContain('astro preview');
     expect(commands).not.toContain('wait-on');
+  });
+
+  it('hands the audit no route list in CI either (MUSE-55)', () => {
+    // The list that used to live in this job said "adding a page → add it", and the page
+    // it never contained was the error page — which could not be reached at the spelling
+    // a route list produces. The audited set is read off `dist` now, so a list here would
+    // be a *narrowing* of it: eight routes named by hand, silently replacing ten derived
+    // from the build. Comments stripped, so the step that explains why there is no list
+    // does not read as one.
+    const ci = readFileSync(join(ROOT, '.github/workflows/ci.yml'), 'utf8');
+    const a11y = ci.slice(ci.indexOf('\n  a11y:'));
+    const job = a11y.slice(0, a11y.indexOf('\n  sanity:'));
+    const commands = job
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n');
+    expect(commands).not.toContain(`${'ROU'}TES`);
+  });
+
+  it('lets the audit take its set from the build and from nowhere else', () => {
+    // The gate's own half of the rule above. A route list read from the environment is a
+    // list wherever it is written down, and one that *defaults* to two homepages is worse
+    // than one that is wrong — `npm run a11y` reported "all pages clean" locally while
+    // auditing two of nine for the life of this script.
+    const source = readFileSync(join(SCRIPTS, 'a11y.mjs'), 'utf8');
+    expect(source).toContain('auditTargets');
+    expect(source).not.toContain(`process.env.${'ROUTES'}`);
+    expect(source).not.toContain(`process.env.${'ROUTE'}`);
   });
 
   it('leaves no way to start a preview daemon by hand either', () => {
