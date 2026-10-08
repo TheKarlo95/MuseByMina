@@ -2,6 +2,7 @@ import { createClient, type SanityClient } from '@sanity/client';
 
 import { SanityUnavailableError } from './decode';
 import { FIXTURE_ENV, fixturePath, runFixtureQuery } from './fixture';
+import { requireQueryParameters } from './params';
 
 /**
  * The one Sanity client, and the one place a network call is made.
@@ -173,6 +174,13 @@ function announce(fixture: string | undefined): void {
  * silent nulls and no named error — which is why that is now an assertion rather than a
  * sentence (`test/sanity.test.ts`, "lets a page import the read path, but not the modules
  * inside it").
+ *
+ * **The parameter check is in front of the branch, not inside either arm (MUSE-51).** A
+ * query referencing a parameter the caller did not supply cannot be answered by anything,
+ * and the two paths used to fail at it differently — HTTP 400 live, `[]` from `groq-js`,
+ * which `requireDocuments` then mislabelled "an empty dataset, not a broken query" and
+ * `minimum: 0` accepted in silence. Checked here, both paths fail with one error class and
+ * one message, before a source is even chosen. `./params.ts` has the long note.
  */
 export async function runQuery<T>(
   query: string,
@@ -180,6 +188,7 @@ export async function runQuery<T>(
 ): Promise<T> {
   const fixture = fixturePath();
   announce(fixture);
+  requireQueryParameters(query, params);
   if (fixture !== undefined) return runFixtureQuery<T>(query, params, fixture);
 
   try {

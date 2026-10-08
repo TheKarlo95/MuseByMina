@@ -394,6 +394,22 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   stayed green while the Studio could not be built at all. `styled-components` is in
   `devDependencies` for that reason — it is a peer dependency of `sanity` and so is
   installed regardless, but `sanity build` preflights *declarations*, not resolution.
+- **A query may not run without the parameters it references** (MUSE-51), and the check is
+  in front of *both* read paths — `requireQueryParameters` in `src/lib/sanity/params.ts`,
+  called by `runQuery` before it chooses a source. Omit `$now` and the live API refuses the
+  request (HTTP 400 `queryParseError`) while `groq-js` answers `[]`, so one mistake used to
+  surface as two error classes — and offline it surfaced *only* because `minimum` defaults
+  to 1, which made `requireDocuments` report it as "an empty dataset, not a broken query".
+  With `minimum: 0`, which `getEvents` explicitly supports, it was silent and published a
+  blank page. **The count check cannot be the instrument here**: it fires on a legitimate
+  zero-document result and says nothing about a broken query, so the parameters are checked
+  before the query runs, which is the only point at which the two cases are distinguishable.
+  `queryParameters` scans the query text rather than parsing it, because `groq-js` is a
+  devDependency the live path must not need — and `test/projections.test.ts` pins the scanner
+  to the real parser, query by query, so a parameter shape it cannot see is a red test.
+  **The register of known `groq-js`-vs-live divergences is the header of
+  `src/lib/sanity/fixture.ts`**; there are two, both found by someone deliberately looking.
+  Add the third there.
 - **A missing or malformed document fails the build naming itself** — `_id`, type and
   field path — through `src/lib/sanity/decode.ts`. "Unreachable", "empty" and "malformed"
   are three different error types on purpose: much of the dataset is still empty, so
