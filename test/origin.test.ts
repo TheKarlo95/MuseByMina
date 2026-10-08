@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   fingerprint,
   openSite,
+  serveBuild,
   serveDist,
   verifyServedBuild,
   type DistServer,
@@ -183,6 +184,26 @@ describe('a check serves its own build rather than attaching to a daemon', () =>
     await expect(
       openSite({ routes: ROUTES, env: env({ DIST: empty }), log: quiet }),
     ).rejects.toThrow(/npm run build/);
+  });
+
+  it('is also what `npm run preview` is now, so no daemon is left behind', async () => {
+    // `scripts/preview.mjs` calls `serveBuild` directly. The orphaned
+    // `astro.mjs preview --json` daemons MUSE-35's review found were started by hand, not
+    // by a check — so retiring it only inside the gates would leave the supply intact.
+    const lines: string[] = [];
+    const site = await serveBuild({
+      env: env({ DIST: ours }),
+      log: (line: string) => lines.push(line),
+    });
+    servers.push({ origin: site.origin, port: 0, close: site.close });
+
+    expect(site.origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(site.base).toBe(`${PREVIEW_BASE}/`);
+    expect(lines.join('\n')).toContain(fingerprint(ours).hash);
+
+    const page = await fetch(`${site.origin}${site.base}`);
+    expect(page.status).toBe(200);
+    expect(await page.text()).not.toContain('another branch');
   });
 });
 
@@ -401,6 +422,21 @@ describe('nothing can go back to trusting whatever is at ORIGIN', () => {
     expect(commands).toContain('npm run a11y');
     expect(commands).not.toContain('astro preview');
     expect(commands).not.toContain('wait-on');
+  });
+
+  it('leaves no way to start a preview daemon by hand either', () => {
+    // The stale daemons that caused this were started by `npm run preview`, not by a
+    // check. Retiring `astro preview` from the gates and leaving the command that
+    // produces it would fix the symptom and keep the supply.
+    const scripts = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts as
+      | Record<string, string>
+      | undefined;
+    expect(scripts?.preview).toBe('node scripts/preview.mjs');
+    for (const [name, command] of Object.entries(scripts ?? {})) {
+      expect(command, name).not.toContain('astro preview');
+    }
+    // And it must not name a port, for the same reason the gates must not.
+    expect(readFileSync(join(SCRIPTS, 'preview.mjs'), 'utf8')).not.toContain('4321');
   });
 
   it('keeps one model of the static host, shared with the suite', () => {

@@ -483,6 +483,59 @@ function requireBuild(outDir, base) {
 }
 
 /**
+ * Where `dist` is and what it is mounted under, for one invocation.
+ *
+ * @param {Record<string, string | undefined>} env
+ */
+function location(env) {
+  const distArg = env.DIST ?? DEFAULT_DIST;
+  return {
+    base: `${(env.BASE ?? DEFAULT_BASE).replace(/\/+$/, '')}/`,
+    dist: isAbsolute(distArg) ? distArg : resolve(ROOT, distArg),
+  };
+}
+
+/**
+ * @param {string} origin
+ * @param {string} base
+ * @param {() => Promise<void>} close
+ * @returns {Site}
+ */
+function siteAt(origin, base, close = async () => {}) {
+  return {
+    origin,
+    base,
+    url: (route) => `${origin}${pagePath(base, route)}`,
+    close,
+  };
+}
+
+/**
+ * Serve the local build, on a port of its own, and say which build it is.
+ *
+ * This is also `npm run preview`. It replaces `astro preview`, which is where the
+ * orphaned daemons came from in the first place — MUSE-35's review found three of them
+ * still listening, parented to pid 3158, from *manual* invocations — and which is not a
+ * correct model of the host anyway: it answers both `/MuseByMina` and `/MuseByMina/` with
+ * 200 and never redirects, so a trailing-slash regression is invisible to anyone checking
+ * by hand (MUSE-9). `resolveRequest` above is the model `test/urls.test.ts` pins.
+ *
+ * @param {object} [args]
+ * @param {Record<string, string | undefined>} [args.env]
+ * @param {(line: string) => void} [args.log]
+ * @returns {Promise<Site>}
+ */
+export async function serveBuild({ env = process.env, log = console.log } = {}) {
+  const { base, dist } = location(env);
+  requireBuild(dist, base);
+  const server = await serveDist(dist, base);
+  const build = fingerprint(dist);
+  log(`build   ${build.hash}  ${build.files} files  ${dist}`);
+  log(`origin  ${server.origin}${base}  — served in-process from that build`);
+  return siteAt(server.origin, base, server.close);
+}
+
+/**
  * Resolve the site a browser check is about to measure, and say in the log which build
  * it is.
  *
@@ -500,33 +553,15 @@ function requireBuild(outDir, base) {
  * @returns {Promise<Site>}
  */
 export async function openSite({ routes = [], env = process.env, log = console.log } = {}) {
-  const base = `${(env.BASE ?? DEFAULT_BASE).replace(/\/+$/, '')}/`;
-  const distArg = env.DIST ?? DEFAULT_DIST;
-  const dist = isAbsolute(distArg) ? distArg : resolve(ROOT, distArg);
-
-  /** @param {string} origin */
-  const siteAt = (origin, close = async () => {}) => ({
-    origin,
-    base,
-    url: (/** @type {string} */ route) => `${origin}${pagePath(base, route)}`,
-    close,
-  });
-
+  const { base, dist } = location(env);
   const given = env.ORIGIN?.replace(/\/+$/, '');
 
-  if (given === undefined || given === '') {
-    requireBuild(dist, base);
-    const server = await serveDist(dist, base);
-    const build = fingerprint(dist);
-    log(`build   ${build.hash}  ${build.files} files  ${dist}`);
-    log(`origin  ${server.origin}${base}  — served in-process from that build`);
-    return siteAt(server.origin, server.close);
-  }
+  if (given === undefined || given === '') return serveBuild({ env, log });
 
   if (env.UNVERIFIED_ORIGIN) {
     log(`origin  ${given}${base}  — NOT VERIFIED (UNVERIFIED_ORIGIN is set)`);
     log('        whatever this reports is about whichever build that server holds.');
-    return siteAt(given);
+    return siteAt(given, base);
   }
 
   requireBuild(dist, base);
@@ -536,7 +571,7 @@ export async function openSite({ routes = [], env = process.env, log = console.l
     `origin  ${given}${base}  — verified byte-identical to that build on ` +
       `${checked.checked.length} URL(s)`,
   );
-  return siteAt(given);
+  return siteAt(given, base);
 }
 
 /**

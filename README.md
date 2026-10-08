@@ -26,6 +26,7 @@ Astro inlines them.
 ```bash
 npm run dev        # http://localhost:4321/MuseByMina/
 npm run build
+npm run preview    # dist, served the way GitHub Pages serves it — not `astro preview`
 npm run typecheck  # astro check
 npm test           # vitest — asserts on real build output
 npm run ds         # design-system compliance
@@ -73,6 +74,14 @@ ORIGIN=https://thekarlo95.github.io UNVERIFIED_ORIGIN=1 npm run a11y
 ```
 
 and the log says out loud that the result is not pinned to a local build.
+
+`npm run preview` is the same in-process host, kept running — **not `astro preview`**,
+which is what produced the stale daemons in the first place (MUSE-35's review found three
+still listening from manual invocations, outliving the sessions that started them) and
+which is not a model of the host anyway: it answers both `/MuseByMina` and `/MuseByMina/`
+with 200 and never redirects, so a trailing-slash regression is invisible to anyone
+checking a page by hand. The replacement 301s the unslashed spelling, exactly as Pages
+does, and dies with Ctrl-C.
 
 ## The design system
 

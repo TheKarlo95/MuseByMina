@@ -27,6 +27,7 @@ Header and footer sit on a band that is plum-ink in *both* themes, so they use t
 ```bash
 npm run dev        # localhost:4321/MuseByMina/
 npm run build
+npm run preview    # dist, served the way Pages serves it — not `astro preview` (MUSE-52)
 npm run typecheck  # astro check
 npm test           # vitest — builds the site and asserts on dist
 npm run a11y       # axe, every page, both themes — serves dist itself
@@ -120,9 +121,13 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   `test/helpers/preview.ts` has always used — which is why the vitest suite was never
   exposed to this and the scripts were. `astro preview` daemonises here and **silently
   reuses a daemon on another port**, so `npm run a11y` audited a different agent's
-  worktree and reported every route clean in both themes. Do not put the daemon back; the
-  CI step starts none either and `test/origin.test.ts` fails if one reappears in the job or
-  if any browser script reads `ORIGIN` or names a port. `ORIGIN` is still how you point a
+  worktree and reported every route clean in both themes. **`npm run preview` is that same
+  in-process host now, not `astro preview`** — the stale daemons were started by hand, so
+  retiring it only inside the gates would have left the supply intact — and it 301s the
+  unslashed spelling the way Pages does, which `astro preview` never did. Do not put the
+  daemon back; the CI step starts none either and `test/origin.test.ts` fails if one
+  reappears in the job, in an npm script, or if any browser script reads `ORIGIN` or names
+  a port. `ORIGIN` is still how you point a
   check at a real server, and it is now **verified**: every URL the run will measure is
   compared byte for byte against the local `dist` and a difference fails naming both
   digests. `UNVERIFIED_ORIGIN=1` is the opt-out for the deployed site and the log says so.

@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "astro dev",
     "build": "node scripts/check-sanity.mjs && astro check && astro build",
-    "preview": "astro preview",
+    "preview": "node scripts/preview.mjs",
     "typecheck": "astro check",
     "test": "vitest run",
     "a11y": "node scripts/a11y.mjs",
