@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-import { astroBuild } from './scratch';
+import { astroBuild, buildLog } from './scratch';
 
 /**
  * Where a build lands is not this module's business any more — `./scratch.ts` mints the
@@ -31,6 +31,14 @@ export const APEX_DEPLOY: Deploy = {
 export interface Build {
   deploy: Deploy;
   outDir: string;
+  /**
+   * Everything `astro build` printed while producing this output, both streams.
+   *
+   * For an acceptance criterion about what the build *says* rather than what it emits.
+   * MUSE-46's inert-`page`-document warning is one: it changes no byte of `dist`, so the
+   * only honest place to read it is the log of a real build (`./scratch.ts`).
+   */
+  log: string;
   /** The site root as a browser sees it, no trailing slash. */
   origin: string;
   read(file: string): string;
@@ -77,6 +85,7 @@ export function buildSite(deploy: Deploy, env: NodeJS.ProcessEnv = {}): Build {
   return {
     deploy,
     outDir,
+    log: buildLog(outDir),
     origin: `${deploy.SITE.replace(/\/$/, '')}${basePath}`,
     read: (file) => readFileSync(join(outDir, file), 'utf8'),
     has: (file) => existsSync(join(outDir, file)),

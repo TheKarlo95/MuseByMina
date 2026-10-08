@@ -4,9 +4,11 @@ import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { LOCALE_HTML_LANG } from '../src/lib/i18n';
+import { resolveRequest } from './helpers/serve';
 import {
   alternates,
   APEX_DEPLOY,
+  basePath,
   buildSite,
   declaredAlternates,
   groupFor,
@@ -318,6 +320,89 @@ describe('AC3: /llms.txt', () => {
 
   it('is markdown with a title, as the llms.txt format requires', () => {
     expect(pages.read('llms.txt')).toMatch(/^#\s+\S/m);
+  });
+
+  /* ------------------------------------------------------------------ MUSE-46 */
+
+  /**
+   * **The other direction, which nothing asserted: `llms.txt` lists nothing extra.**
+   *
+   * Everything above walks `ROUTES` — the list derived from `src/pages/` — and looks the
+   * route up in `llms.txt`. So a route declared in `src/lib/pages.ts` with **no file
+   * behind it** published a link and broke nothing: `llms.txt` is generated from the
+   * registry, the registry was never compared back, and the page list these tests build
+   * from could not see an entry that has no file. MUSE-13 closed exactly this for
+   * `nav.ts` and left it open here, and `llms.txt` is published *for machines* —
+   * including this project's own QA agents — so a dead link in it is worse than a
+   * missing entry, not better.
+   *
+   * Resolved through the **model of GitHub Pages** (`scripts/dist-origin.mjs`, the same
+   * resolver `test/urls.test.ts` and `npm run preview` use) rather than by checking a
+   * file exists. A URL in this file is a promise about what the deploy answers, and the
+   * difference between a 200 and a 301 is the difference between a page and a redirect
+   * (MUSE-9) — which a file-existence check cannot see at all.
+   */
+  function llmsLinks(build: Build): string[] {
+    return [...build.read('llms.txt').matchAll(/\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/g)].map(
+      (match) => match[1]!,
+    );
+  }
+
+  /** What the deploy answers for a URL `llms.txt` advertises. */
+  function answerFor(build: Build, url: string): { status: number; file?: string } {
+    return resolveRequest(build.outDir, basePath(build), new URL(url).pathname);
+  }
+
+  it('found links to check, in both deploy targets', () => {
+    // The positive control. Every assertion below is satisfiable by a file with no links
+    // in it, and this file's subject is a guard that reads as covering both directions
+    // while reaching one (MUSE-37, MUSE-42).
+    for (const build of [pages, apex]) {
+      expect(llmsLinks(build).length, build.deploy.SITE).toBeGreaterThan(ROUTES.length);
+    }
+  });
+
+  it('links to nothing the deploy does not serve with a 200', () => {
+    for (const build of [pages, apex]) {
+      const dead = llmsLinks(build)
+        .map((url) => ({ url, ...answerFor(build, url) }))
+        .filter(({ status }) => status !== 200)
+        .map(({ url, status }) => `${url} → ${status}`);
+
+      expect(
+        dead,
+        `llms.txt advertises ${dead.length} URL(s) the deploy does not answer. This is ` +
+          `published for machines, so a dead link here is followed rather than ignored. ` +
+          `A route in ROUTES (src/lib/pages.ts) with no file under src/pages/ produces ` +
+          `exactly this; so does a hand-built URL missing its trailing slash (MUSE-9).`,
+      ).toEqual([]);
+    }
+  });
+
+  /**
+   * And the set equality the ticket asks for, stated over *page* URLs.
+   *
+   * A page URL on this site ends in a slash and a published file does not —
+   * `trailingSlash: 'always'` with `build.format: 'directory'` (CLAUDE.md), which is why
+   * `robots.txt` and `sitemap-index.xml` separate themselves out without a list of
+   * exemptions to keep current. Deriving the partition from the site's own URL shape
+   * rather than from a hardcoded set of filenames is the whole lesson of MUSE-42.
+   */
+  it('lists exactly the pages the build serves — nothing missing, nothing extra', () => {
+    for (const build of [pages, apex]) {
+      const listed = llmsLinks(build).filter((url) => url.endsWith('/'));
+      const served = ROUTES.map((route) => absolute(build, route));
+
+      const extra = listed.filter((url) => !served.includes(url));
+      expect(extra, `llms.txt lists pages src/pages/ does not build (${build.deploy.SITE})`)
+        .toEqual([]);
+
+      const absent = served.filter((url) => !listed.includes(url));
+      expect(absent, `llms.txt omits pages the build serves (${build.deploy.SITE})`)
+        .toEqual([]);
+
+      expect(new Set(listed).size, 'llms.txt lists a page more than once').toBe(listed.length);
+    }
   });
 });
 

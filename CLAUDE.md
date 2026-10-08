@@ -72,6 +72,41 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   which passes `minimum: 0` to `requireDocuments` deliberately: a count check there reports
   "the dataset holds 3, this page needs 4 … an empty dataset" and shadows the message that
   names the route, in the single most likely case.
+
+  **Three lists, four disagreements, and `src/pages/` is the only one that cannot lie**
+  (MUSE-46). `test/routes.test.ts` holds them to each other and every check is anchored on
+  the filesystem. A route in `ROUTES` with **no file** under `src/pages/` used to publish an
+  `llms.txt` link to a 404 — silently, because `test/seo.test.ts` only ever looked each
+  built page *up* in `llms.txt`; it now resolves every URL that file advertises through the
+  model of GitHub Pages and requires a 200, and asserts set equality over page URLs in both
+  directions. The partition between a page link and `robots.txt`/`sitemap-index.xml` is
+  "does the URL end in a slash", which is the site's own URL shape rather than a list of
+  filenames to keep current. A preview route (`MUSE_PREVIEW_ROUTES`) is neither a ghost nor
+  a missing page: its entry point is under `test/` and its URL carries `-preview`, and both
+  halves are asserted.
+
+  **A `page` document for a route the site does not serve is a warning, not a failed
+  build.** Two instruments, neither sufficient alone. The Studio refuses the route —
+  `oneOf(Rule, ROUTE_VALUES)` in `sanity/schemaTypes/enums.ts`, which is `Rule.valid()`
+  past a gap in Sanity's `StringRule` type; `options.list` is the dropdown, not the
+  contract. That reaches Mina while she is typing but cannot cover the other order of
+  events: a developer deletes a route and yesterday's valid document is inert today. That
+  lands in a PR, so the PR's build log gets it. **Do not promote it to a failure** — the
+  document publishes nothing (`getPageMeta` walks `ROUTES`), so a fatal check would let a
+  stale CMS row stop every unrelated PR, every deploy and MUSE-21's scheduled rebuild over
+  a provably inert condition; `test/routes.test.ts` pins that the ghost build is still
+  byte-identical, for exactly that reason. Sanity turns out to *infer* a `valid()` rule
+  from `options.list`, so a pasted route was already refused — under the `required()`
+  rule's message, the one written for an empty field — and nothing in the repo knew either
+  way until the suite started running Sanity's real validator (`@sanity/validation`, a
+  declared devDependency for the same reason `styled-components` is one). `ROUTES[].
+  studioLabel` duplicating each document's `name.hr` was looked at and left: it is a
+  fourth copy of a *label*, not of which pages exist, it has to name a route whose
+  document does not exist yet, and tying them would make Mina rewording a page's short
+  name a red build.
+
+  `Build.log` in `test/helpers/build.ts` is how an acceptance criterion about what the
+  build *says* on success gets read off a real build — the counterpart to `buildFailure`.
 - **The deploy host lives in exactly one file**, `astro.config.mjs`, as the overridable
   `SITE`/`BASE` default — which is what makes a domain move (MUSE-29) a config change
   rather than a search-and-replace. `sitemap`, `robots.txt` and `llms.txt` all derive

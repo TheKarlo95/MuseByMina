@@ -48,7 +48,8 @@ import { ROUTES } from '../../src/lib/pages';
  *     Those are formatting rules, and a CMS field for one is a way to publish `25:00`.
  *   - The route list below: which pages exist is decided by `src/pages/`, and
  *     `test/seo.test.ts` reads the page list off the filesystem for exactly that reason.
- *     Sanity owns a page's *words*, never its existence.
+ *     Sanity owns a page's *words*, never its existence — which is a claim about three
+ *     lists agreeing, and `test/routes.test.ts` is where it is held to account.
  */
 
 /** A `list` option as Sanity wants it: stored value plus the label Mina reads. */
@@ -92,6 +93,39 @@ export const ROUTE_OPTIONS: readonly EnumOption[] = ROUTES.map((entry) => ({
   title: `${entry.studioLabel} — ${entry.route}`,
   value: entry.route,
 }));
+
+/**
+ * The same routes as bare values, for the `route` field's `Rule.valid()`.
+ *
+ * A `list` is the dropdown. It turns out Sanity *also* infers a `valid()` rule from it,
+ * so a pasted route has in fact been refused all along — but nothing in this repository
+ * knew that, the schema comment said the opposite, and the message it produced was the
+ * one written for an *empty* field („Odaberi stranicu."), which is a different problem
+ * with a different fix. Declaring the rule makes the guarantee the schema's own rather
+ * than an inference from a UI option, lets it say what is actually wrong, and keeps it
+ * if the field ever stops being a dropdown. `test/routes.test.ts` runs Sanity's real
+ * validator over every route in `ROUTES` and over one that is not in it (MUSE-46).
+ */
+export const ROUTE_VALUES: readonly string[] = ROUTES.map((entry) => entry.route);
+
+/**
+ * `Rule.valid(values)`, with the type Sanity's own builder is missing.
+ *
+ * `valid` is on the runtime `Rule` interface and **not** on `StringRule`, which is what
+ * `defineField({type: 'string'})` hands the validation builder — so the call that works
+ * is the call that does not type-check (`ts(2339)`, caught by `astro check` inside
+ * `npm run build`). The cast is deliberately one line wide and the behaviour behind it is
+ * not taken on trust: `test/routes.test.ts` runs Sanity's real validator over every route
+ * and over several that are not routes, so a cast that stopped reaching anything is a red
+ * test rather than a field that silently accepts whatever is pasted into it.
+ *
+ * Not `Rule.custom()`, which *is* typed: a custom validator is skipped entirely unless
+ * the validation run is given a client, so the check would be real in the Studio and
+ * unobservable in a test — and an unobservable guard is the thing this ticket is about.
+ */
+export function oneOf<T>(rule: T, values: readonly string[]): T {
+  return (rule as unknown as { valid(allowed: readonly string[]): T }).valid(values);
+}
 
 /** Billing period for a pricing tier. The *wording* per locale belongs to the page. */
 export const PRICE_PERIODS = ['class', 'course', 'month', 'package'] as const;

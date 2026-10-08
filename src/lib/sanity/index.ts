@@ -1,4 +1,4 @@
-import { ROUTES } from '../pages';
+import { ROUTES, inertRouteWarning } from '../pages';
 import { runQuery, sanitySource, type SanitySource } from './client';
 import {
   SanityContentError,
@@ -160,6 +160,13 @@ async function pagesByRoute(): Promise<Map<string, PageMetaDoc>> {
   pages ??= (async () => {
     const rows = await runQuery<unknown>(PAGES_QUERY);
     const documents = requireDocuments(rows, 'page', decodePage, 0);
+
+    // MUSE-46, and before the checks below rather than after: a document for a route the
+    // site does not serve is inert, so it is a warning and not a failure — but it has to
+    // be *said* even on a build that is about to fail for a different reason. The whole
+    // decision, and why this strength and not another, is at `inertRouteWarning`.
+    const inert = inertRouteWarning(documents);
+    if (inert !== undefined) console.warn(inert);
 
     const byRoute = new Map<string, PageMetaDoc>();
     const duplicated: string[] = [];
