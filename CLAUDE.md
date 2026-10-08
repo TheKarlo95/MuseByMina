@@ -285,6 +285,25 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   deleted the first one's builds mid-flight, which is MUSE-17's flake wearing a different
   hat. An hour is fifteen times the longest a build can live, needs no lock and no pid
   file, and cannot reach anything a live run could still be using.
+- **A browser suite waits for a condition, never for the clock** (MUSE-54), and
+  `test/helpers/browser-settle.ts` is the only place it waits. Three suites flaked in one
+  afternoon with no code in common and one defect in common: a measurement taken at a
+  moment. The helper samples on the page's own `requestAnimationFrame` clock, because
+  everything these suites wait for — a smooth scroll, a CSS transition — is produced by
+  that clock, so on a loaded box the animation and the sampling of it starve *together*.
+  Measured: under a starved renderer a smooth fragment scroll does not begin for three to
+  seven frames after the click — 90 ms at 10× CPU throttling, 350 ms at 80×, **1272 ms at
+  150×** — and the deleted helper's entire defence against that was a fixed `150` with a
+  25 ms poll behind it, whose exit condition ("two equal reads") the unmoved page
+  satisfies. It then returned the page still at the top, which is exactly the symptom
+  MUSE-50 reported. `minFrames` is that pause counted in frames instead, so the margin
+  survives the load; the wall clock appears only on the failure path, where it bounds how
+  long a *failure* takes to report and the message names the condition and the last thing
+  observed. `fixedSleeps` in `test/helpers/source-guard.ts` keeps new sleeps out — as a
+  rule about a *call*, so the sentence explaining why a sleep was removed can stay in the
+  file it was removed from. What that rule cannot reach is written out beside it and
+  asserted: a measurement that never waited at all, a fixed-interval poll spelled with
+  `setTimeout`, and a correct wait given too small a budget.
 
 ## Sanity (MUSE-19, MUSE-20)
 
