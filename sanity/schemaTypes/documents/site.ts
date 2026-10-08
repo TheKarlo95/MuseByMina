@@ -1,6 +1,12 @@
 import { defineArrayMember, defineField, defineType } from 'sanity';
 
-import { ADDRESS_PATTERN, ROUTE_OPTIONS, SOCIAL_PLATFORM_OPTIONS } from '../enums';
+import {
+  ADDRESS_PATTERN,
+  ROUTE_OPTIONS,
+  ROUTE_VALUES,
+  SOCIAL_PLATFORM_OPTIONS,
+  oneOf,
+} from '../enums';
 import { imageField } from '../objects/image';
 
 /**
@@ -19,7 +25,14 @@ import { imageField } from '../objects/image';
  *
  * Which routes exist stays in code. `test/seo.test.ts` reads the page list off
  * `src/pages/` precisely so the index cannot claim a page the site does not serve, and
- * a CMS field is not allowed to undo that: `route` is a fixed list built from `ROUTES`.
+ * a CMS field is not allowed to undo that: `route` is a fixed list built from `ROUTES`,
+ * offered as a dropdown **and** validated against the same list (MUSE-46). The two are
+ * not the same thing — `options.list` is what Mina can pick from, `Rule.valid()` is what
+ * the document is allowed to hold — and the gap between them is the shape this ticket
+ * came from: a document can outlive the route it was written for, whatever the UI
+ * offered on the day it was created. Sanity does infer a `valid()` rule from a `list`,
+ * so the hole was narrower than it read; what it could not infer was a message that says
+ * what is wrong, and `test/routes.test.ts` is what turns either into a tested claim.
  */
 export const page = defineType({
   name: 'page',
@@ -37,7 +50,13 @@ export const page = defineType({
         'Koju stranicu ovaj zapis opisuje. Popis je fiksan: stranice postoje u kodu, ' +
         'a ovdje se upisuju samo njihove riječi.',
       options: { list: [...ROUTE_OPTIONS], layout: 'dropdown' },
-      validation: (Rule) => Rule.required().error('Odaberi stranicu.'),
+      validation: (Rule) => [
+        Rule.required().error('Odaberi stranicu.'),
+        oneOf(Rule, ROUTE_VALUES).error(
+          'Ova adresa nije među stranicama koje web objavljuje. Odaberi jednu s popisa — ' +
+            'zapis za stranicu koja ne postoji ne prikazuje se nigdje.',
+        ),
+      ],
     }),
     defineField({
       name: 'name',

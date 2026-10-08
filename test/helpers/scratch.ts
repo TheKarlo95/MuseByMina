@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdirSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -125,10 +125,18 @@ const VITEST_LEAKS = [
  * whole suite stayed green with the shared cache back. `test/isolation.test.ts` is what
  * keeps them now, against a real build.
  *
- * On failure the child's output is folded into the thrown error. `execFileSync` with
- * `stdio: 'pipe'` throws `Command failed: npx astro build …` and keeps the actual Astro
- * diagnostics on `.stdout`/`.stderr`, where a `beforeAll` failure never shows them — the
- * reason the three earlier sightings of this bug were all diagnosed from scratch.
+ * On failure the child's output is folded into the thrown error, which is where a
+ * `beforeAll` failure never shows it otherwise — the reason the three earlier sightings
+ * of this bug were all diagnosed from scratch.
+ *
+ * **A successful build's output is kept too** (MUSE-46), under `buildLog`. "The build
+ * warns, naming the document" is an acceptance criterion in exactly the shape
+ * `buildFailure` already serves for "the build fails, naming the document", and a
+ * warning that only a unit test has seen is a warning nothing proves the build prints.
+ * `spawnSync` rather than `execFileSync` for that reason and one more: `execFileSync`
+ * hands back stdout alone on success, and `console.warn` from a page's frontmatter goes
+ * to stderr — so a check that read only the return value would depend on which stream a
+ * message happened to pick.
  */
 export function astroBuild(env: NodeJS.ProcessEnv, hint?: string): string {
   const outDir = claimOutDir(hint);
@@ -136,25 +144,46 @@ export function astroBuild(env: NodeJS.ProcessEnv, hint?: string): string {
   const childEnv: NodeJS.ProcessEnv = { ...process.env };
   for (const key of VITEST_LEAKS) delete childEnv[key];
 
-  try {
-    execFileSync('npx', ['astro', 'build', '--outDir', outDir], {
-      cwd: ROOT,
-      env: { ...childEnv, ...env, BUILD_CACHE_DIR: cacheDirFor(outDir) },
-      stdio: 'pipe',
+  const child = spawnSync('npx', ['astro', 'build', '--outDir', outDir], {
+    cwd: ROOT,
+    env: { ...childEnv, ...env, BUILD_CACHE_DIR: cacheDirFor(outDir) },
+    stdio: 'pipe',
+  });
+
+  const said = [
+    `--- stdout ---\n${String(child.stdout ?? '')}`,
+    `--- stderr ---\n${String(child.stderr ?? '')}`,
+  ].join('\n');
+
+  if (child.error || child.status !== 0) {
+    throw new Error([`astro build failed (outDir ${outDir})`, said].join('\n'), {
+      cause: child.error,
     });
-  } catch (cause) {
-    const { stdout, stderr } = cause as { stdout?: Buffer; stderr?: Buffer };
-    throw new Error(
-      [
-        `astro build failed (outDir ${outDir})`,
-        `--- stdout ---\n${String(stdout ?? '')}`,
-        `--- stderr ---\n${String(stderr ?? '')}`,
-      ].join('\n'),
-      { cause },
-    );
   }
 
+  BUILD_LOGS.set(outDir, said);
   return outDir;
+}
+
+/** What each successful build printed, keyed by the directory it built into. */
+const BUILD_LOGS = new Map<string, string>();
+
+/**
+ * Everything `astro build` wrote while producing `outDir`, both streams.
+ *
+ * Keyed by the output directory because that is the one name a build already has and
+ * cannot share — `claimOutDir` mints it with `mkdtemp`, so two builds can never collide
+ * on this map the way they used to collide on the directory itself (MUSE-17).
+ */
+export function buildLog(outDir: string): string {
+  const log = BUILD_LOGS.get(outDir);
+  if (log === undefined) {
+    throw new Error(
+      `No build log for ${outDir}. Only a build this process ran through astroBuild() ` +
+        `has one, and only if it succeeded — a failed build's output is on the error it threw.`,
+    );
+  }
+  return log;
 }
 
 /**
