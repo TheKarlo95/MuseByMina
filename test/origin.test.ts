@@ -370,17 +370,23 @@ describe('an explicit ORIGIN is checked against the local build', () => {
  * and if nothing puts the daemon back.
  */
 describe('nothing can go back to trusting whatever is at ORIGIN', () => {
-  /** Every script that drives a browser, read off the directory rather than listed. */
+  /**
+   * Every script that drives a browser, read off the directory rather than listed — so a
+   * fourth gate is covered by the two guards below the moment it is written, with nobody
+   * having to know they exist.
+   */
   function browserScripts(): string[] {
     return readdirSync(SCRIPTS)
       .filter((f) => f.endsWith('.mjs'))
-      .filter((f) => readFileSync(join(SCRIPTS, f), 'utf8').includes("from 'playwright'"))
+      .filter((f) => /from ['"]playwright['"]/.test(readFileSync(join(SCRIPTS, f), 'utf8')))
       .sort();
   }
 
-  it('finds the three browser gates', () => {
-    // If a fourth appears, it is covered by the two tests below without anyone adding it
-    // to a list — which is the only version of this that survives.
+  it('finds the browser gates at all', () => {
+    // The guards below are `for` loops over this list. A filter that silently stops
+    // matching does not fail them — it makes them pass over nothing, which is precisely
+    // the shape of "a check that confirms the wrong thing" this ticket is the third
+    // instance of. So the discovery is asserted before anything is asserted with it.
     expect(browserScripts()).toEqual(['a11y.mjs', 'schedule-ux.mjs', 'screenshot-themes.mjs']);
   });
 
