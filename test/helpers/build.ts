@@ -185,6 +185,21 @@ const ASSET_RELS = new Set([
 ]);
 
 /**
+ * `<meta>` keys whose `content` is an image URL something off-site will fetch (MUSE-69).
+ *
+ * A link preview card is a subresource with no element on the page referencing it, so no
+ * browser ever requests one: `npm run budget` cannot see it, `test/fonts.test.ts` cannot
+ * see it, and a card pointing at a path that 404s is invisible to everything except the
+ * scraper that caches the failure. These are the only tags on this site whose URL is
+ * fetched exclusively by somebody else's software, which is exactly why they belong in
+ * the one check that resolves references against `dist` under both deploy targets.
+ *
+ * Deliberately not `og:url` — that is a page URL, and `pageRefs` already collects it for
+ * `test/urls.test.ts`, which asks the different question (does this spelling 301).
+ */
+const META_IMAGE_KEYS = new Set(['og:image', 'og:image:secure_url', 'twitter:image']);
+
+/**
  * Every subresource URL in a built page, read off the markup.
  *
  * Derived from the HTML rather than from a list of the tags we happen to emit today, so
@@ -210,6 +225,13 @@ export function assetRefs(html: string): AssetRef[] {
       const url = attr(m[0], 'src');
       if (url !== undefined) refs.push({ source: `<${tag} src>`, url });
     }
+  }
+
+  for (const m of html.matchAll(/<meta\b[^>]*>/g)) {
+    const key = (attr(m[0], 'property') ?? attr(m[0], 'name') ?? '').toLowerCase();
+    if (!META_IMAGE_KEYS.has(key)) continue;
+    const url = attr(m[0], 'content');
+    if (url !== undefined) refs.push({ source: `<meta ${key}>`, url });
   }
 
   return refs;

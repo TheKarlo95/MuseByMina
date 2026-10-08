@@ -207,8 +207,20 @@ export const siteSettings = defineType({
       name: 'shareImage',
       title: 'Slika za dijeljenje linka',
       ratio: '16:9',
+      /**
+       * The second sentence is MUSE-69 and it is not decoration.
+       *
+       * The field now has a reader, and when it is empty the site publishes a composed
+       * brand card — the logo on plum, laid out by design system §12. A fallback the
+       * person filling the form does not know about is a fallback that reads as a bug:
+       * she would upload a photograph, see the logo in a preview that had not refreshed,
+       * and have no way to tell whether the field works. Saying it here is the only place
+       * she will read it. See the long note in `src/lib/share-card.ts`.
+       */
       purpose:
-        'Slika koju pokazuju WhatsApp, Instagram i Facebook kad se link na stranicu podijeli.',
+        'Slika koju pokazuju WhatsApp, Instagram i Facebook kad se link na stranicu podijeli. ' +
+        'Ako je ostaviš praznu, prikazuje se logo studija na tamnoj podlozi — slika koju ovdje ' +
+        'postaviš zamjenjuje ga svugdje.',
       required: false,
     }),
   ],

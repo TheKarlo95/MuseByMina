@@ -66,6 +66,15 @@ import interLatin from '../assets/fonts/inter-400-600-latin.woff2?url';
  * anyway, which are the ones already proven safe there.
  */
 import { ICONS } from '../lib/icon';
+/**
+ * The link preview card (MUSE-69), and the `og:locale` spelling beside it.
+ *
+ * `src/lib/share-card.ts` holds the whole decision — Mina's upload if she has set one,
+ * the composed brand card if not, and why that particular fallback is allowed in a
+ * repository that makes a dangling reference fatal. Like `./icon`, this module pulls in
+ * no CSS, so its position in this list cannot move the built `<head>` (MUSE-43).
+ */
+import { ogLocale, shareCard } from '../lib/share-card';
 import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
 
@@ -166,16 +175,42 @@ const skipLabel = locale === 'hr' ? 'Preskoči na sadržaj' : 'Skip to content';
  * `Astro.site` is always set — `astro.config.mjs` always sets it — and is the only thing
  * that knows the deploy's origin, so no URL in the block names a host (MUSE-8).
  */
+const settings = await getSiteSettings();
+
 const ldJson = indexable
   ? jsonLd(
       structuredData({
-        settings: await getSiteSettings(),
+        settings,
         locale,
         canonical,
         site: Astro.site!,
       }),
     )
   : undefined;
+
+/**
+ * The picture a shared link shows (MUSE-69).
+ *
+ * Off the *same* memoised `getSiteSettings()` the JSON-LD and the footer read, so the
+ * card and the page cannot be describing two different reads of the dataset.
+ *
+ * **Not gated on `indexable`**, unlike the canonical, the hreflang cluster and the
+ * JSON-LD above. Those are claims about a URL, and the error page has none — the host
+ * serves its body for any unknown path, so a canonical it declared would name a 404.
+ * An image is not a claim about a URL; it is the same class of thing as the tab icon
+ * and `theme-color`, which the error page already carries (`src/lib/icon.ts`). And the
+ * page already emits `og:title` and `og:description`, so withholding only the image is
+ * precisely the bare text card this ticket is about, on the one page a dead shared link
+ * actually reaches.
+ *
+ * `Astro.site` is the only thing that knows the deploy's origin and `astro.config.mjs`
+ * always sets it, so the absolute URL a scraper needs is *derived* here rather than
+ * written (MUSE-29, MUSE-42). An upload's URL is already absolute — Sanity's CDN is
+ * another origin — and `new URL` leaves it alone, so there is one expression rather than
+ * a branch.
+ */
+const card = shareCard(settings.shareImage, locale);
+const cardUrl = new URL(card.src, Astro.site).href;
 ---
 
 <!doctype html>
@@ -269,6 +304,27 @@ const ldJson = indexable
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     {indexable && <meta property="og:url" content={canonical} />}
+
+    {/* The card (MUSE-69). `og:image:width`/`height` are not padding: Facebook's own
+        documentation says a card with neither renders without an image the *first* time
+        a URL is shared, because the layout happens before the fetch. `src/lib/share-card.ts`
+        answers both for an upload too, from the asset id rather than by guessing.
+
+        No `og:image:type`: an upload is served through `auto=format`, so the CDN picks
+        AVIF, WebP or the original per request and a declared MIME type would be a claim
+        the bytes can contradict.
+
+        `twitter:*` beside them because X reads `twitter:card` and nothing else to decide
+        between a thumbnail and a large card; the image and alt are the same two values,
+        emitted from the same expressions so they cannot drift. */}
+    <meta property="og:locale" content={ogLocale(LOCALE_HTML_LANG[locale])} />
+    <meta property="og:image" content={cardUrl} />
+    <meta property="og:image:alt" content={card.alt} />
+    <meta property="og:image:width" content={String(card.width)} />
+    <meta property="og:image:height" content={String(card.height)} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content={cardUrl} />
+    <meta name="twitter:image:alt" content={card.alt} />
 
     {/* The site's only `application/ld+json` tag, and `test/structured-data.test.ts`
         asserts that it is the only one: a second emission site is a second answer to

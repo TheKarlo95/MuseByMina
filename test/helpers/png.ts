@@ -93,22 +93,13 @@ function paeth(a: number, b: number, c: number): number {
 }
 
 /**
- * The pixels of an 8-bit RGBA PNG, as `width * height * 4` bytes.
+ * The image data, un-filtered, as `width * height * bpp` bytes.
  *
- * Throws on anything else — indexed colour, 16-bit samples, an interlaced file. The icons
- * this reads are written by one documented recipe (`logo/README.md`), so a file that is
- * not 8-bit RGBA is a file somebody regenerated with different settings, and that is
- * worth a failure rather than a silent reinterpretation.
+ * The filtering is the only part of PNG that is the same whatever the colour type, so it
+ * is one function and every reader below is a mapping on top of it. Non-interlaced and
+ * 8 bits per sample, which is all this suite's own files are — see `decodeRgba`.
  */
-export function decodeRgba(file: Buffer): { header: PngHeader; pixels: Buffer } {
-  const head = header(file);
-
-  if (head.colourType !== COLOUR_TYPE.rgba || head.bitDepth !== 8) {
-    throw new Error(
-      `expected an 8-bit RGBA PNG (colour type ${COLOUR_TYPE.rgba}, depth 8), ` +
-        `got colour type ${head.colourType} depth ${head.bitDepth}`,
-    );
-  }
+function unfilter(file: Buffer, head: PngHeader, bpp: number): Buffer {
   if (head.interlace !== 0) throw new Error('interlaced PNGs are not supported here');
 
   const idat = chunks(file)
@@ -118,7 +109,6 @@ export function decodeRgba(file: Buffer): { header: PngHeader; pixels: Buffer } 
 
   const raw = inflateSync(Buffer.concat(idat));
 
-  const bpp = 4;
   const stride = head.width * bpp;
   const pixels = Buffer.alloc(head.height * stride);
 
@@ -157,6 +147,83 @@ export function decodeRgba(file: Buffer): { header: PngHeader; pixels: Buffer } 
 
       out[x] = recovered & 0xff;
     }
+  }
+
+  return pixels;
+}
+
+/**
+ * The pixels of an 8-bit RGBA PNG, as `width * height * 4` bytes.
+ *
+ * Throws on anything else — indexed colour, 16-bit samples, an interlaced file. The icons
+ * this reads are written by one documented recipe (`logo/README.md`), so a file that is
+ * not 8-bit RGBA is a file somebody regenerated with different settings, and that is
+ * worth a failure rather than a silent reinterpretation.
+ */
+export function decodeRgba(file: Buffer): { header: PngHeader; pixels: Buffer } {
+  const head = header(file);
+
+  if (head.colourType !== COLOUR_TYPE.rgba || head.bitDepth !== 8) {
+    throw new Error(
+      `expected an 8-bit RGBA PNG (colour type ${COLOUR_TYPE.rgba}, depth 8), ` +
+        `got colour type ${head.colourType} depth ${head.bitDepth}`,
+    );
+  }
+
+  return { header: head, pixels: unfilter(file, head, 4) };
+}
+
+/**
+ * The pixels of an **opaque** PNG — truecolour or indexed — as `width * height * 3` bytes.
+ *
+ * Added for the share card (MUSE-69), which is a flat plum ground with one white lockup
+ * on it and therefore an indexed file: 24 KB as a 256-colour palette against 48 KB as
+ * RGBA, for pixel-identical output. The module already modelled this case — `COLOUR_TYPE
+ * .palette` and `hasTransparencyChunk` are here precisely because `test/icon.test.ts`
+ * asserts the apple-touch tile is opaque — it just could not read one.
+ *
+ * Refuses a file carrying `tRNS`, which is the only way an indexed or truecolour PNG can
+ * be anything other than opaque: ignoring it would hand back the palette colour under a
+ * transparent pixel, which is a colour the image does not show. For the share card that
+ * refusal is also the assertion — a transparent card is composited against whatever a
+ * chat bubble happens to be — so the strictness is not merely defensive.
+ */
+export function decodeOpaqueRgb(file: Buffer): { header: PngHeader; pixels: Buffer } {
+  const head = header(file);
+
+  if (head.bitDepth !== 8) {
+    throw new Error(`expected 8 bits per sample, got depth ${head.bitDepth}`);
+  }
+  if (hasTransparencyChunk(file)) {
+    throw new Error('this PNG carries a tRNS chunk, so it is not opaque');
+  }
+
+  if (head.colourType === COLOUR_TYPE.rgb) {
+    return { header: head, pixels: unfilter(file, head, 3) };
+  }
+
+  if (head.colourType !== COLOUR_TYPE.palette) {
+    throw new Error(
+      `expected an opaque PNG (colour type ${COLOUR_TYPE.rgb} or ` +
+        `${COLOUR_TYPE.palette}), got colour type ${head.colourType}`,
+    );
+  }
+
+  const palette = chunks(file).find((chunk) => chunk.type === 'PLTE')?.data;
+  if (palette === undefined) throw new Error('indexed PNG with no PLTE chunk');
+
+  const indices = unfilter(file, head, 1);
+  const pixels = Buffer.alloc(indices.length * 3);
+  for (let i = 0; i < indices.length; i += 1) {
+    const entry = indices[i]! * 3;
+    if (entry + 2 >= palette.length) {
+      throw new Error(
+        `palette index ${indices[i]} is outside a ${palette.length / 3}-entry PLTE`,
+      );
+    }
+    pixels[i * 3] = palette[entry]!;
+    pixels[i * 3 + 1] = palette[entry + 1]!;
+    pixels[i * 3 + 2] = palette[entry + 2]!;
   }
 
   return { header: head, pixels };

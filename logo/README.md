@@ -153,8 +153,54 @@ composites a transparent one unpredictably, so it brings its own plum ground.
   above are rasters cropped from a raster, which is fine at every size a favicon, avatar
   or masthead needs and is not a vector. It would also retire the dilation: a stroked
   vector can simply be drawn heavier at a small size.
-- A **social share image** (`og:image`). Not this — `siteSettings.shareImage` is a field
-  in Sanity and a 1200 × 630 composition, which a square icon is not.
+
+## The share card (MUSE-69)
+
+`src/assets/muse-share-card.png` is what WhatsApp, Facebook, Slack and iMessage paint when
+somebody shares a link to this site and Mina has not uploaded a `shareImage` in the Studio.
+It is **the lockup on plum and nothing else** — the same bar everything above is held to:
+no type was set, nothing was drawn, nothing was traced.
+
+| | |
+|---|---|
+| Frame | **1200 × 630**, the 1.91:1 every platform crops towards |
+| Ground | opaque plum `#420535` (§13's dark page background) |
+| Lockup | **500px wide**, 364px tall, centred at (350, 133) |
+| §12 clear space at that size | **120px** per side; the card leaves 350 / 133 |
+| Weight | **23,745 bytes**, 256-colour palette PNG |
+| Derived by | `muse-lockup-white.png` resized to 500 × 364 (lanczos3), composited on the plum ground, flattened |
+
+Three of those are decisions.
+
+**500px wide, not the 521 that §12 allows.** A lockup needs an envelope about 1.207× its
+width *tall*, so 630px of card puts a ceiling at 521 and the card's width never binds. The
+21 pixels are worth more as slack than as mark — the same trade the masthead made at
+36-rather-than-38 — and they leave 13px above and below the clear-space minimum, so the
+rule holds with room rather than exactly. The other end is the one that binds in practice:
+nobody renders a preview at 1200px. WhatsApp paints it about 330 CSS pixels wide in a chat
+and an iMessage rich link about 270, which puts the lockup at 112 CSS pixels against §12's
+100px floor. Rendered at both and looked at; at 270 "DANCE STUDIO" and "BY MINA" are still
+words. 440px of lockup would be under the floor.
+
+**Plum, and opaque.** Plum rather than the footer's plum-ink because the card is the brand
+on its own rather than a band on a page, and §12's "all dark surfaces" takes either. Opaque
+because a transparent share image is composited by each client against whatever its chat
+bubble happens to be — white in a light chat, near-black in a dark one — and a white lockup
+on transparency is invisible to half the audience. The apple-touch tile is opaque for the
+same reason.
+
+**A palette PNG, not RGBA and not WebP.** The picture is one flat ground, one white mark and
+the antialiasing between them, which is a 1-D colour ramp: 23.7 KB indexed against 48.0 KB
+as RGBA, pixel for pixel the same card. WebP is unavailable for the reason it is unavailable
+to the favicon — the audience is somebody else's software, and a link-preview scraper cannot
+be content-negotiated with.
+
+`src/lib/share-card.ts` holds the geometry (derived from `src/lib/lockup.ts`, so §12's
+cap-height fraction has one home) and the reasoning for having a fallback at all in a
+repository that makes a dangling reference fatal. `test/share.test.ts` re-measures the
+committed card against `muse-lockup-white.png` every run — the box, the clear space, the
+opacity and the mark's own column and row ink profiles — so a card regenerated differently,
+re-cropped or redrawn is a red test rather than a logo nobody looked at twice.
 
 ## Rules
 
