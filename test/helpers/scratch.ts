@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { fetchMeasuredPage } from './measured';
+
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
 /**
@@ -391,10 +393,15 @@ function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
  *   - …and the port is still **parsed back out of the greeting**, because Astro moves to
  *     the next free port when the one it was given is taken. The number we asked for is
  *     a hint; the number it printed is the truth.
+ *
+ * Before it hands the server over it **fetches one page and checks that the page says it
+ * is that page** — see the probe at the end of this function. `pagesRender: false` is the
+ * deliberate opt-out, for the one caller whose pages are *expected* not to render.
  */
 export async function astroDev(
   env: NodeJS.ProcessEnv,
   hint?: string,
+  { pagesRender = true }: { pagesRender?: boolean } = {},
 ): Promise<DevServer> {
   const cacheDir = claimOutDir(hint);
 
@@ -495,7 +502,7 @@ export async function astroDev(
     );
   }
 
-  return {
+  const server: DevServer = {
     origin,
     base,
     // `base` ends in exactly one slash and the route is stripped of its leading ones, so
@@ -504,4 +511,41 @@ export async function astroDev(
     output: () => log,
     stop,
   };
+
+  /**
+   * …and then one page is fetched, and that page is asked which page it is (MUSE-62).
+   *
+   * The cross-check above compares two strings. This asks the server, through the same
+   * `fetchMeasuredPage` the suites use, and it is the half that generalises: a `base` from
+   * configuration is only correct if the configuration is the one the child read, and a
+   * greeting that *contains* the prefix can still be a server serving something else at
+   * it. What every caller actually depends on is that `server.url(route)` names a real
+   * page — so that is what is checked, once, before the handle exists.
+   *
+   * Why it is here rather than in each suite: `test/fonts.test.ts` measured `404.astro` in
+   * CI for the life of MUSE-35's coverage and stayed green, because the error page carries
+   * the same stylesheet, the same six faces and the same two preloads. Its own
+   * per-request canonical check (MUSE-62) is what catches a wrong *route*; this catches a
+   * wrong *base*, which is the failure that makes every route wrong at once, and it
+   * catches it for a suite written next year that has never heard of either ticket.
+   *
+   * `pagesRender: false` is for `test/devcontent.test.ts`'s live arm, whose Sanity project
+   * does not exist: every page it serves is a 500 **and that is its assertion**. An
+   * opt-out that asserts nothing, named so that using it is a decision — the shape
+   * `openRedirectProbe` has in `scripts/browser-checks.mjs`.
+   */
+  if (pagesRender) {
+    try {
+      await fetchMeasuredPage(server.url(''), `astro dev (${label(hint) || 'no hint'})`);
+    } catch (problem) {
+      await stop();
+      throw new Error(
+        `${problem instanceof Error ? problem.message : String(problem)}\n` +
+          `--- astro dev output ---\n${log}`,
+        { cause: problem },
+      );
+    }
+  }
+
+  return server;
 }

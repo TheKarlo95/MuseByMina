@@ -180,7 +180,11 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   404ed, and the dev server's own 404 line re-coloured the terminal while printing the
   path, so the symptom read as `//schedule/`. The JSON form put a literal backslash there,
   which the class already had — for an unrelated reason.
-  To reproduce CI locally, unset `CLAUDECODE`, `AI_AGENT` and `CLAUDE_CODE_*` for the run.
+  To reproduce CI locally, unset `CLAUDECODE`, `AI_AGENT` and `CLAUDE_CODE_*` **and set
+  `FORCE_COLOR=1`**. Unsetting the markers alone is not enough and reads as a clean
+  reproduction: `kleur` turns colour off when stdout is not a TTY, which it never is under
+  a test runner, so the banner comes out plain and the escape sequence is simply absent.
+  CI has colour on. Both halves, or the defect is still unreachable.
 
   Two rules came out of it. **The base is configuration, never something to discover from
   a server**: `astroDev()` takes it from `astro.config.mjs` and only *cross-checks* the
@@ -194,9 +198,18 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   was wrong before it was requested. `astro dev` serves `404.astro` at the bad path with no
   redirect, and that page carries the same six faces and two preloads — so
   `test/fonts.test.ts` measured the error page in all three environments and stayed green.
-  A browser check needs something from the page's own markup saying which page it is;
-  `test/devcontent.test.ts` compares each response's `<link rel="canonical">` against the
-  path it requested, which the 404 page cannot satisfy because it declares none.
+  A check needs something from the page's own markup saying which page it is, and that is
+  one function: `fetchMeasuredPage` in `test/helpers/measured.ts` (MUSE-62), the `fetch`
+  side of what `openCheckPage` does for Playwright. It compares each response's
+  `<link rel="canonical">` against the path requested, which the 404 page cannot satisfy
+  because it declares none, and `assertMeasuredPage` makes the same claim about HTML
+  obtained another way — the DOM a browser-opened page ended up with. **Not body text:**
+  every page contains „Muse by Mina", so eight copies of one page pass for eight pages.
+
+  `astroDev()` itself fetches one page through it before handing the server over, so the
+  *base* is proven rather than cross-checked and no suite has to remember any of this;
+  `pagesRender: false` is the opt-out for `test/devcontent.test.ts`'s live arm, whose pages
+  are expected to be 500s.
 - **Page URLs end in a slash.** `trailingSlash: 'always'` + `build.format: 'directory'`,
   so `dist/en/index.html` is served at `/en/` and `/en` 301s to it. Build hrefs with
   `localeUrl()` (`src/lib/i18n.ts`) and nothing else — it is the single place the slash is
