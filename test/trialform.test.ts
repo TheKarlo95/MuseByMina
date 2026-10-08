@@ -48,7 +48,11 @@ const VALID = {
   name: 'Ana Horvat',
   email: 'ana.horvat@example.com',
   phone: '+385 91 234 5678',
-  level: 'pocetni',
+  /**
+   * Read off the copy table, not written out (MUSE-18): the submitted value is the
+   * level key now, and a literal here was one of the three places `pocetni` lived.
+   */
+  level: FORM_COPY.hr.levels[1]!.value,
   message: 'Dolazim s prijateljicom, obje smo početnice.',
 } as const;
 

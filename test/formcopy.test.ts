@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { FORM_COPY, FORM_FIELDS, requiredMessage } from '../src/lib/forms';
 import { LOCALES } from '../src/lib/i18n';
-import { LEVELS } from '../src/lib/schedule';
+import { LEVELS, LEVEL_NAME } from '../src/lib/schedule';
 
 /**
  * MUSE-7 — "every user-facing string needs both HR and EN".
@@ -99,7 +99,43 @@ describe('the form copy table', () => {
     expect(EN.levels.map((l) => l.value)).toEqual(HR.levels.map((l) => l.value));
   });
 
-  it('labels the levels the same way in both, and translates the one that is prose', () => {
+  it('submits the level key, not a second spelling of the level', () => {
+    /**
+     * MUSE-18 — the decision this ticket had to make.
+     *
+     * The values were `pocetni` / `improver` / `srednji` / `napredni`: three Croatian
+     * slugs predating MUSE-6's English level names, plus the enum key, because MUSE-36
+     * added a fourth level and its author had no way to see the convention. One list,
+     * two conventions, and `test/home.test.ts`'s guard could not see either — the wire
+     * format was a table of its own with no single source above it.
+     *
+     * So the wire format *is* the key now. `LEVELS` is the vocabulary the Studio
+     * dropdown, the GROQ projection, the grid's row order and the homepage doors all
+     * already speak, so a submitted `intermediate` can be matched back to a class by
+     * Mina and by anything automated later; and there is one string per level in the
+     * system rather than two tables to keep in step. `PUBLIC_FORM_ENDPOINT` is unset
+     * (MUSE-12), so no submission has ever carried the old values and there is no
+     * history to preserve.
+     *
+     * Asserted against `LEVELS` in order, so a fifth level cannot arrive with a fifth
+     * convention.
+     */
+    for (const copy of Object.values(FORM_COPY)) {
+      expect(copy.levels.slice(1).map((l) => l.value)).toEqual([...LEVELS]);
+    }
+  });
+
+  it('declares which level each option is, so the rendered label can be checked', () => {
+    // The `data-level-name` contract (MUSE-11) reaches the `<option>` through this
+    // field; `test/home.test.ts` asserts the attribute against the built markup.
+    for (const copy of Object.values(FORM_COPY)) {
+      const [notSure, ...levels] = copy.levels;
+      expect(notSure!.level, 'the "not sure yet" option claims to be a level').toBeUndefined();
+      expect(levels.map((l) => l.level)).toEqual([...LEVELS]);
+    }
+  });
+
+  it('labels the levels out of LEVEL_NAME, and translates the one that is prose', () => {
     // These labels used to be required to *differ*, which was the pre-MUSE-6 rule.
     // A level renders English in both locales, and since MUSE-11 both locales read it
     // from `LEVEL_NAME` — so the level labels are the same words on purpose, and the
@@ -111,6 +147,20 @@ describe('the form copy table', () => {
     // fourth, and a hardcoded 3 here is a second place the set of levels is written.
     expect(hrLevels.length, 'the levels are missing from the select').toBe(LEVELS.length);
     expect(enLevels.map((l) => l.label)).toEqual(hrLevels.map((l) => l.label));
+
+    /**
+     * MUSE-18 — and compared against `LEVEL_NAME` rather than only against each other.
+     *
+     * HR `===` EN was the whole of this assertion, which is satisfied by both locales
+     * drifting *together*: relabelling the select `Novice` / `Expert` in one edit left
+     * this suite green, which is the hole the ticket was filed about. The oracle has to
+     * be the map, not the other locale.
+     */
+    for (const locale of LOCALES) {
+      expect(FORM_COPY[locale].levels.slice(1).map((l) => l.label)).toEqual(
+        LEVELS.map((level) => LEVEL_NAME[locale][level]),
+      );
+    }
 
     // "Još ne znam" / "Not sure yet" is not a level. It is prose, so it is translated.
     expect(hrNotSure!.value, 'the default option is the blank one').toBe('');

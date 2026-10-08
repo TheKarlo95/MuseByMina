@@ -6,6 +6,7 @@ import {
   formatTime,
   groupByDay,
   LEVEL_NAME,
+  LEVEL_PREREQUISITE,
   minutesPhrase,
   uniformDuration,
   WEEKDAY_NAME,
@@ -65,10 +66,7 @@ const t = {
     openMaps: 'Otvori u Google Maps',
     trial: 'Dođi na probni sat',
     trialLede: 'Prvi sat je besplatan. Javi nam se i dogovorit ćemo termin.',
-    doorWho: {
-      beginner: 'Nikad nisi plesao/la. Počni ovdje.',
-      intermediate: 'Plešeš oko godinu dana.',
-    },
+    doorNudge: { beginner: 'Počni ovdje.' },
   },
   en: {
     eyebrow: 'Dance studio · Zagreb',
@@ -86,12 +84,15 @@ const t = {
     openMaps: 'Open in Google Maps',
     trial: 'Come to a trial class',
     trialLede: 'Your first class is free. Get in touch and we will find you a slot.',
-    doorWho: {
-      beginner: 'You have never danced. Start here.',
-      intermediate: 'About a year of dancing.',
-    },
+    doorNudge: { beginner: 'Start here.' },
   },
 }[locale];
+
+/**
+ * Widened on purpose: the nudge is written for the beginner door only, and a door
+ * without one is correct rather than a missing translation. See the note on `doors`.
+ */
+const doorNudge: Partial<Record<Level, string>> = t.doorNudge;
 
 /**
  * Which levels get a door. This list is the whole editorial decision, and the
@@ -132,7 +133,31 @@ function firstSession(level: Level): ClassEntry | undefined {
 }
 
 /**
- * Level name, day and time all come from the schedule; only `who` is page copy.
+ * Level name, prerequisite, day and time all come from the schedule; only the
+ * **nudge** is page copy.
+ *
+ * ---
+ *
+ * **The door's „who is this for?" line is `LEVEL_PREREQUISITE`** (MUSE-18).
+ *
+ * It used to be a `doorWho` table in the copy block above, and
+ * `doorWho.intermediate` was byte-identical to
+ * `LEVEL_PREREQUISITE[locale].intermediate` in both languages — „Plešeš oko godinu
+ * dana." / "About a year of dancing.". Exactly the drift MUSE-11 had just fixed for
+ * the level *name*, one field over, on the same cards, and nothing watched it:
+ * MUSE-11's guard only knew about `LEVEL_NAME`. The beginner entry was worse in a
+ * quieter way — it said the same *fact* as the prerequisite in different words
+ * („Nikad nisi plesao/la." vs „Bez iskustva — nikad nisi plesao ni plesala."), so
+ * the homepage and `/schedule` already disagreed about what a beginner is, in a way
+ * no diff would ever flag as a conflict.
+ *
+ * So the prerequisite is read, and `t.doorNudge` keeps only the part that is
+ * genuinely this page's: „Počni ovdje." / "Start here.", which is a call to action
+ * rather than a description of the level and belongs to the beginner door alone. A
+ * door with no nudge renders the prerequisite by itself.
+ *
+ * `test/home.test.ts` now guards `LEVEL_PREREQUISITE` the same way it guards
+ * `LEVEL_NAME`, so this cannot be pasted back.
  *
  * **A door onto a level nobody teaches is dropped, not a build failure** — and that
  * changed in MUSE-36, so the reasoning is worth having here.
@@ -158,7 +183,7 @@ const doors = DOOR_LEVELS.flatMap((level) => {
       level,
       name: LEVEL_NAME[locale][level],
       when: `${WEEKDAY_NAME[locale][entry.day]} · ${formatTime(entry.start)}`,
-      who: t.doorWho[level],
+      who: [LEVEL_PREREQUISITE[locale][level], doorNudge[level]].filter(Boolean).join(' '),
     },
   ];
 });
