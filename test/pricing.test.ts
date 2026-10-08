@@ -581,7 +581,7 @@ describe('AC4: a chosen package can be acted on, on the same page', () => {
       const select = /<select\b[^>]*\bname="package"[^>]*>([\s\S]*?)<\/select>/.exec(html);
       expect(select).not.toBeNull();
       expect(options(select![1]!)).toEqual([
-        ['', FORM_COPY[locale].packageAny],
+        ['', FORM_COPY[locale].package.any],
         ...TIERS.map((doc) => [packageValue(doc as never), expected(doc, locale).name]),
       ]);
     });
@@ -602,16 +602,25 @@ describe('AC4: a chosen package can be acted on, on the same page', () => {
      * a question the visitor cannot answer.
      *
      * Worth having as its own assertion, because `test/trialform.test.ts` does **not**
-     * catch it. Its residue check subtracts every string in `FORM_COPY`, and
-     * `packageAny` is now one of them — so a package field leaking onto `/contact` is
+     * catch it. Its residue check subtracts every string in `FORM_COPY`, and the
+     * package strings are among them — so a package field leaking onto `/contact` is
      * subtracted away and the suite stays green. Measured, not assumed: concatenating
      * the two field lists unconditionally failed only this test out of all 117.
+     *
+     * **And that is why this is no longer the only thing watching** (MUSE-53). This
+     * assertion is specific to this field and gave the next shared copy string no
+     * cover at all. `test/formcopy.test.ts` now renders this component under every
+     * prop shape and checks `GATED_COPY` against what moved, so a gated string is
+     * covered by existing rather than by somebody writing a test like this one. Kept
+     * anyway: it reads as the acceptance criterion it came from, and it is the one that
+     * also pins the field *order* and the absence of the `name="package"` control.
      */
     for (const locale of LOCALES) {
       const bare = await container.renderToString(TrialForm, { props: { locale } });
       expect(bare, locale).not.toContain('name="package"');
-      expect(bare, locale).not.toContain(FORM_COPY[locale].packageAny);
-      expect(bare, locale).not.toContain(FORM_COPY[locale].labels.package);
+      for (const string of Object.values(FORM_COPY[locale].package)) {
+        expect(bare, `${locale}: ${string}`).not.toContain(string);
+      }
       for (const field of FORM_FIELDS) {
         expect(bare, `${locale} ${field.name}`).toContain(`name="${field.name}"`);
       }
@@ -629,6 +638,24 @@ describe('the page says only things the site wrote or Mina typed', () => {
    * It is also the guard against the thing this commit is most at risk of: a price, a
    * package name or a "what's included" line invented in code rather than read from the
    * dataset. Anything of that kind is residue.
+   *
+   * ---
+   *
+   * **What this answers: provenance, not placement** (MUSE-53).
+   *
+   * The question is *did we write this?* — is every character the visitor can read
+   * either copy from a table in `src/lib/` or a value out of the dataset. A leaked
+   * diagnostic, an invented price, an untranslated string, a provider's error body: all
+   * survive the subtraction and fail by existing, however they are worded.
+   *
+   * The question it does **not** answer is *should this be here?* A string in
+   * `PRICING_COPY` or `FORM_COPY` is "ours" by definition, so it is subtracted on every
+   * page this guard runs against — including the pages it must never appear on. The
+   * subtraction set is therefore everything we ever wrote, not everything this page is
+   * allowed to say, and it widens with every string anybody adds. **Misplaced copy is
+   * invisible here and always will be.** That is covered by `GATED_COPY` in
+   * `src/lib/forms.ts` and the placement suite in `test/formcopy.test.ts`; do not read
+   * a green run of this file as evidence that a field is on the right page.
    */
   const phrases = (value: unknown, out: string[] = []): string[] => {
     if (typeof value === 'string') out.push(value.normalize('NFC'));

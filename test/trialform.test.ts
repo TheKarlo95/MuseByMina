@@ -176,6 +176,29 @@ function phrases(copy: FormCopy): string[] {
  *
  * `extras` are the things on the page that are legitimately not copy: the studio's email
  * address, which is content, and whatever the visitor typed themselves.
+ *
+ * ---
+ *
+ * **What this answers, and what it cannot** (MUSE-53).
+ *
+ * It answers **provenance**: *did we write this, in this visitor's language?* Anything
+ * that is not in `FORM_COPY` and not content survives the subtraction and fails,
+ * whatever it says, which is the whole reason this is a subtraction rather than a search
+ * for `PUBLIC_FORM_ENDPOINT` and `/^HTTP \d{3}/`.
+ *
+ * It does not answer **placement**: *should this string be on this page?* Every string
+ * in `FORM_COPY` is by definition "something we wrote", so `phrases()` subtracts all of
+ * them from every page this suite visits — including strings that belong on one page
+ * only. `FORM_COPY` is shared by `/`, `/contact` and `/pricing`, so the subtraction set
+ * here is *everything the form can ever say*, and it grows every time anybody adds a
+ * line. Measured rather than reasoned about: ungating the package `<select>` so that it
+ * leaks onto `/contact` leaves this file at **38 passed**.
+ *
+ * That gap is covered by `GATED_COPY` in `src/lib/forms.ts` and the placement suite in
+ * `test/formcopy.test.ts`, which renders the component under each prop shape and fails
+ * on a string that appears where its gate is off. Nothing below should be rewritten to
+ * try to cover it: a residue assertion that knew which page it was on would need the
+ * per-page copy list this repository has re-filed six times.
  */
 function residue(rendered: string, copy: FormCopy, extras: string[]): string {
   // Case-folded, because the labels and the submit are uppercased by `text-transform`

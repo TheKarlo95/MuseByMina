@@ -1,18 +1,16 @@
 ---
 // Nothing new is imported here, and that is deliberate (MUSE-43). `/contact`'s own
 // header note measures it: introducing a module to this graph *below* the `TrialForm`
-// import on that page reorders the built `<head>`. `PACKAGE_FIELD` therefore joins the
+// import on that page reorders the built `<head>`. `formFields` therefore joins the
 // `../lib/forms` import that is already in the graph rather than arriving as a new
-// specifier. Verified by `diff -r` of two builds — see the pull request.
+// specifier — the same reason `PACKAGE_FIELD` did when MUSE-22 added it. Verified by
+// `diff -r` of two builds — see the pull request.
 import {
   FORM_COPY,
   FORM_ENDPOINT,
-  FORM_FIELDS,
   HONEYPOT_FIELD,
-  PACKAGE_FIELD,
-  type FieldDef,
+  formFields,
   type LevelOption,
-  requiredMessage,
 } from '../lib/forms';
 import { localeUrl, type Locale } from '../lib/i18n';
 import { getSiteSettings } from '../lib/sanity';
@@ -81,17 +79,17 @@ interface Props {
 const { locale, packages } = Astro.props;
 const copy = FORM_COPY[locale];
 
-/** The package field exists only where there is something to choose. */
-const fields: readonly FieldDef[] =
-  packages !== undefined && packages.length > 0
-    ? [PACKAGE_FIELD, ...FORM_FIELDS]
-    : FORM_FIELDS;
-
-/** A `<select>`'s options: the packages for `package`, the levels for `level`. */
-const optionsFor = (field: FieldDef): readonly LevelOption[] =>
-  field.name === 'package'
-    ? [{ value: '', label: copy.packageAny }, ...(packages ?? [])]
-    : copy.levels;
+/**
+ * The fields to render, each carrying the strings it renders (MUSE-53).
+ *
+ * This file no longer looks a field's label, hint or options up by name. It used to,
+ * and that is where placement hid: a loop keyed on `field.name` renders any field it is
+ * handed, so the package field could be made to leak onto `/` and `/contact` by one
+ * edit to the list above it — no type error, and nothing red but
+ * `test/pricing.test.ts`. `formFields` is now the single place a field and its copy are
+ * paired, and `copy.package` is reachable from nowhere else.
+ */
+const fields = formFields(copy, packages);
 
 /**
  * The inbox a failed submission falls back to is content (MUSE-20), read here in
@@ -141,11 +139,11 @@ const privacyHref = localeUrl('/privacy', locale);
       {
         fields.map((field) => {
           const id = `trial-${field.name}`;
-          const hint = copy.hints[field.name];
+          const hint = field.hint;
           return (
             <div class:list={['field', field.kind === 'textarea' && 'wide']}>
               <label class="label" for={id}>
-                {copy.labels[field.name]}
+                {field.label}
                 {!field.required && <span class="optional">({copy.optional})</span>}
               </label>
 
@@ -163,7 +161,7 @@ const privacyHref = localeUrl('/privacy', locale);
                     name={field.name}
                     data-control
                     aria-describedby={hint ? `${id}-hint` : undefined}
-                    data-msg-required={requiredMessage(copy, field.name)}
+                    data-msg-required={field.requiredMessage}
                     data-msg-toolong={copy.tooLong}
                   >
                     {/*
@@ -174,7 +172,7 @@ const privacyHref = localeUrl('/privacy', locale);
                       on the blank option and on every package, so Astro omits the
                       attribute and they opt out — neither is a level.
                     */}
-                    {optionsFor(field).map((option) => (
+                    {(field.options ?? []).map((option) => (
                       <option value={option.value} data-level-name={option.level}>{option.label}</option>
                     ))}
                   </select>
@@ -189,7 +187,7 @@ const privacyHref = localeUrl('/privacy', locale);
                   maxlength={field.maxlength}
                   data-control
                   aria-describedby={hint ? `${id}-hint` : undefined}
-                  data-msg-required={requiredMessage(copy, field.name)}
+                  data-msg-required={field.requiredMessage}
                   data-msg-toolong={copy.tooLong}
                 />
               ) : (
@@ -203,8 +201,8 @@ const privacyHref = localeUrl('/privacy', locale);
                   maxlength={field.maxlength}
                   data-control
                   aria-describedby={hint ? `${id}-hint` : undefined}
-                  data-msg-required={requiredMessage(copy, field.name)}
-                  data-msg-format={copy.format[field.name]}
+                  data-msg-required={field.requiredMessage}
+                  data-msg-format={field.formatMessage}
                   data-msg-toolong={copy.tooLong}
                 />
               )}

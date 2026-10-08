@@ -412,6 +412,22 @@ describe('AC1: who runs the studio, how it started, and who teaches', () => {
      * sentence, and the diff would look deliberate. A sentence has nowhere to hide
      * instead — adding `<p>Studio je otvoren 2019.</p>` to the component fails this on all
      * three counts at once.
+     *
+     * ---
+     *
+     * **What this answers: provenance, not placement** (MUSE-53).
+     *
+     * The question is *where did this sentence come from?* — the CMS, or somebody's
+     * imagination. It is blind by construction to *should this be here?*: anything that
+     * came out of Sanity is subtracted, so a paragraph belonging to one document
+     * rendered under another, or an instructor's bio appearing on a card that is not
+     * hers, is subtracted away and this stays green. The chunk-level rules narrow that a
+     * little — a bio is only subtracted from the chunk it is in — but the guarantee is
+     * about origin, not position, and it should not be read as more.
+     *
+     * The copy-table analogue of the same gap is `GATED_COPY` in `src/lib/forms.ts` and
+     * the placement suite in `test/formcopy.test.ts`. This component has no shared copy
+     * table yet; the day it grows one, placement belongs there and not here.
      */
     const supplied = (locale: Locale): string[] =>
       [
