@@ -1,6 +1,7 @@
 import { createClient, type SanityClient } from '@sanity/client';
 
 import { SanityUnavailableError } from './decode';
+import { inDevServer } from './dev';
 import { FIXTURE_ENV, fixturePath, runFixtureQuery } from './fixture';
 import { requireQueryParameters } from './params';
 
@@ -132,28 +133,77 @@ export function sanitySource(): SanitySource {
 let announced = false;
 
 /**
- * Say once per build where the content came from.
+ * Say once per build where the content came from, **and whether it will be read again**.
  *
  * The one line of output this module produces, and it earns its place: a build reading
  * the committed seed instead of the dataset is otherwise indistinguishable from a build
  * reading the dataset — both are green and both publish pages. `FIXTURE` is in capitals
  * so it is visible in a deploy log that nobody is reading closely. See
  * `./fixture.ts` for the other three things that keep a fixture out of a deploy.
+ *
+ * **The caching clause is MUSE-47's half**, and it is here rather than in a document
+ * because this is the one line somebody is already looking at when the question arises.
+ * „Is what I am seeing current?" has two answers in this project — a build answers it
+ * once and a dev server answers it per request — and before MUSE-47 the output said
+ * neither, which is how „the memoisation is right for a build" came to be read as a
+ * property of the module. A log that names the regime is also what makes the regime
+ * assertable from outside the process: `test/devcontent.test.ts` reads it off a real
+ * `astro build` and a real `astro dev` rather than trusting a unit test about an
+ * `import.meta` constant.
  */
 function announce(fixture: string | undefined): void {
   if (announced) return;
   announced = true;
+  const dev = inDevServer();
+  const caching = !dev
+    ? `[content] build — each reader is queried once and memoised for this process.`
+    : fixture === undefined
+      ? `[content] dev server — every reader is re-read on each request, so a Studio ` +
+        `edit shows up on reload.`
+      : `[content] dev server — the file is re-read on each request, so editing it ` +
+        `shows up on reload.`;
   if (fixture === undefined) {
     console.log(
-      `[content] live — project ${PROJECT_ID}, dataset ${DATASET}, api v${API_VERSION}`,
+      `[content] live — project ${PROJECT_ID}, dataset ${DATASET}, api v${API_VERSION}\n` +
+        caching,
     );
   } else {
     console.log(
       `[content] FIXTURE — ${fixture}\n` +
-        `[content] FIXTURE builds are for the test suite. ${FIXTURE_ENV} is set; unset it ` +
-        `to read the live dataset.`,
+        (dev
+          ? `[content] FIXTURE — this dev server is reading a file in the repository, not ` +
+            `the live dataset, so a Studio edit will never appear. ${FIXTURE_ENV} is set; ` +
+            `unset it to read the live dataset.`
+          : `[content] FIXTURE builds are for the test suite. ${FIXTURE_ENV} is set; ` +
+            `unset it to read the live dataset.`) +
+        `\n${caching}`,
     );
   }
+}
+
+/**
+ * What to tell a dev server whose query could not be answered.
+ *
+ * Appended to the unreachable-API error, and **only under a dev server**. The same error
+ * is what a failed deploy prints, and a deploy log is the last place to suggest reading a
+ * fixture: `.github/workflows/deploy.yml` greps that error for `TRANSIENT_BUILD_FAILURE`
+ * and retries, and the correct remedy there is to wait for Sanity, never to publish the
+ * committed seed. So the advice goes to the only reader it is advice for.
+ *
+ * This is MUSE-47's answer to „`npm run dev` now requires network": not a fallback —
+ * a build that silently substituted the seed for an unreachable dataset is the deploy
+ * failure MUSE-20's four barriers exist to prevent, and a *dev* session that did it would
+ * be the MUSE-35 shape again, dev and the build disagreeing about something invisible.
+ * One sentence, at the moment it is needed, naming the whole command.
+ */
+function offlineHint(): string {
+  if (!inDevServer()) return '';
+  return (
+    `\nNo network? This dev server can render from the committed seed instead — ` +
+    `\`${FIXTURE_ENV}=content/seed.ndjson npm run dev\`. It is the same file ` +
+    `\`npm run sanity:seed\` imports, so it is the content as of the last migration, and ` +
+    `the log says FIXTURE for as long as it is set. A deploy may never set it.`
+  );
 }
 
 /**
@@ -201,8 +251,9 @@ export async function runQuery<T>(
         `This is the read path failing, not missing content. Check the dataset name, ` +
         `then that the query parses — \`node scripts/sanity-read-check.mjs\` runs every ` +
         `query in \`queries.ts\` against the live API and reports each one as OK, EMPTY ` +
-        `or BROKEN.\n` +
-        `Query was:\n${query.trim()}`,
+        `or BROKEN.` +
+        offlineHint() +
+        `\nQuery was:\n${query.trim()}`,
     );
   }
 }
