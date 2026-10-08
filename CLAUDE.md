@@ -212,6 +212,26 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   deliberate opt-out that asserts nothing, for `test/lang.test.ts` and
   `test/localeswitch.test.ts`, whose subject *is* the redirect — it must be handed a
   browser language rather than defaulted one, and `scripts/` may not use it.
+- **What `npm run a11y` audits is read off the build, and each page carries its URL and
+  its status** (MUSE-55). It ran over `ROUTES` — two homepages by default, a
+  comma-separated list in `ci.yml` whose own comment said "adding a page → add it". The
+  error page was never on it and **could not be**: `site.url('/404')` spells
+  `/MuseByMina/404/`, which the host answers 404 for because it is not a directory, and
+  the gate asserted 200 for everything. Both of those are *correct* — the slash rule is
+  MUSE-9 and the 200 was hard-won after the script reported "8/8 clean" against a stale
+  server 404ing every route — so the page no happy path links to and every lost visitor
+  meets was the one page nothing watched, right after MUSE-38 made it bilingual.
+  `auditTargets` in `scripts/dist-origin.mjs` walks `dist` instead and hands back an
+  `AuditTarget` per page: the **spelling** and the **status** both come from
+  `resolveRequest`, so a page whose correct answer is not 200 is audited at it while
+  anything *other* than the expected status is still a loud failure. There is no list to
+  extend and `ROUTES` is gone from both the script and CI; `test/origin.test.ts` fails if
+  either grows one back. The error page has no locale in its path and is bilingual
+  markup, so it is audited **once per locale** — `/MuseByMina/404` (200) and
+  `/MuseByMina/en/404` (404), both recorded host behaviours — and
+  `test/browserlocale.test.ts` asserts the two arrivals get the same bytes, so the pin
+  cannot quietly start selecting a language. `site.at(path)` is the only way to name a
+  spelling that is not `pagePath`'s; `pagePath` is still the one place a slash is added.
 - **"Should a crawler index this" and "may this page route by language" are two props**
   (MUSE-38). `BaseLayout.astro` takes `indexable` and `localeTwin`, and neither is derived
   from the other — `const localeRouting = indexable;` is the regression, it reads as a

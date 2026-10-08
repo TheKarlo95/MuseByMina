@@ -83,6 +83,28 @@ const ERROR_PAGE = '404.html';
  */
 
 /**
+ * One page a browser check is going to measure.
+ *
+ * Three fields rather than a route string, because MUSE-55: a route string carries only
+ * *which* page, and the two things a check also has to know about the error page are the
+ * **spelling** of its URL and the **status** the host answers for it. Both used to be
+ * assumed — `site.url()` for the spelling and a literal `200` for the status — and
+ * between them they made the one page every lost visitor meets the one page the
+ * accessibility gate could not reach.
+ *
+ * `route` is still what decides the locale pin and what the log calls the page
+ * (`scripts/browser-checks.mjs`, MUSE-48); `path` is what is actually requested; `status`
+ * and `file` come from `resolveRequest`, so they are the host model's answer rather than
+ * anyone's expectation.
+ *
+ * @typedef {object} AuditTarget
+ * @property {string} route Locale-prefixed route — `/`, `/en/schedule`, `/en/404`.
+ * @property {string} path The URL path to request, exactly as the host wants it spelled.
+ * @property {number} status What the host answers for that path. Not always 200.
+ * @property {string} file The file in the build that answers it.
+ */
+
+/**
  * A running static host over one build.
  *
  * @typedef {object} DistServer
@@ -115,6 +137,8 @@ const ERROR_PAGE = '404.html';
  * @property {string} origin
  * @property {string} base The deploy base, trailing slash included.
  * @property {(route: string) => string} url Absolute URL for a route, slash included.
+ * @property {(path: string) => { url: (route: string) => string }} at This site addressed
+ *   at one exact URL path — for the page whose spelling is not `pagePath`'s. See `at`.
  * @property {() => Promise<void>} close
  */
 
@@ -304,6 +328,129 @@ export function pagePath(base, route) {
   return `${base}${segments.map((segment) => `${segment}/`).join('')}`;
 }
 
+/** `/404` — the error page's route, derived from the file the deploy looks for. */
+const ERROR_ROUTE = `/${ERROR_PAGE.slice(0, -'.html'.length)}`;
+
+/**
+ * The route an output file is published as. `en/schedule/index.html` → `/en/schedule`.
+ *
+ * @param {string} rel
+ * @returns {string}
+ */
+function routeOfOutput(rel) {
+  if (rel === 'index.html') return '/';
+  if (rel.endsWith('/index.html')) return `/${rel.slice(0, -'/index.html'.length)}`;
+  return `/${rel.slice(0, -'.html'.length)}`;
+}
+
+/**
+ * **Every page in a build, with the URL the host serves it at and the status it answers.**
+ *
+ * MUSE-55. `npm run a11y` ran over a route list in an environment variable, and that list
+ * had never contained `/404` — so the one page no happy path links to, and every lost
+ * visitor meets, was the one page the accessibility gate never audited. MUSE-38 turned it
+ * into a bilingual page with two `<h1>`s, two `lang` blocks and two exits, audited it by
+ * hand, and said plainly that it was not gated.
+ *
+ * It could not have been listed, either. Two things were wrong and both of them were
+ * individually *correct*:
+ *
+ *   1. `site.url(route)` appends a trailing slash, because page URLs carry one (MUSE-9) —
+ *      so `/404` became `/MuseByMina/404/`, which the host answers **404** for, since it
+ *      is not a directory. The slash is not the bug and must not be "fixed".
+ *   2. The gate asserted 200 for everything, hard-won after it reported "8/8 clean"
+ *      against a stale server that was 404ing every route. Relaxing that to
+ *      must-be-anything would give the 404 back its reach and give it up for every other
+ *      page.
+ *
+ * So the spelling and the status are **carried with the page** instead of assumed, and
+ * both come from `resolveRequest` — the one model of GitHub Pages in this repository
+ * (`test/urls.test.ts` pins its every rule against the live deploy). The set is **read off
+ * the output tree**, which is the half that keeps it from rotting: a page added to
+ * `src/pages/` is audited the day it builds, with no list anywhere to extend. A list
+ * extended by hand is the defect this repository has re-filed seven times.
+ *
+ * The error page is the one entry that is not simply "an HTML file at its own URL", and it
+ * gets **one target per locale**:
+ *
+ *   /404     → /MuseByMina/404      200   extensionless resolution of 404.html
+ *   /en/404  → /MuseByMina/en/404   404   nothing there; the deploy's error page answers
+ *
+ * That is not the same page twice for the sake of it. The page has **no locale in its
+ * path** and is bilingual by construction (MUSE-38) — one document, both languages, no
+ * client-side selection — so there is no single locale to pin it to, and pinning it to one
+ * would audit a bilingual page as though it were monolingual. Auditing it once per locale
+ * means both an `hr-HR` browser and an `en-US` browser are measured meeting it, which is
+ * what the bilingual markup is *for*, and it is also what makes the expected-status
+ * machinery live rather than theoretical: `/en/404` is a real recorded host behaviour
+ * whose correct answer is not 200.
+ *
+ * @param {string} outDir
+ * @param {string} base The deploy base, trailing slash included.
+ * @param {object} [options]
+ * @param {string[]} [options.locales] The site's locales, for the error page. Passed in
+ *   rather than imported: the locales live in `src/lib/i18n.ts`, a `.mjs` script cannot
+ *   import a `.ts` module, and `scripts/browser-checks.mjs` — which already mirrors them,
+ *   pinned by `test/browserlocale.test.ts` — is the module that must not be imported from
+ *   here, or it would drag Playwright into every caller of this one.
+ * @param {string} [options.defaultLocale] The locale served without a path prefix.
+ * @returns {AuditTarget[]}
+ */
+export function auditTargets(outDir, base, { locales = [], defaultLocale = '' } = {}) {
+  /** @type {Map<string, AuditTarget>} */
+  const byPath = new Map();
+
+  /**
+   * @param {string} route
+   * @param {string} path
+   * @param {string} [mustServe] The output file this target is a target *of*, when the
+   *   caller knows: a derived URL that resolves to some other file is a derivation bug,
+   *   and finding out by auditing the wrong page is how MUSE-48 happened.
+   */
+  const add = (route, path, mustServe) => {
+    const served = resolveRequest(outDir, base, path);
+    if (served.status === 301) {
+      throw new Error(
+        `${path} is a redirect, not a page — auditing it would audit the 301 ` +
+          `(MUSE-9). ${route} was derived to the wrong spelling.`,
+      );
+    }
+    if (served.file === undefined) {
+      throw new Error(`Nothing in ${outDir} answers ${path}, derived for ${route}.`);
+    }
+    if (mustServe !== undefined && served.file !== mustServe) {
+      throw new Error(
+        `${path}, derived for ${mustServe}, is served ${served.file} by the host model.`,
+      );
+    }
+    if (!byPath.has(path)) {
+      byPath.set(path, { route, path, status: served.status, file: served.file });
+    }
+  };
+
+  for (const rel of filesUnder(outDir)) {
+    if (!rel.endsWith('.html')) continue;
+    const route = routeOfOutput(rel);
+    // A directory page is served at its slashed URL and 301s from the other spelling;
+    // a bare `foo.html` is served extensionlessly at `/foo` and 404s at `/foo/`. One
+    // place adds the slash, and it is still `pagePath`.
+    const path = rel.endsWith('index.html')
+      ? pagePath(base, route)
+      : `${base}${route.slice(1)}`;
+    add(route, path, rel);
+  }
+
+  // The error page, once per locale — see the note above.
+  if (isFile(outDir, ERROR_PAGE)) {
+    for (const locale of locales) {
+      const route = locale === defaultLocale ? ERROR_ROUTE : `/${locale}${ERROR_ROUTE}`;
+      add(route, `${base}${route.slice(1)}`, ERROR_PAGE);
+    }
+  }
+
+  return [...byPath.values()].sort((a, b) => (a.path < b.path ? -1 : 1));
+}
+
 /**
  * Serve `outDir` over HTTP on a port the kernel picks.
  *
@@ -375,6 +522,21 @@ const digest = (/** @type {Buffer | Uint8Array} */ bytes) =>
 const shortDigest = (/** @type {Buffer | Uint8Array} */ bytes) => digest(bytes).slice(0, 12);
 
 /**
+ * The URL path one entry of a run's route list is measured at.
+ *
+ * A plain string is a page route and gets `pagePath`'s spelling, slash included — which is
+ * what `npm run shots` and `npm run ux:schedule` pass. An `AuditTarget` carries its own
+ * spelling, because the error page's is not a directory's (MUSE-55).
+ *
+ * @param {string} base
+ * @param {string | AuditTarget} entry
+ * @returns {string}
+ */
+function probePath(base, entry) {
+  return typeof entry === 'string' ? pagePath(base, entry) : entry.path;
+}
+
+/**
  * Which URLs a run has to agree on with the server, for a set of routes.
  *
  * The pages themselves, because those are what the check measures and a difference in one
@@ -384,11 +546,11 @@ const shortDigest = (/** @type {Buffer | Uint8Array} */ bytes) => digest(bytes).
  *
  * @param {string} base
  * @param {string} outDir
- * @param {string[]} routes
+ * @param {(string | AuditTarget)[]} routes
  * @returns {string[]}
  */
 function probePaths(base, outDir, routes) {
-  const paths = routes.map((route) => pagePath(base, route));
+  const paths = routes.map((entry) => probePath(base, entry));
   const index = `${base}llms.txt`;
   if (resolveRequest(outDir, base, index).status === 200) paths.push(index);
   return [...new Set(paths)];
@@ -419,7 +581,7 @@ const MISMATCH_ADVICE = [
  * @param {string} args.origin
  * @param {string} args.base The deploy base, trailing slash included.
  * @param {string} args.outDir
- * @param {string[]} args.routes
+ * @param {(string | AuditTarget)[]} args.routes
  * @returns {Promise<Verification>}
  */
 export async function verifyServedBuild({ origin, base, outDir, routes }) {
@@ -444,7 +606,9 @@ export async function verifyServedBuild({ origin, base, outDir, routes }) {
       );
     }
 
-    if (expected.status !== 200) {
+    // Nothing in the build answers this URL at all. A 301 lands here too: a redirect is
+    // not a page, and a run that measured one would be measuring the hop.
+    if (expected.file === undefined) {
       problems.push(
         [
           `  ${url}`,
@@ -455,12 +619,18 @@ export async function verifyServedBuild({ origin, base, outDir, routes }) {
       continue;
     }
 
-    if (response.status !== 200) {
+    // The status the **host model** gives this URL, not a literal 200 (MUSE-55). The
+    // error page is served at `…/404` with a 200 and at `…/en/404` with a 404, and both
+    // of those are correct answers that a run has to be able to state. What is *not*
+    // relaxed is the comparison: an answer other than the one this build says that URL
+    // has is still a hard failure, which is the half MUSE-52 and its two predecessors
+    // were each written to keep.
+    if (response.status !== expected.status) {
       problems.push(
         [
           `  ${url}`,
           `    the server answered  ${response.status}`,
-          `    this build has       200, ${expected.file}`,
+          `    this build has       ${expected.status}, ${expected.file}`,
         ].join('\n'),
       );
       continue;
@@ -512,9 +682,15 @@ function requireBuild(outDir, base) {
 /**
  * Where `dist` is and what it is mounted under, for one invocation.
  *
- * @param {Record<string, string | undefined>} env
+ * Exported because MUSE-55 made the audit set a question about the output tree rather
+ * than a list in the environment, and `auditTargets` needs to be told which tree — but it
+ * is still this module that decides what `DIST` and `BASE` mean, so a check cannot come to
+ * a different answer than the server it is about to measure.
+ *
+ * @param {Record<string, string | undefined>} [env]
+ * @returns {{ base: string, dist: string }}
  */
-function location(env) {
+export function buildLocation(env = process.env) {
   const distArg = env.DIST ?? DEFAULT_DIST;
   return {
     base: `${(env.BASE ?? DEFAULT_BASE).replace(/\/+$/, '')}/`,
@@ -533,6 +709,21 @@ function siteAt(origin, base, close = async () => {}) {
     origin,
     base,
     url: (route) => `${origin}${pagePath(base, route)}`,
+    /**
+     * This site, addressed at one exact URL path.
+     *
+     * The `RouteSource` `scripts/browser-checks.mjs` takes is a single `url(route)`
+     * method on purpose — a check must not be able to reach past it to an origin and
+     * join a URL itself, because joining the URL by hand is how MUSE-9's slash got lost.
+     * `at` is how a check names a spelling that is not `pagePath`'s **without** opening
+     * that door: the path still comes from this module, from `resolveRequest`'s model of
+     * the host, and the route handed to `openCheckPage` alongside it still decides the
+     * locale pin and the log line. The error page is the only thing that needs it
+     * (MUSE-55), and `pagePath` is still the only place a trailing slash is added.
+     *
+     * @param {string} path
+     */
+    at: (path) => ({ url: () => `${origin}${path}` }),
     close,
   };
 }
@@ -553,7 +744,7 @@ function siteAt(origin, base, close = async () => {}) {
  * @returns {Promise<Site>}
  */
 export async function serveBuild({ env = process.env, log = console.log } = {}) {
-  const { base, dist } = location(env);
+  const { base, dist } = buildLocation(env);
   requireBuild(dist, base);
   const server = await serveDist(dist, base);
   const build = fingerprint(dist);
@@ -573,14 +764,16 @@ export async function serveBuild({ env = process.env, log = console.log } = {}) 
  * `ORIGIN` or names a port again.
  *
  * @param {object} [args]
- * @param {string[]} [args.routes] Every route this run will measure. They are what gets
- *   compared against the server, so a route left out is a page nothing vouched for.
+ * @param {(string | AuditTarget)[]} [args.routes] Every page this run will measure — a
+ *   route string, or an `AuditTarget` carrying its own spelling and expected status. They
+ *   are what gets compared against the server, so a page left out is a page nothing
+ *   vouched for.
  * @param {Record<string, string | undefined>} [args.env]
  * @param {(line: string) => void} [args.log]
  * @returns {Promise<Site>}
  */
 export async function openSite({ routes = [], env = process.env, log = console.log } = {}) {
-  const { base, dist } = location(env);
+  const { base, dist } = buildLocation(env);
   const given = env.ORIGIN?.replace(/\/+$/, '');
 
   if (given === undefined || given === '') return serveBuild({ env, log });
@@ -616,6 +809,37 @@ export async function openSite({ routes = [], env = process.env, log = console.l
 export async function openSiteOrExit(args) {
   try {
     return await openSite(args);
+  } catch (problem) {
+    console.error(`\n${problem instanceof Error ? problem.message : String(problem)}\n`);
+    process.exit(1);
+  }
+}
+
+/**
+ * `auditTargets` over the build this invocation is about, as a command-line entry point.
+ *
+ * Paired with `openSiteOrExit` for the same reason it exists: a gate's first line of
+ * output should be the report, not a stack trace. "There is no build here" is the common
+ * case and `requireBuild`'s message is the one that says `npm run build`.
+ *
+ * @param {object} [args]
+ * @param {Record<string, string | undefined>} [args.env]
+ * @param {string[]} [args.locales]
+ * @param {string} [args.defaultLocale]
+ * @returns {AuditTarget[]}
+ */
+export function auditTargetsOrExit({ env = process.env, locales, defaultLocale } = {}) {
+  try {
+    const { base, dist } = buildLocation(env);
+    requireBuild(dist, base);
+    const targets = auditTargets(dist, base, { locales, defaultLocale });
+    if (targets.length === 0) {
+      // A gate that audits nothing reports success. This repository has shipped that
+      // twice — "8/8 clean" against a 404ing server, and a guard looping over an empty
+      // discovery — so an empty set is a failure here rather than a quiet pass.
+      throw new Error(`No pages found in ${dist} to audit. That cannot be right.`);
+    }
+    return targets;
   } catch (problem) {
     console.error(`\n${problem instanceof Error ? problem.message : String(problem)}\n`);
     process.exit(1);

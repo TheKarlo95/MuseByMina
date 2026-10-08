@@ -66,16 +66,20 @@ jobs:
       # on a fresh runner, but leaving the daemon here would mean the audited origin is a
       # daemon again the next time this job is copied, and the scripts no longer have a
       # port to be handed. Each check logs the fingerprint of the build it measured.
+      #
+      # No route list either. `npm run a11y` reads the set off the build it just made
+      # (MUSE-55) — every HTML file in `dist`, each at the URL the host serves it and the
+      # status the host answers, so the error page is audited in both locales and a new
+      # page under `src/pages/` is audited the day it builds. The list that used to live
+      # here said "adding a page → add it", which is this repository's seventh instance of
+      # a hand-extended list, and it never contained the 404 at all because the 404 cannot
+      # be reached at the spelling a route list produces.
       - name: Audit
         run: |
           npm run a11y
           # /schedule's responsive shift, keyboard operation and filters —
           # the MUSE-6 criteria a DOM-only test cannot reach.
           npm run ux:schedule
-        env:
-          # ROUTES defaults to the two homepages, so every new page has to be
-          # listed here or it is never audited. Adding a page → add it.
-          ROUTES: /,/en,/schedule,/en/schedule,/contact,/en/contact,/privacy,/en/privacy
 
   sanity:
     name: sanity schema & types

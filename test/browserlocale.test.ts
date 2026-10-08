@@ -16,7 +16,7 @@ import {
 } from '../scripts/browser-checks.mjs';
 import { DEFAULT_LOCALE, LOCALES } from '../src/lib/i18n';
 import { LANG_STORAGE_KEY } from '../src/lib/lang';
-import { startPreview, type Preview } from './helpers/preview';
+import { PREVIEW_BASE, startPreview, type Preview } from './helpers/preview';
 
 /**
  * MUSE-48 — a browser check measures the page it names, or says so.
@@ -189,6 +189,78 @@ describe('a check that asks for a page measures that page', () => {
       const line = describeMeasured(open.measured);
       expect(line).toContain('/MuseByMina/');
       expect(line).toContain('hr-HR');
+    } finally {
+      await open.close();
+    }
+  });
+});
+
+/**
+ * MUSE-55 — the one page whose route carries no locale.
+ *
+ * Everything above derives the pin from the route because the route is the intent. The
+ * error page breaks that cleanly in half: it has **no locale in its path** (one
+ * `404.html` for the whole deploy) and it is **bilingual markup** — one document, both
+ * languages, no client-side selection, `localeTwin={false}` (MUSE-38). So "which locale
+ * is this page" has no answer, and picking one would audit a bilingual page as though it
+ * were monolingual.
+ *
+ * The decision is therefore to audit it **once per locale**, at the URL a visitor of each
+ * language actually arrives at — `/MuseByMina/404` for a Croatian browser and
+ * `/MuseByMina/en/404` for an English one, which are a 200 and a 404 respectively and are
+ * both recorded host behaviours (`test/urls.test.ts`). The two assertions below are what
+ * make that a decision rather than a sentence: each pin lands where it asked, and the two
+ * get the *same bytes*, so neither pin is secretly selecting a language.
+ */
+describe('the bilingual error page has no locale in its path', () => {
+  /**
+   * The preview addressed at one exact URL path — the `Site.at` of
+   * `scripts/dist-origin.mjs`, which exists because the error page's spelling is not a
+   * directory's and `pagePath` must stay the only place a trailing slash is added
+   * (MUSE-9).
+   */
+  const at = (path: string) => ({
+    url: () => `${preview.origin}${path.slice(PREVIEW_BASE.length)}`,
+  });
+
+  const SPELLINGS = [
+    { route: '/404', path: `${PREVIEW_BASE}/404`, status: 200, locale: 'hr' },
+    { route: '/en/404', path: `${PREVIEW_BASE}/en/404`, status: 404, locale: 'en' },
+  ] as const;
+
+  it('is measured once per locale, each at the status the host answers', async () => {
+    const bodies: string[] = [];
+    for (const { route, path, status, locale } of SPELLINGS) {
+      const open = await openCheckPage(browser, at(path), route);
+      try {
+        // Unslashed, and landed where it asked. `/MuseByMina/404/` is a 404 because it is
+        // not a directory, which is correct and is not what gets fixed here.
+        expect(new URL(open.page.url()).pathname, route).toBe(path);
+        expect(open.response?.status(), route).toBe(status);
+        // The pin comes off the route, same rule as every other page.
+        expect(open.measured.locale, route).toBe(locale);
+        expect(await open.page.evaluate(() => navigator.language), route).toBe(
+          NAVIGATOR_LOCALE[locale],
+        );
+        bodies.push(await open.response!.text());
+      } finally {
+        await open.close();
+      }
+    }
+
+    // And the pin is not choosing content: both locales are served the same document, so
+    // auditing it twice is auditing two arrivals at one bilingual page rather than two
+    // pages. The day that stops being true — a 404 that picks a language client-side is
+    // exactly the second mechanism MUSE-38 refused — this is the test that says so.
+    expect(bodies[0]).toBe(bodies[1]);
+  });
+
+  it('is reached by neither locale through the slashed spelling', async () => {
+    // `site.url('/404')` produces this, and it is why the gate could not audit the page:
+    // the request is legitimate, the body is the error page, and the status is 404.
+    const open = await openCheckPage(browser, at(`${PREVIEW_BASE}/404/`), '/404');
+    try {
+      expect(open.response?.status()).toBe(404);
     } finally {
       await open.close();
     }
