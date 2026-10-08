@@ -1,6 +1,7 @@
-import { chromium, type Browser, type Page } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { launchChecks, openCheckPage } from '../scripts/browser-checks.mjs';
 import { startPreview, type Preview } from './helpers/preview';
 import { seededSchedule } from './helpers/seed';
 
@@ -68,7 +69,7 @@ let browser: Browser;
 let preview: Preview;
 
 beforeAll(async () => {
-  [preview, browser] = await Promise.all([startPreview('numerals'), chromium.launch()]);
+  [preview, browser] = await Promise.all([startPreview('numerals'), launchChecks()]);
 }, 240_000);
 
 afterAll(async () => {
@@ -81,19 +82,25 @@ interface Visit {
   close(): Promise<void>;
 }
 
+/**
+ * Open `route` at measurement scale, as a visitor of that route's language.
+ *
+ * Through `scripts/browser-checks.mjs`, which pins the locale the route names and asserts
+ * the landing URL (MUSE-48). This suite used to carry its own language-pin line, copied
+ * from `scripts/a11y.mjs` — a glyph measured on the wrong language's page is still a
+ * glyph, so there is nothing in the numbers that would have said so.
+ */
 async function visit(route: string, colorScheme: 'dark' | 'light'): Promise<Visit> {
-  const ctx = await browser.newContext({
-    colorScheme,
-    viewport: { width: 1280, height: 900 },
-    deviceScaleFactor: SCALE,
+  const { page, close } = await openCheckPage(browser, preview, route, {
+    context: {
+      colorScheme,
+      viewport: { width: 1280, height: 900 },
+      deviceScaleFactor: SCALE,
+    },
   });
-  // The homepage language redirect would otherwise take /schedule's visitor away.
-  await ctx.addInitScript(() => localStorage.setItem('muse-lang', 'hr'));
-  const page = await ctx.newPage();
-  await page.goto(preview.url(route), { waitUntil: 'networkidle' });
   // Without this the first shot can catch the fallback face mid-swap.
   await page.evaluate(() => document.fonts.ready);
-  return { page, close: () => ctx.close() };
+  return { page, close };
 }
 
 /** The `<time>` in the grid gutter whose text is exactly `text`. */

@@ -1,7 +1,8 @@
 import { AxeBuilder } from '@axe-core/playwright';
-import { chromium, type Browser, type Page } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { launchChecks, openCheckPage } from '../scripts/browser-checks.mjs';
 import { FORM_COPY, FORM_FIELDS, HONEYPOT_FIELD, requiredMessage } from '../src/lib/forms';
 import type { FieldName, FormCopy } from '../src/lib/forms';
 import { LOCALE_HTML_LANG, type Locale } from '../src/lib/i18n';
@@ -65,7 +66,7 @@ let browser: Browser;
 let preview: Preview;
 
 beforeAll(async () => {
-  [preview, browser] = await Promise.all([startPreview('contact'), chromium.launch()]);
+  [preview, browser] = await Promise.all([startPreview('contact'), launchChecks()]);
 }, 240_000);
 
 afterAll(async () => {
@@ -79,24 +80,28 @@ interface Visit {
   close(): Promise<void>;
 }
 
+/**
+ * Open `route`, as a visitor of that route's language.
+ *
+ * Through `scripts/browser-checks.mjs` (MUSE-48): the locale comes off the route, both
+ * halves of the pin are set, and the landing URL is asserted. This suite used to spell
+ * the browser language itself — `route.startsWith('/en') ? 'en-GB' : 'hr-HR'`, with a
+ * comment saying that without it every assertion about `/` is quietly one about `/en`.
+ * Correct, and the third hand-written copy of a rule that now has one home.
+ */
 async function visit(
   route: string,
   opts: { scheme?: 'dark' | 'light'; width?: number; height?: number } = {},
 ): Promise<Visit> {
-  const ctx = await browser.newContext({
-    colorScheme: opts.scheme ?? 'dark',
-    // Same viewport the a11y gate uses, so a geometry claim here means the same thing there.
-    viewport: { width: opts.width ?? 1280, height: opts.height ?? 900 },
-    // The Croatian homepage redirects a browser that is clearly not Croatian to /en
-    // (`src/lib/lang.ts`). Without pinning the language, every assertion about `/` would
-    // quietly be an assertion about `/en`.
-    locale: route.startsWith('/en') ? 'en-GB' : 'hr-HR',
+  const { page, measured, close } = await openCheckPage(browser, preview, route, {
+    context: {
+      colorScheme: opts.scheme ?? 'dark',
+      // Same viewport the a11y gate uses, so a geometry claim here means the same thing there.
+      viewport: { width: opts.width ?? 1280, height: opts.height ?? 900 },
+    },
   });
-  const page = await ctx.newPage();
-  const url = preview.url(route);
-  await page.goto(url, { waitUntil: 'networkidle' });
   await page.evaluate(() => document.fonts.ready);
-  return { page, url, close: () => ctx.close() };
+  return { page, url: measured.url, close };
 }
 
 /**

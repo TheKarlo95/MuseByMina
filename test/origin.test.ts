@@ -374,11 +374,18 @@ describe('nothing can go back to trusting whatever is at ORIGIN', () => {
    * Every script that drives a browser, read off the directory rather than listed — so a
    * fourth gate is covered by the two guards below the moment it is written, with nobody
    * having to know they exist.
+   *
+   * A gate is recognised by importing `scripts/browser-checks.mjs`, which is the only way
+   * to open a page here since MUSE-48: that module owns Playwright, and `scripts/` no
+   * longer imports it at all, so "imports playwright" — what this used to look for — now
+   * matches the module and none of its callers. `test/browserlocale.test.ts` asserts the
+   * same set from the other side, and that Playwright stays out of these scripts, which is
+   * what keeps the two discoveries describing the same files.
    */
   function browserScripts(): string[] {
     return readdirSync(SCRIPTS)
-      .filter((f) => f.endsWith('.mjs'))
-      .filter((f) => /from ['"]playwright['"]/.test(readFileSync(join(SCRIPTS, f), 'utf8')))
+      .filter((f) => f.endsWith('.mjs') && f !== 'browser-checks.mjs')
+      .filter((f) => readFileSync(join(SCRIPTS, f), 'utf8').includes('browser-checks.mjs'))
       .sort();
   }
 

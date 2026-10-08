@@ -76,6 +76,37 @@ ORIGIN=$SITE UNVERIFIED_ORIGIN=1 npm run a11y
 
 and the log says out loud that the result is not pinned to a local build.
 
+**Every browser check measures the page it names, or fails saying so.** `/`
+client-side-redirects to `/en/` unless the browser's language is Croatian — correct
+behaviour (MUSE-33) — and Playwright, Puppeteer and a plain headless Chromium all report
+`en-US`. So a check that did not pin the locale opened the Croatian homepage, measured the
+English one, and labelled its results `/`: the site's primary page was the one page the
+tooling defaulted to never looking at. MUSE-35's QA hit it in its own first run and nearly
+filed the redirect's refetching as a font-preload bug.
+
+`scripts/browser-checks.mjs` is how a check gets a page (MUSE-48). It takes the route, and
+the route is the whole intent — it derives the locale from it, sets `navigator.language`
+**and** the stored language to match, and asserts after navigating that the URL it landed
+on is the URL it asked for:
+
+```
+✓ dark  /MuseByMina/      locale=hr  lang=hr-HR  no violations
+✓ dark  /MuseByMina/en/   locale=en  lang=en     no violations
+```
+
+Two scripts already defended against this with a hand-written `addInitScript` line each,
+and that was the bug: the defence was a line every future author had to know to write.
+That module **owns Playwright** for the checks — nothing in `scripts/` imports it, and no
+file in `scripts/` or `test/` may open a context, open a page, seed storage or launch a
+browser of its own, so a script or suite written next year inherits all of it without
+knowing any of this exists. `test/browserlocale.test.ts` discovers those files off the two
+directories and fails if one of them opens its own browser. The landing assertion is the
+half that generalises: `scripts/a11y.mjs` grew one by hand after auditing the wrong page
+twice, `scripts/screenshot-themes.mjs` never had one, and it now catches any future
+redirect that moves a check somewhere it did not intend to go. `openRedirectProbe` is the
+one door that asserts nothing, for the two suites whose subject *is* the redirect; it has
+to be handed a browser language rather than defaulted one, and `scripts/` may not use it.
+
 `npm run preview` is the same in-process host, kept running — **not `astro preview`**,
 which is what produced the stale daemons in the first place (MUSE-35's review found three
 still listening from manual invocations, outliving the sessions that started them) and

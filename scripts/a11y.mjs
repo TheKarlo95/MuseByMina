@@ -1,6 +1,6 @@
-import { chromium } from 'playwright';
 import { AxeBuilder } from '@axe-core/playwright';
 
+import { describeMeasured, launchChecks, openCheckPage } from './browser-checks.mjs';
 import { openSiteOrExit } from './dist-origin.mjs';
 
 /**
@@ -16,35 +16,48 @@ const ROUTES = (process.env.ROUTES ?? '/,/en').split(',');
  * `openSite` serves `dist` from an in-process host on an ephemeral port. That is MUSE-52.
  * This script reported every route clean in both themes against a stale `astro preview`
  * daemon belonging to a **different agent's worktree**, because `astro preview`
- * daemonises here and silently reuses one on another port. The two checks below were
- * both added for that class and neither could see it — a status and a redirect confirm
- * *something* answered, not which build. An explicit `ORIGIN` is still honoured and is
- * now proved byte-identical to the local build before anything is audited, and either
- * way the two lines logged above name the build these results are about.
+ * daemonises here and silently reuses one on another port. The status check below was
+ * added for that class and could not see it — a status confirms *something* answered, not
+ * which build. An explicit `ORIGIN` is still honoured and is now proved byte-identical to
+ * the local build before anything is audited, and either way the two lines logged above
+ * name the build these results are about.
  *
  * Page URLs carry a trailing slash (`trailingSlash: 'always'`, MUSE-9); `site.url` is the
  * one place that is added. Auditing the unslashed spelling would audit a redirect.
  */
 const site = await openSiteOrExit({ routes: ROUTES });
-const pageUrl = (route) => site.url(route);
 
-const browser = await chromium.launch();
+/**
+ * The browser, and the locale each page is audited as.
+ *
+ * `scripts/browser-checks.mjs` opens every page (MUSE-48). This script used to carry a
+ * hand-written `addInitScript` line pinning the stored language, with a comment saying that
+ * without it `/` redirects an `en-US` browser to `/en/` and the English page gets audited
+ * twice — and that line, which every future check had to know to copy, was the bug the
+ * ticket is about. The locale now comes off the route, and the landing URL is asserted
+ * inside the door rather than here: that assertion was added to this file by hand after it
+ * audited the wrong page twice, which is exactly why it belongs where nobody can omit it.
+ */
+const browser = await launchChecks();
 let failures = 0;
 
 for (const route of ROUTES) {
-  const url = pageUrl(route);
-
   for (const scheme of ['dark', 'light']) {
-    const ctx = await browser.newContext({
-      colorScheme: scheme,
-      viewport: { width: 1280, height: 900 },
-    });
-    // Pin the language, or the homepage's Accept-Language redirect sends an
-    // en-US browser to /en and we audit the English page twice.
-    await ctx.addInitScript(() => localStorage.setItem('muse-lang', 'hr'));
+    /** @type {Awaited<ReturnType<typeof openCheckPage>>} */
+    let open;
+    try {
+      open = await openCheckPage(browser, site, route, {
+        context: { colorScheme: scheme, viewport: { width: 1280, height: 900 } },
+      });
+    } catch (problem) {
+      // A landing that is not the page we named. The door's message explains itself.
+      failures += 1;
+      console.log(`✗ ${route} ${scheme}`);
+      console.log(`${problem instanceof Error ? problem.message : String(problem)}`);
+      continue;
+    }
 
-    const page = await ctx.newPage();
-    const response = await page.goto(url, { waitUntil: 'networkidle' });
+    const { page, response, measured } = open;
 
     // A 404 body audits perfectly clean. Without this the gate reports success
     // for a page that does not exist — which it did, against a stale dev server
@@ -52,14 +65,8 @@ for (const route of ROUTES) {
     const status = response?.status() ?? 0;
     if (status !== 200) {
       failures += 1;
-      console.log(`✗ ${route} ${scheme} — expected 200, got ${status} at ${url}`);
-      await ctx.close();
-      continue;
-    }
-    if (new URL(page.url()).pathname !== new URL(url).pathname) {
-      failures += 1;
-      console.log(`✗ ${route} ${scheme} — redirected to ${page.url()}, audited the wrong page`);
-      await ctx.close();
+      console.log(`✗ ${route} ${scheme} — expected 200, got ${status} at ${measured.url}`);
+      await open.close();
       continue;
     }
     await page.evaluate(() => document.fonts.ready);
@@ -68,12 +75,14 @@ for (const route of ROUTES) {
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
       .analyze();
 
-    const tag = `${route} ${scheme}`.padEnd(14);
+    // The page that was audited, not the route that was asked for (MUSE-48): a reader of
+    // this log can see which language each line is about without re-running anything.
+    const tag = `${scheme.padEnd(5)} ${describeMeasured(measured)}`;
     if (violations.length === 0) {
-      console.log(`✓ ${tag} no violations`);
+      console.log(`✓ ${tag}  no violations`);
     } else {
       failures += violations.length;
-      console.log(`✗ ${tag} ${violations.length} violation(s)`);
+      console.log(`✗ ${tag}  ${violations.length} violation(s)`);
       for (const v of violations) {
         console.log(`   [${v.impact}] ${v.id} — ${v.help}`);
         for (const n of v.nodes.slice(0, 3)) {
@@ -83,7 +92,7 @@ for (const route of ROUTES) {
         }
       }
     }
-    await ctx.close();
+    await open.close();
   }
 }
 

@@ -1,5 +1,4 @@
-import { chromium } from 'playwright';
-
+import { describeMeasured, launchChecks, openCheckPage } from './browser-checks.mjs';
 import { openSiteOrExit } from './dist-origin.mjs';
 
 /**
@@ -61,28 +60,45 @@ function check(label, ok, detail) {
  */
 const site = await openSiteOrExit({ routes: PAGES.map((page) => page.route) });
 
-const browser = await chromium.launch();
+const browser = await launchChecks();
 
+/** The page each locale's checks were actually run against, printed once per page. */
+const measuredPages = new Set();
+
+/**
+ * Open one of the schedule pages, as a visitor of that page's language.
+ *
+ * `scripts/browser-checks.mjs` pins the locale the route names and asserts the landing
+ * URL (MUSE-48). This script carried the third copy of the hand-written language-pin line
+ * — there were two when the ticket was filed and three by the time it was picked up,
+ * which is the argument for a mechanism rather than a comment in one sentence.
+ *
+ * Page URLs carry a trailing slash (`trailingSlash: 'always'`, MUSE-9). The unslashed
+ * spelling 404s, and a 404 body paints no schedule at all — which reads as "every layout
+ * check failed" rather than "wrong URL". `site.url`, inside the door, adds that slash.
+ */
 async function open(route, { viewport, colorScheme = 'dark' }) {
-  const ctx = await browser.newContext({ viewport, colorScheme, deviceScaleFactor: 1 });
-  // Keep the homepage language redirect from ever entering the picture.
-  await ctx.addInitScript(() => localStorage.setItem('muse-lang', 'hr'));
-  const page = await ctx.newPage();
-
-  // Page URLs carry a trailing slash (`trailingSlash: 'always'`, MUSE-9). The
-  // unslashed spelling 404s on the dev server, and a 404 body paints no schedule
-  // at all — which reads as "every layout check failed" rather than "wrong URL".
-  // `site.url` is the one place that slash is added.
-  const url = site.url(route);
-  const response = await page.goto(url, { waitUntil: 'networkidle' });
+  const { page, response, measured, close } = await openCheckPage(browser, site, route, {
+    context: { viewport, colorScheme, deviceScaleFactor: 1 },
+  });
 
   const status = response?.status() ?? 0;
   if (status !== 200) {
-    throw new Error(`${url} returned ${status} — the checks below would audit the wrong page`);
+    await close();
+    throw new Error(
+      `${measured.url} returned ${status} — the checks below would audit the wrong page`,
+    );
+  }
+
+  // Which page these checks are about, in the output, once (MUSE-48).
+  const line = describeMeasured(measured);
+  if (!measuredPages.has(line)) {
+    measuredPages.add(line);
+    console.log(`· measuring ${line}`);
   }
 
   await page.evaluate(() => document.fonts.ready);
-  return { ctx, page };
+  return { close, page };
 }
 
 /**
@@ -202,7 +218,7 @@ for (const { locale, route } of PAGES) {
     ['768px', BREAKPOINT, 'grid'],
     ['1280px', DESKTOP, 'grid'],
   ]) {
-    const { ctx, page } = await open(route, { viewport });
+    const { close, page } = await open(route, { viewport });
     const views = await visibleViews(page);
 
     check(
@@ -231,7 +247,7 @@ for (const { locale, route } of PAGES) {
       );
     }
 
-    await ctx.close();
+    await close();
   }
 
   // AC2's "the same data": the painted set at 1280px must equal the painted set
@@ -239,11 +255,11 @@ for (const { locale, route } of PAGES) {
   const mobile = await open(route, { viewport: MOBILE });
   await mobile.page.$$eval('details', (els) => els.forEach((el) => (el.open = true)));
   const mobileSlots = (await paintedSlots(mobile.page)).sort();
-  await mobile.ctx.close();
+  await mobile.close();
 
   const desktop = await open(route, { viewport: DESKTOP });
   const desktopSlots = (await paintedSlots(desktop.page)).sort();
-  await desktop.ctx.close();
+  await desktop.close();
 
   check(
     `AC2 ${locale} the grid paints the same classes as the expanded accordion`,
@@ -266,7 +282,7 @@ for (const { locale, route } of PAGES) {
 // ---------------------------------------------------------------------------
 for (const { locale, route } of PAGES) {
   for (const colorScheme of ['dark', 'light']) {
-    const { ctx, page } = await open(route, { viewport: MOBILE, colorScheme });
+    const { close, page } = await open(route, { viewport: MOBILE, colorScheme });
     const label = `AC6 ${locale} ${colorScheme.padEnd(5)}`;
 
     /** Tab until focus lands inside a `<details>` that is still closed. */
@@ -283,7 +299,7 @@ for (const { locale, route } of PAGES) {
 
     check(`${label} reaches a closed day with Tab alone`, Boolean(reached), 'never focused');
     if (!reached) {
-      await ctx.close();
+      await close();
       continue;
     }
 
@@ -327,7 +343,7 @@ for (const { locale, route } of PAGES) {
     await page.keyboard.press('Space');
     check(`${label} Space expands the day too`, (await state()).open);
 
-    await ctx.close();
+    await close();
   }
 }
 
@@ -348,7 +364,7 @@ for (const { locale, route, empty, one } of PAGES) {
     ['390px', MOBILE],
     ['1280px', DESKTOP],
   ]) {
-    const { ctx, page } = await open(route, { viewport });
+    const { close, page } = await open(route, { viewport });
     const label = `AC4 ${locale} ${name.padEnd(6)}`;
 
     check(
@@ -437,7 +453,7 @@ for (const { locale, route, empty, one } of PAGES) {
       );
     }
 
-    await ctx.close();
+    await close();
   }
 }
 
