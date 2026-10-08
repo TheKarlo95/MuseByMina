@@ -591,7 +591,14 @@ describe('nothing can go back to trusting whatever is at ORIGIN', () => {
     // matching does not fail them — it makes them pass over nothing, which is precisely
     // the shape of "a check that confirms the wrong thing" this ticket is the third
     // instance of. So the discovery is asserted before anything is asserted with it.
-    expect(browserScripts()).toEqual(['a11y.mjs', 'schedule-ux.mjs', 'screenshot-themes.mjs']);
+    expect(browserScripts()).toEqual([
+      'a11y.mjs',
+      // MUSE-63's performance budget. `npm run budget` serves `dist` over an ephemeral
+      // port like the other three, so the guards below apply to it unchanged.
+      'budget.mjs',
+      'schedule-ux.mjs',
+      'screenshot-themes.mjs',
+    ]);
   });
 
   it('routes every one of them through this module', () => {
