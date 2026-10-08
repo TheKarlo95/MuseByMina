@@ -144,6 +144,37 @@ const MEMBER_STARTERS = new Set(
  */
 const SLEEP_NAMES = new Set([frag('waitFor', 'Timeout')]);
 
+/**
+ * Playwright's "a tab appeared" events, and the helper that turns a tab into a document.
+ *
+ * MUSE-61. `context.waitForEvent('page')` resolves when the tab *object* exists, which in
+ * Chromium is while it is still at `about:blank`; everything a test then waits on — `load`
+ * on an already-loaded blank document, a `localStorage` read against an opaque origin — is
+ * no barrier at all, and the assertion reads `about:blank` instead of the page it named.
+ * `settleNewTab` in `test/helpers/browser-settle.ts` is the only wait in the tree that
+ * establishes otherwise, so the rule is that a tab taken out of one of these events is
+ * handed to it.
+ *
+ * Split with `frag` like everything else here, so the textual tripwire and the AST rule can
+ * share one convention and this file never reports its own definitions.
+ */
+const TAB_EVENT = frag('waitFor', 'Event');
+const TAB_EVENT_NAMES = new Set(['page', 'popup']);
+const TAB_COMMIT = frag('settleNew', 'Tab');
+
+/**
+ * The dev server, and the module that asks a server whether its URLs name real pages.
+ *
+ * MUSE-62's rule, implemented here at its author's request rather than in a second parser
+ * of the test tree: `test/fonts.test.ts` drove `astro dev` at a path that 404ed and measured
+ * `404.astro` for eleven green tests, because the error page carries the same stylesheet and
+ * the same six faces as every other page. `astroDev()` now probes a page through
+ * `test/helpers/measured.ts` before handing the server over, which is the primary defence
+ * and a runtime one; this is the belt, for the suite that reaches past the probe.
+ */
+const DEV_SERVER = frag('astro', 'Dev');
+const MEASURED_MODULE = 'measured';
+
 // ---------------------------------------------------------------------------
 // The census: every file under `test/` is one of three kinds, and a fourth is an
 // error rather than a file nobody looks at.
@@ -264,7 +295,32 @@ interface Call {
   object: string | null;
   /** The callee's own name: `rm`, `rmSync`, `spawn`. */
   name: string;
+  /** The first argument when it is a string literal — `waitForEvent('page')`. */
+  firstString: string | null;
+  /** The first argument when it is a bare identifier — `settleNewTab(tab, …)`. */
+  firstIdentifier: string | null;
   line: number;
+}
+
+/**
+ * One `const x = …` whose initializer is simple enough to follow.
+ *
+ * Enough to track a tab from the event that produced it to the wait that commits it, which
+ * is two hops at most: `const opened = ctx.waitForEvent('page')` and then
+ * `const tab = await opened`. Deliberately not a scope-aware resolver — see the honesty note
+ * under `uncommittedTabs` for what that costs.
+ */
+interface Binding {
+  name: string;
+  line: number;
+  /** Was the initializer `await`ed? */
+  awaited: boolean;
+  /** The callee's name, when the initializer is a call. */
+  call: string | null;
+  /** That call's first string argument. */
+  callArgument: string | null;
+  /** The identifier, when the initializer is nothing but one. */
+  identifier: string | null;
 }
 
 interface Facts {
@@ -275,6 +331,8 @@ interface Facts {
   code: string;
   imports: Import[];
   calls: Call[];
+  /** Simple variable declarations, in source order. */
+  bindings: Binding[];
   /** Every string literal and every template-literal text span, separately. */
   literals: { value: string; line: number }[];
 }
@@ -305,12 +363,13 @@ function facts(file: string, source?: string): Facts {
 
   const imports: Import[] = [];
   const calls: Call[] = [];
+  const bindings: Binding[] = [];
   const literals: { value: string; line: number }[] = [];
   const lineOf = (node: ts.Node): number =>
     tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
 
   const visit = (node: ts.Node): void => {
-    collect(node, { imports, calls, literals }, lineOf);
+    collect(node, { imports, calls, bindings, literals }, lineOf);
     ts.forEachChild(node, visit);
   };
   visit(tree);
@@ -321,6 +380,7 @@ function facts(file: string, source?: string): Facts {
     code: blankRanges(text, commentRanges(tree, view)),
     imports,
     calls,
+    bindings,
     literals,
   };
   if (source === undefined) cache.set(file, built);
@@ -358,9 +418,40 @@ function blank(text: string, from: number, to: number): string {
 
 function collect(
   node: ts.Node,
-  into: { imports: Import[]; calls: Call[]; literals: { value: string; line: number }[] },
+  into: {
+    imports: Import[];
+    calls: Call[];
+    bindings: Binding[];
+    literals: { value: string; line: number }[];
+  },
   lineOf: (node: ts.Node) => number,
 ): void {
+  // `const x = …`. Recorded and then fallen through, not returned on: the initializer holds
+  // calls and literals the rules above need, and an early return here would hide them.
+  if (
+    ts.isVariableDeclaration(node) &&
+    ts.isIdentifier(node.name) &&
+    node.initializer !== undefined
+  ) {
+    const awaited = ts.isAwaitExpression(node.initializer);
+    const value = awaited
+      ? (node.initializer as ts.AwaitExpression).expression
+      : node.initializer;
+    const called = ts.isCallExpression(value) ? calleeName(value.expression) : null;
+    const firstArgument = ts.isCallExpression(value) ? value.arguments[0] : undefined;
+    into.bindings.push({
+      name: node.name.text,
+      line: lineOf(node),
+      awaited,
+      call: called,
+      callArgument:
+        firstArgument !== undefined && ts.isStringLiteral(firstArgument)
+          ? firstArgument.text
+          : null,
+      identifier: ts.isIdentifier(value) ? value.text : null,
+    });
+  }
+
   // import … from 'x'  /  export … from 'x'
   if (
     (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
@@ -387,20 +478,43 @@ function collect(
       return;
     }
 
+    // The first argument, in the two forms a rule here asks about: `waitForEvent('page')`
+    // and `settleNewTab(tab, …)`. Nothing deeper — a rule that needed to understand an
+    // expression would be a type checker, not a guard.
+    const firstString = first !== undefined && ts.isStringLiteral(first) ? first.text : null;
+    const firstIdentifier =
+      first !== undefined && ts.isIdentifier(first) ? first.text : null;
+
     if (ts.isIdentifier(callee)) {
-      into.calls.push({ member: false, object: null, name: callee.text, line: lineOf(node) });
+      into.calls.push({
+        member: false,
+        object: null,
+        name: callee.text,
+        firstString,
+        firstIdentifier,
+        line: lineOf(node),
+      });
     } else if (ts.isPropertyAccessExpression(callee)) {
       into.calls.push({
         member: true,
         object: ts.isIdentifier(callee.expression) ? callee.expression.text : null,
         name: callee.name.text,
+        firstString,
+        firstIdentifier,
         line: lineOf(node),
       });
     } else if (ts.isElementAccessExpression(callee)) {
       // fs['rmSync'](…) — the string is the name.
       const key = callee.argumentExpression;
       if (ts.isStringLiteral(key)) {
-        into.calls.push({ member: true, object: null, name: key.text, line: lineOf(node) });
+        into.calls.push({
+          member: true,
+          object: null,
+          name: key.text,
+          firstString,
+          firstIdentifier,
+          line: lineOf(node),
+        });
       }
     }
     return;
@@ -416,6 +530,24 @@ function collect(
   if (ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) {
     into.literals.push({ value: node.text, line: lineOf(node) });
   }
+}
+
+/**
+ * The name a callee is written under — `f`, `o.f`, `o['f']` — or `null`.
+ *
+ * Only the callee's *own* name, the way the `Call` facts above read it: what a call is
+ * reached through is a separate question and no rule here asks it.
+ */
+function calleeName(expression: ts.Expression): string | null {
+  if (ts.isIdentifier(expression)) return expression.text;
+  if (ts.isPropertyAccessExpression(expression)) return expression.name.text;
+  if (
+    ts.isElementAccessExpression(expression) &&
+    ts.isStringLiteral(expression.argumentExpression)
+  ) {
+    return expression.argumentExpression.text;
+  }
+  return null;
 }
 
 /** The names an import clause brings in, as the *exporting* module spells them. */
@@ -586,6 +718,133 @@ export function fixedSleeps(file: string, source?: string): Offence[] {
         `(MUSE-54). Wait for the condition it is approximating; ` +
         `test/helpers/browser-settle.ts has the shapes.`,
     }));
+}
+
+/**
+ * A new tab taken out of a Playwright event and never gated on a commit.
+ *
+ * MUSE-61, and the rule is about the class rather than about the line that failed.
+ * `context.waitForEvent('page')` hands back a tab that exists; in Chromium a middle-click
+ * creates it at `about:blank` and the document arrives later. Everything the suite then
+ * waited on was satisfiable in that state — reproduced deterministically by delaying the
+ * tab's first document request — so `expect(tab.url())` compared against the empty document
+ * and a pull request touching no browser code went red. The gate has to be a **commit**, and
+ * `settleNewTab` is the only thing in the tree that establishes one.
+ *
+ * Two hops of dataflow, which is all the idiom needs: the promise (`const opened =
+ * ctx.waitForEvent('page')`) and the tab awaited out of it (`const tab = await opened`), plus
+ * the direct `const tab = await ctx.waitForEvent('page')`. A tab is satisfied when
+ * `settleNewTab` is called with it as its first argument.
+ *
+ * ---
+ *
+ * **What this rule cannot reach**, in the same spirit as the note under `fixedSleeps` — a
+ * rule whose limits are not written down is read as a rule with none:
+ *
+ *   - **A tab nothing binds to a name.** `(await opened).waitForLoadState('load')` is
+ *     invisible here, and the textual tripwire deliberately does **not** cover it: the event
+ *     is legitimate and necessary — it is how a middle-click's tab is taken delivery of at
+ *     all — so a needle on its name would fire on correct code for ever, and the cheapest
+ *     way to silence a permanent false positive is to delete the needle. Naming the tab is
+ *     the normal way to write it, and the funnel below is what makes that reliable.
+ *   - **Matching is by name across the whole file, not by scope.** Two tests that both call
+ *     their tab `tab` are satisfied by either one routing it. That is the same crudeness
+ *     `buildDirectoryNames` accepts, and it is why the suite now takes delivery of a tab in
+ *     exactly one helper: one binding is a rule that cannot be fooled by a second one.
+ *   - **It says nothing about what happens *after* the commit.** A test that waits properly
+ *     and then asserts the wrong thing is a wrong test, not a flaky one, and no guard reading
+ *     syntax can tell those apart.
+ */
+export function uncommittedTabs(file: string, source?: string): Offence[] {
+  const { calls, bindings } = facts(file, source);
+
+  /** Variables holding the *promise* of a tab, and the line it was asked for on. */
+  const promised = new Map<string, number>();
+  /**
+   * Every tab the file takes delivery of — a list, not a map keyed by name.
+   *
+   * Three tests each calling theirs `tab` is the shape this rule was written against, and a
+   * map would report the last of them and hide the other two. The *verdict* is still by
+   * name, which is the crudeness noted above; the *report* names every line.
+   */
+  const tabs: { name: string; line: number }[] = [];
+
+  for (const binding of bindings) {
+    const fromEvent =
+      binding.call === TAB_EVENT &&
+      binding.callArgument !== null &&
+      TAB_EVENT_NAMES.has(binding.callArgument);
+
+    if (fromEvent) {
+      if (binding.awaited) tabs.push({ name: binding.name, line: binding.line });
+      else promised.set(binding.name, binding.line);
+      continue;
+    }
+    // `const tab = await opened` — the second hop, and the only one.
+    const awaitedFrom =
+      binding.awaited && binding.identifier !== null
+        ? promised.get(binding.identifier)
+        : undefined;
+    if (awaitedFrom !== undefined) tabs.push({ name: binding.name, line: awaitedFrom });
+  }
+
+  const committed = new Set(
+    calls
+      .filter((call) => call.name === TAB_COMMIT && call.firstIdentifier !== null)
+      .map((call) => call.firstIdentifier as string),
+  );
+
+  return tabs
+    .filter(({ name }) => !committed.has(name))
+    .map(({ name, line }) => ({
+      file,
+      line,
+      what:
+        `takes a new tab out of ${TAB_EVENT}() into \`${name}\` and never waits for it to ` +
+        `commit a document (MUSE-61) — a tab arrives at about:blank, and \`load\` and a ` +
+        `localStorage read are both satisfiable there. Hand it to ${TAB_COMMIT}() from ` +
+        `test/helpers/browser-settle.ts before asserting anything about it.`,
+    }));
+}
+
+/**
+ * A dev server driven by a file that never asks whether its URLs name real pages.
+ *
+ * MUSE-62's rule, and its reasoning: `test/fonts.test.ts` requested a path that 404ed and
+ * measured `404.astro` for eleven green tests, because the error page carries the same
+ * stylesheet and the same six faces as every page it was standing in for. The primary
+ * defence is a runtime one — `astroDev()` probes a page through `test/helpers/measured.ts`
+ * before it hands the server over — so this is the belt: a suite that reaches past the probe
+ * still has to have the question in front of it.
+ *
+ * Keyed on the **module**, not on which function is called: `fetchMeasuredPage` and
+ * `assertMeasuredPage` answer the same question in two syntaxes and a rule naming one of
+ * them would be satisfied by neither. It lives here rather than in a second parser of the
+ * test tree, which is why MUSE-62 left both these files alone.
+ *
+ * What it cannot reach: a file that imports the module and then does not use it. An import
+ * nothing uses is a lint failure in this repository (`astro check`), which is a different
+ * gate doing its own job.
+ */
+export function unmeasuredDevServers(file: string, source?: string): Offence[] {
+  const { imports } = facts(file, source);
+  const drives = imports.filter((entry) => entry.name === DEV_SERVER);
+  if (drives.length === 0) return [];
+
+  const measures = imports.some(
+    (entry) => entry.module.split('/').pop() === MEASURED_MODULE,
+  );
+  if (measures) return [];
+
+  return drives.map(({ line }) => ({
+    file,
+    line,
+    what:
+      `imports ${DEV_SERVER} but not ./${MEASURED_MODULE} — a dev server answers an unknown ` +
+      `path with the error page, which carries the same stylesheet and fonts as the page ` +
+      `that was asked for (MUSE-62). Read pages through fetchMeasuredPage/assertMeasuredPage ` +
+      `so a wrong URL is a named failure rather than eleven green tests.`,
+  }));
 }
 
 /**
