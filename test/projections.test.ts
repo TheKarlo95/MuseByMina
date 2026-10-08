@@ -30,6 +30,7 @@ import {
   SLOT_DANGLING_OVERRIDE,
   SLOT_PARTIAL_DANGLING_OVERRIDE,
   SLOT_WITH_DANGLING_TEACHER,
+  STUDIO_STORY_DOC,
   expectedImage,
   fixtureOf,
 } from './helpers/structural-content';
@@ -475,15 +476,57 @@ describe('STUDIO_STORY_QUERY: the dated origin story', () => {
   });
 
   it('reports a dataset with no story as never created, not as a broken query', async () => {
-    // The state the live dataset is in today, and the state `main` must keep building in:
-    // `/aboutus` is deliberately not routed until the document exists (MUSE-23), so
-    // nothing calls this reader yet. When the follow-up routes the page, this is the
-    // message that has to name the document.
+    // `/aboutus` is routed as of MUSE-60, so this is no longer a message nobody would
+    // read: it is what every pull request and every deploy gets if the `studioStory`
+    // document is deleted from the dataset. The build is right to stop — the alternative
+    // is publishing a heading above nothing — and the error has to name the document so
+    // the reader knows which of the three cases ("unreachable", "empty", "malformed") it
+    // was.
     const empty = fixtureOf([SITE_SETTINGS_DOC], 'projections-no-story');
     const run = from(empty, () => getStudioStory());
 
     await expect(run).rejects.toThrow(SanityContentError);
     await expect(run).rejects.toThrow(/`studioStory`/);
+  });
+
+  /**
+   * **`foundedOn` is optional as of MUSE-60, and optional is not unchecked.**
+   *
+   * No founding date for this studio is recorded anywhere, and the placeholder story
+   * MUSE-60 seeded is held to asserting nothing checkable — so a required date could only
+   * have been satisfied by inventing one. That makes a story *without* the field the
+   * ordinary case, and it is the case `FULL` cannot exercise, because `STUDIO_STORY_DOC`
+   * carries a date on purpose (the §10 date forms are an acceptance criterion of their
+   * own).
+   *
+   * Two rows, both needed. Absent has to decode to `undefined` rather than failing, and a
+   * value that is present but not a calendar date has to fail **naming the field** — a
+   * date the CDN answers `"not a date"` for would otherwise reach `formatDate` and publish
+   * „Od Invalid Date".
+   */
+  it('accepts a story with no founding date, and names a malformed one', async () => {
+    const undated = fixtureOf(
+      [
+        SITE_SETTINGS_DOC,
+        Object.fromEntries(
+          Object.entries(STUDIO_STORY_DOC).filter(([field]) => field !== 'foundedOn'),
+        ) as typeof STUDIO_STORY_DOC,
+      ],
+      'projections-undated-story',
+    );
+    const story = await from(undated, () => getStudioStory());
+    expect(story.foundedOn).toBeUndefined();
+    // And the rest of the document still arrived, so "optional" did not become "dropped".
+    expect(story.heading).toEqual({ hr: 'HR story heading', en: 'EN story heading' });
+    expect(story.story).toHaveLength(2);
+
+    const malformed = fixtureOf(
+      [SITE_SETTINGS_DOC, { ...STUDIO_STORY_DOC, foundedOn: '13.08.2026.' }],
+      'projections-malformed-date',
+    );
+    const run = from(malformed, () => getStudioStory());
+    await expect(run).rejects.toThrow(SanityContentError);
+    await expect(run).rejects.toThrow(/foundedOn/);
   });
 });
 

@@ -34,6 +34,16 @@
  * be held to its acceptance criteria, and it goes away with the follow-up ticket that
  * routes the page properly. If an entry here outlives the ticket that added it, that is a
  * page somebody forgot to ship.
+ *
+ * That rule has now been exercised once: MUSE-60 routed `/aboutus` and deleted the entry,
+ * and `PREVIEW_ROUTES` is empty. What that costs is the one guard in point 4 that is a
+ * *loop over the registry* — "every entry point is under `test/`" passes vacuously with
+ * nothing to iterate — so `test/aboutus.test.ts` keeps it for the next entry and leans on
+ * the half that still has a subject: `requestedPreviews` must **throw** for a name that is
+ * not in the registry, which is what makes a stale `MUSE_PREVIEW_ROUTES=aboutus` a named
+ * error rather than a build that silently injects nothing. The guard on no workflow and no
+ * `package.json` script assigning the variable is a claim about the variable rather than
+ * about the registry, and is unaffected.
  */
 
 /** The environment variable that asks for preview routes. Comma-separated names. */
@@ -44,11 +54,22 @@ export const PREVIEW_ROUTE_ENV = 'MUSE_PREVIEW_ROUTES';
  *
  * Paths are repo-relative with a leading `./`, which is what `injectRoute` wants and what
  * lets the guard in `test/aboutus.test.ts` check they are all under `test/`.
+ *
+ * **Empty, and empty is the healthy state** (MUSE-60). `aboutus` was the only entry there
+ * has ever been, and MUSE-60 routed the page: `src/pages/aboutus.astro`, its English twin,
+ * the `ROUTES` entry, the nav entry and the `studioStory` document, together. The rule
+ * above is not satisfied by an entry whose component has since shipped, so the entry went
+ * with the ticket rather than becoming the staging area this file says it must not be.
+ *
+ * Add one the next time a page ticket splits because its *content* is not ready, and
+ * delete it in the ticket that routes the page. The mechanism stays because that split
+ * keeps recurring in this project — `/aboutus` was the second page built against a dataset
+ * that could not feed it — and because an empty registry costs a deploy nothing:
+ * `requestedPreviews` answers `[]` for an unset variable, `previewRoutes()` in
+ * `astro.config.mjs` spreads an empty list, and the output is byte-identical to a build
+ * that has never heard of any of this.
  */
-export const PREVIEW_ROUTES: Record<string, string> = {
-  // MUSE-23. Remove this when the follow-up adds `src/pages/aboutus.astro`.
-  aboutus: './test/preview/aboutus.astro',
-};
+export const PREVIEW_ROUTES: Record<string, string> = {};
 
 /**
  * Which previews this build was asked for, validated.

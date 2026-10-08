@@ -52,22 +52,43 @@ import { imageField } from '../objects/image';
  * `13. kolovoza 2026.`, EN `13 August 2026` (design system §10) — and a formatting rule in
  * a CMS field is how you publish a date in the wrong language. Same argument as the time
  * format on `scheduleSlot.start` and the currency on `pricingTier.priceEur`.
+ *
+ * **It stopped being `required()` in MUSE-60, and that is the optional-field argument
+ * again rather than a relaxation.** MUSE-60 routed `/aboutus` with a placeholder story,
+ * under one content rule: the placeholder may assert nothing checkable — no founding year,
+ * no student count, no claim about anybody's training. No founding date for this studio is
+ * written down anywhere, so a `required()` date could only have been satisfied by picking
+ * one and publishing it as fact, which is exactly the move that made MUSE-36 Urgent. The
+ * page omits the line when there is none, the way a card with no bio is a name and a role.
+ * Put it back on the required list when Mina has said a date, not before.
  */
 export const studioStory = defineType({
   name: 'studioStory',
   title: 'Priča studija',
   type: 'document',
   description:
-    'Kako je studio počeo i tko ga vodi — tekst na stranici „O nama”. Jedan zapis, ne više njih.',
+    'Kako je studio počeo i tko ga vodi — tekst na stranici „O nama”. Jedan zapis, ne više ' +
+    'njih. PRIVREMENI TEKST: naslov i odlomci koji su sada upisani su rezerva, napisani da ' +
+    'stranica može izaći, i ne govore ništa o studiju što se može provjeriti. Prepiši ih ' +
+    'svojim riječima kad budeš imala vremena — sve što tu upišeš ide na stranicu bez ' +
+    'objave koda.',
   fields: [
     defineField({
       name: 'heading',
       title: 'Naslov',
       type: 'localeString',
       description:
-        'Naslov iznad priče, npr. „Kako je sve počelo”. Jedna linija, bez točke na kraju.',
+        'Naslov iznad priče, npr. „Kako je sve počelo”. Jedna linija, bez točke na kraju. ' +
+        'Ono što je sada upisano je privremeno — slobodno prepiši.',
       validation: (Rule) => Rule.required(),
     }),
+    /**
+     * **Optional as of MUSE-60.** See the long note above the type for why.
+     *
+     * In short: no founding date for this studio is recorded anywhere, and MUSE-60's
+     * content rule is that the placeholder story asserts nothing checkable. A required
+     * date could only be satisfied by inventing one.
+     */
     defineField({
       name: 'foundedOn',
       title: 'Datum otvaranja studija',
@@ -75,9 +96,9 @@ export const studioStory = defineType({
       description:
         'Dan kad je studio počeo raditi. Stranica sama piše „13. kolovoza 2026.” na ' +
         'hrvatskom i „13 August 2026” na engleskom — format je pravilo oblikovanja, ne ' +
-        'tekst koji se upisuje.',
+        'tekst koji se upisuje. Nije obavezno: dok datuma nema, stranica ga ne spominje. ' +
+        'Nemoj upisivati približan datum — bolje prazno nego pogrešno.',
       options: { dateFormat: 'DD.MM.YYYY.' },
-      validation: (Rule) => Rule.required().error('Datum otvaranja je obavezan.'),
     }),
     defineField({
       name: 'story',
@@ -87,7 +108,9 @@ export const studioStory = defineType({
       description:
         'Po jedan odlomak u jednom polju — dodaj novi za svaki odlomak, ne stavljaj prazan ' +
         'red unutar jednog. Dvije do tri rečenice po odlomku. Piši kao da nekome ' +
-        'objašnjavaš zašto si otvorila studio, bez nabrajanja titula. Najmanje jedan odlomak.',
+        'objašnjavaš zašto si otvorila studio, bez nabrajanja titula. Najmanje jedan ' +
+        'odlomak. PRIVREMENI TEKST: dva odlomka koja su sada upisana su rezerva — prepiši ' +
+        'ih svojima.',
       validation: (Rule) => Rule.required().min(1).error('Dodaj barem jedan odlomak.'),
     }),
   ],

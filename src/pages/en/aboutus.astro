@@ -1,0 +1,11 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import AboutUs from '../../components/AboutUs.astro';
+import { getPage } from '../../lib/sanity';
+
+const meta = await getPage('/aboutus');
+---
+
+<BaseLayout locale="en" title={meta.title.en} description={meta.description.en}>
+  <AboutUs locale="en" />
+</BaseLayout>

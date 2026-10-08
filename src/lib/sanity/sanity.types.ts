@@ -85,7 +85,7 @@ export type Page = {
   _createdAt: string;
   _updatedAt: string;
   _rev: string;
-  route: "/" | "/schedule" | "/pricing" | "/contact" | "/privacy";
+  route: "/" | "/schedule" | "/pricing" | "/aboutus" | "/contact" | "/privacy";
   name: LocaleString;
   title: LocaleString;
   description: LocaleString;
@@ -319,7 +319,7 @@ export type StudioStory = {
   _updatedAt: string;
   _rev: string;
   heading: LocaleString;
-  foundedOn: string;
+  foundedOn?: string;
   story: Array<
     {
       _key: string;
@@ -495,7 +495,7 @@ export type SITE_SETTINGS_QUERY_RESULT = {
 // Query: *[_type == "page"] | order(route asc){    _id,    route,    name{ hr, en },    title{ hr, en },    description{ hr, en }  }
 export type PAGES_QUERY_RESULT = Array<{
   _id: string;
-  route: "/" | "/contact" | "/pricing" | "/privacy" | "/schedule";
+  route: "/" | "/aboutus" | "/contact" | "/pricing" | "/privacy" | "/schedule";
   name: {
     hr: string;
     en: string;
@@ -594,7 +594,7 @@ export type STUDIO_STORY_QUERY_RESULT = {
     hr: string;
     en: string;
   };
-  foundedOn: string;
+  foundedOn: string | null;
   story: Array<{
     hr: string;
     en: string;

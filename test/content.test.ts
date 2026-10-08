@@ -214,6 +214,16 @@ const ADDED_AFTER_THE_MIGRATION: { route: string; ticket: string; because: strin
       'holds no tier — so `/pricing` arrived with the two periods the studio confirmed, ' +
       'after this receipt was written. Its copy is asserted in `test/pricing.test.ts`.',
   },
+  {
+    route: '/aboutus',
+    ticket: 'MUSE-60',
+    because:
+      'The about page. MUSE-23 built the component and deliberately did not route it — ' +
+      'the dataset held no `studioStory` and `getStudioStory()` fails the build naming ' +
+      'the missing document — so `/aboutus` arrived after this receipt was written. Its ' +
+      'story is **placeholder prose seeded in the dataset**, awaiting Mina\'s words; its ' +
+      'copy is asserted in `test/aboutus.test.ts`.',
+  },
 ];
 
 function addedEntry(route: string) {
@@ -454,16 +464,23 @@ describe('the migration is a committed artefact, not a Studio session', () => {
      * two, because the studio confirmed two periods and no others. A third one appearing
      * here is a price nobody agreed to, which is MUSE-36 on the one field where it is also
      * a commercial claim; `test/pricing.test.ts` holds the amounts themselves.
+     *
+     * MUSE-60 added the sixth `page` document and the `studioStory` singleton. The
+     * instructor count staying at **two** is the load-bearing half of that one: the page
+     * it routes is the roster, and a third instructor appearing here is a person who does
+     * not teach here — MUSE-36 exactly. `test/aboutus.test.ts` holds the names, and holds
+     * that neither of the two has a bio nobody wrote.
      */
     const byType = new Map<string, number>();
     for (const doc of seedDocs()) byType.set(doc._type, (byType.get(doc._type) ?? 0) + 1);
     expect([...byType.entries()].sort()).toEqual([
       ['class', 4],
       ['instructor', 2],
-      ['page', 5],
+      ['page', 6],
       ['pricingTier', 2],
       ['scheduleSlot', 4],
       ['siteSettings', 1],
+      ['studioStory', 1],
     ]);
   });
 
@@ -594,6 +611,41 @@ describe('AC1: every page renders the words `main` published', () => {
           `[${expectedCopy(route, 'name', locale)}]`,
         );
       }
+    }
+  });
+
+  /**
+   * The anti-narrowing half of `ADDED_AFTER_THE_MIGRATION`: a route is frozen or it is
+   * declared new, and nothing is quietly neither.
+   *
+   * Without this, a page added to `ROUTES` with no frozen entry would make `expectedCopy`
+   * read the seed for it — comparing the build to its own input, which is the exact
+   * failure the header of this file says a reviewer demonstrated.
+   */
+  it('accounts for every route: frozen before the migration, or declared as added since', () => {
+    const unaccounted = ROUTES.map(({ route }) => route).filter(
+      (route) =>
+        PUBLISHED_BEFORE_THE_MIGRATION.pages[route] === undefined && !addedEntry(route),
+    );
+    expect(
+      unaccounted,
+      'these routes have no frozen copy and are not listed in ' +
+        'ADDED_AFTER_THE_MIGRATION, so their words are being compared against the seed ' +
+        'the build just read, which asserts nothing',
+    ).toEqual([]);
+
+    for (const entry of ADDED_AFTER_THE_MIGRATION) {
+      expect(entry.ticket, entry.route).not.toBe('');
+      expect(entry.because.length, `${entry.route} needs a reason`).toBeGreaterThan(40);
+      // A route cannot be both: the frozen entry is the stronger claim, and an "added"
+      // entry beside one would switch it off.
+      expect(
+        PUBLISHED_BEFORE_THE_MIGRATION.pages[entry.route],
+        `${entry.route} is listed as added after the migration and is also frozen`,
+      ).toBeUndefined();
+      expect(ROUTES.map(({ route }) => route), `${entry.route} is not a route`).toContain(
+        entry.route,
+      );
     }
   });
 

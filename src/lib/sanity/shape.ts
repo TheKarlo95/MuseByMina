@@ -296,19 +296,28 @@ const _postAuthorOptional: AssertPostAuthorOptional = true;
 const _postAuthorRef: AssertPostProjectsAuthorRef = true;
 
 /**
- * The origin story's fields, all three of which `/aboutus` cannot render without.
+ * The origin story's fields: the two `/aboutus` cannot render without, and the date it
+ * renders when there is one.
  *
  * The singleton is nullable by construction — `[0]` on an empty set is `null` — so, as
  * with `siteSettings`, the assertion is on the document's fields rather than on the
  * document. `story` being an array is asserted separately: `Guaranteed` would be satisfied
  * by a renamed projection that happened to resolve to a single object.
+ *
+ * `foundedOn` moved onto the optional list in MUSE-60 — no founding date for this studio
+ * is recorded and a required one could only be invented — and it is asserted *as*
+ * optional rather than left unasserted, for the reason `instagram` is: a field with no
+ * assertion at all is a field nothing watches, and deleting it from the projection would
+ * simply stop the generated type having the key.
  */
 type StoryRow = NonNullable<STUDIO_STORY_QUERY_RESULT>;
 const _storyFields: [
   Guaranteed<StoryRow, 'heading'>,
-  Guaranteed<StoryRow, 'foundedOn'>,
   Guaranteed<StoryRow, 'story'>,
-] = [true, true, true];
+] = [true, true];
+
+export type AssertStoryFoundedOnOptional = OptionalIn<StoryRow, 'foundedOn'>;
+const _storyFoundedOnOptional: AssertStoryFoundedOnOptional = true;
 
 export type AssertStoryIsParagraphs = Same<
   StoryRow['story'],

@@ -441,6 +441,10 @@
             },
             {
               "type": "string",
+              "value": "/aboutus"
+            },
+            {
+              "type": "string",
               "value": "/contact"
             },
             {
@@ -1978,7 +1982,7 @@
         "value": {
           "type": "string"
         },
-        "optional": false
+        "optional": true
       },
       "story": {
         "type": "objectAttribute",

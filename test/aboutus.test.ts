@@ -1209,10 +1209,17 @@ describe('AC: the story came from the dataset, and an edit moves it', () => {
 
   it('leaves the seeded story nowhere in the output — not one byte', () => {
     const seeded = seededStory();
+    /**
+     * The two locale values of each field, and only those. `Object.values` over a
+     * `localeString` also hands back `"localeString"` and a paragraph's `_key` — and `p1`
+     * is a two-byte needle that matches inside a woff2 by coincidence, which is a failure
+     * with nothing wrong behind it.
+     */
     const words = [
-      ...Object.values(seeded.heading as Record<Locale, string>),
-      ...(seeded.story as Record<Locale, string>[]).flatMap((p) => Object.values(p)),
-    ].filter((value) => typeof value === 'string' && value !== '');
+      seeded.heading as Record<Locale, string>,
+      ...(seeded.story as Record<Locale, string>[]),
+    ].flatMap((field) => LOCALES.map((locale) => field[locale]));
+    expect(words.every((word) => typeof word === 'string' && word !== '')).toBe(true);
     expect(words.length).toBeGreaterThan(0);
 
     const stale = edited
