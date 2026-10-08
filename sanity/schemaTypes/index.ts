@@ -3,6 +3,7 @@ import type { SchemaTypeDefinition } from 'sanity';
 import { danceClass, instructor, scheduleSlot, studioStory } from './documents/studio';
 import { event, pricingTier } from './documents/offering';
 import { faq, galleryImage, post } from './documents/media';
+import { prosePage } from './documents/prose';
 import { page, siteSettings } from './documents/site';
 import { localeRichText, localeString, localeText } from './objects/locale';
 
@@ -36,6 +37,9 @@ export const schemaTypes: SchemaTypeDefinition[] = [
 
   // Site-wide
   page,
+  // The body of a page that is only prose — `/whatisbachata` today, and the shape the
+  // other three trust pages of MUSE-27 are built for (MUSE-65).
+  prosePage,
   siteSettings,
 ];
 

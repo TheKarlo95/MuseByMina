@@ -1,0 +1,11 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import WhatIsBachata from '../components/WhatIsBachata.astro';
+import { getPage } from '../lib/sanity';
+
+const meta = await getPage('/whatisbachata');
+---
+
+<BaseLayout locale="hr" title={meta.title.hr} description={meta.description.hr}>
+  <WhatIsBachata locale="hr" />
+</BaseLayout>

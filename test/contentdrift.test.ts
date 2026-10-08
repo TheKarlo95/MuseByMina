@@ -213,6 +213,37 @@ const CMS_OWNS: { path: string; why: string }[] = [
       'have been filled with fiction if it had been written in code.',
   },
   {
+    path: 'prosePage.heading',
+    why:
+      "the `<h1>` of `/whatisbachata` (MUSE-65). Mina's words, and deliberately not the " +
+      'nav label: the menu entry is „Što je bachata" and the heading is the question it ' +
+      'answers, „Što je bachata?". A page whose whole job is to explain something is the ' +
+      'page a developer is most tempted to write prose into, because the prose is not ' +
+      'about the studio and so feels safe — and it is still copy nobody can reword ' +
+      'without a deploy.',
+  },
+  {
+    path: 'prosePage.lede',
+    why:
+      'the paragraph under that heading — what somebody who reads one line and leaves has ' +
+      'learned. Same field family as the heading, same argument.',
+  },
+  {
+    path: 'prosePage.sections[].heading',
+    why:
+      'the `<h2>`s of a prose page, which are what a reader and a screen reader skim by. ' +
+      'A subheading in code is a structure the CMS cannot change.',
+  },
+  {
+    path: 'prosePage.sections[].body[]',
+    why:
+      'the prose itself, and the field this guard matters most for on this type. One ' +
+      'paragraph of it names the three bachata styles — the dimension MUSE-36 deleted as ' +
+      '`STYLES` because the three were invented — and the whole safety of saying it is ' +
+      'that it is a sentence about the dance in the dataset rather than a list in code. ' +
+      'A copy under `src/` is that distinction gone.',
+  },
+  {
     path: 'studioStory.heading',
     why:
       'the `<h1>` of `/aboutus`. One of two fields on the one page whose entire subject ' +
@@ -267,6 +298,14 @@ const MAY_APPEAR_IN_CODE: { path: string; why: string }[] = [
       'ticket just moved into the CMS — three correct spellings. The genuine duplication ' +
       'here is `studioLabel` against `page.name.hr` and it needs a *different* guard: ' +
       'equality pinning, not absence. See the note under "one guard, or two" below.',
+  },
+  {
+    path: 'prosePage.route',
+    why:
+      'code is its source, exactly as `page.route` is: `ROUTES` in `src/lib/pages.ts` ' +
+      'decides which pages exist and the Studio builds its dropdown from it, so the arrow ' +
+      'runs from here into the dataset. A route under `src/` is the original — this one ' +
+      'is spelled in `ROUTES`, in `MORE_NAV` and in the two page wrappers.',
   },
   {
     path: 'page.route',

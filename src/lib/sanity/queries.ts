@@ -87,6 +87,37 @@ export const PAGES_QUERY = defineQuery(`
 `);
 
 /**
+ * The body of every page that is only prose (MUSE-65).
+ *
+ * One query for all of them rather than one per route, and that is the half worth keeping:
+ * `getProsePage(route)` indexes the result by route, so **two documents describing one
+ * route is an error it can name** rather than a page whose heading depends on which row
+ * GROQ answered first — the same reasoning as `PAGES_QUERY` and `pagesByRoute`.
+ *
+ * `sections` is a two-level array and both levels are projected member by member, for the
+ * reason every bilingual value is projected as `{hr, en}`: a bare `sections[]` would hand
+ * the page the `prosePageSection` wrapper, and a bare `body[]` the `localeText` one. The
+ * **order of both** is what the page renders — an explanation given backwards is still an
+ * explanation made of well-formed paragraphs, so no decoder can catch it and
+ * `test/whatisbachata.test.ts` asserts the positions against the dataset instead.
+ *
+ * No dereference in here, so no `_ref` beside one (MUSE-49). If a future trust page gives
+ * a section a reference — an instructor, a class — the pair rule applies to it.
+ */
+export const PROSE_PAGES_QUERY = defineQuery(`
+  *[_type == "prosePage"] | order(route asc){
+    _id,
+    route,
+    heading{ hr, en },
+    lede{ hr, en },
+    "sections": sections[]{
+      heading{ hr, en },
+      "body": body[]{ hr, en }
+    }
+  }
+`);
+
+/**
  * The weekly schedule, flattened into the shape `src/lib/schedule.ts` already renders.
  *
  * A slot carries the day and the time; everything else is dereferenced off the class it
@@ -297,6 +328,7 @@ export const DOCUMENT_COUNTS_QUERY = defineQuery(`
     "siteSettings": count(*[_type == "siteSettings"]),
     "studioStory": count(*[_type == "studioStory"]),
     "page": count(*[_type == "page"]),
+    "prosePage": count(*[_type == "prosePage"]),
     "class": count(*[_type == "class"]),
     "scheduleSlot": count(*[_type == "scheduleSlot"]),
     "instructor": count(*[_type == "instructor"]),

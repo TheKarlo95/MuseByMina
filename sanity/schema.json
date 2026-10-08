@@ -388,6 +388,156 @@
     }
   },
   {
+    "name": "prosePage",
+    "type": "document",
+    "attributes": {
+      "_id": {
+        "type": "objectAttribute",
+        "value": {
+          "type": "string"
+        }
+      },
+      "_type": {
+        "type": "objectAttribute",
+        "value": {
+          "type": "string",
+          "value": "prosePage"
+        }
+      },
+      "_createdAt": {
+        "type": "objectAttribute",
+        "value": {
+          "type": "string"
+        }
+      },
+      "_updatedAt": {
+        "type": "objectAttribute",
+        "value": {
+          "type": "string"
+        }
+      },
+      "_rev": {
+        "type": "objectAttribute",
+        "value": {
+          "type": "string"
+        }
+      },
+      "route": {
+        "type": "objectAttribute",
+        "value": {
+          "type": "union",
+          "of": [
+            {
+              "type": "string",
+              "value": "/"
+            },
+            {
+              "type": "string",
+              "value": "/whatisbachata"
+            },
+            {
+              "type": "string",
+              "value": "/schedule"
+            },
+            {
+              "type": "string",
+              "value": "/pricing"
+            },
+            {
+              "type": "string",
+              "value": "/aboutus"
+            },
+            {
+              "type": "string",
+              "value": "/contact"
+            },
+            {
+              "type": "string",
+              "value": "/privacy"
+            }
+          ]
+        },
+        "optional": false
+      },
+      "heading": {
+        "type": "objectAttribute",
+        "value": {
+          "type": "inline",
+          "name": "localeString"
+        },
+        "optional": false
+      },
+      "lede": {
+        "type": "objectAttribute",
+        "value": {
+          "type": "inline",
+          "name": "localeText"
+        },
+        "optional": false
+      },
+      "sections": {
+        "type": "objectAttribute",
+        "value": {
+          "type": "array",
+          "of": {
+            "type": "object",
+            "attributes": {
+              "heading": {
+                "type": "objectAttribute",
+                "value": {
+                  "type": "inline",
+                  "name": "localeString"
+                },
+                "optional": false
+              },
+              "body": {
+                "type": "objectAttribute",
+                "value": {
+                  "type": "array",
+                  "of": {
+                    "type": "object",
+                    "attributes": {
+                      "_key": {
+                        "type": "objectAttribute",
+                        "value": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "rest": {
+                      "type": "inline",
+                      "name": "localeText"
+                    }
+                  }
+                },
+                "optional": false
+              },
+              "_type": {
+                "type": "objectAttribute",
+                "value": {
+                  "type": "string",
+                  "value": "prosePageSection"
+                }
+              }
+            },
+            "rest": {
+              "type": "object",
+              "attributes": {
+                "_key": {
+                  "type": "objectAttribute",
+                  "value": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "optional": false
+      }
+    }
+  },
+  {
     "name": "page",
     "type": "document",
     "attributes": {
@@ -430,6 +580,10 @@
             {
               "type": "string",
               "value": "/"
+            },
+            {
+              "type": "string",
+              "value": "/whatisbachata"
             },
             {
               "type": "string",

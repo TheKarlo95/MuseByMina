@@ -59,11 +59,16 @@ export interface SiteRoute {
 /** Indexable pages, in the order they should be listed. Error routes are not here. */
 export const ROUTES: SiteRoute[] = [
   { route: '/', studioLabel: 'Početna' },
+  // Ahead of the timetable, deliberately (MUSE-65). This page answers "what is bachata",
+  // which is the question somebody has *before* they look at what is on — and it is the
+  // site's best organic entry point, so the order a machine reads the site in should put
+  // the explanation before the schedule rather than after it.
+  { route: '/whatisbachata', studioLabel: 'Što je bachata' },
   { route: '/schedule', studioLabel: 'Raspored' },
   // Inserted rather than appended (MUSE-59, MUSE-60): the order here is the order
   // `llms.txt` lists the site in and the order the Studio's dropdown offers, and it is the
-  // order a reader meets the pages — what is on, what it costs, who teaches it, how to
-  // come.
+  // order a reader meets the pages — what the dance is, what is on, what it costs, who
+  // teaches it, how to come.
   { route: '/pricing', studioLabel: 'Cjenik' },
   { route: '/aboutus', studioLabel: 'O nama' },
   { route: '/contact', studioLabel: 'Kontakt' },

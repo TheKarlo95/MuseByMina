@@ -25,6 +25,8 @@ import {
   POST_FUTURE,
   POST_NOW,
   PAGE_DOCS,
+  PROSE_PAGE_DOC,
+  ROUTE_FOR_PROSE,
   SITE_SETTINGS_DOC,
   SLOT_DANGLING_CLASS,
   SLOT_DANGLING_OVERRIDE,
@@ -47,6 +49,7 @@ import {
   getPageMeta,
   getPosts,
   getPricingTiers,
+  getProsePage,
   getSchedule,
   getSiteSettings,
   getStudioStory,
@@ -527,6 +530,98 @@ describe('STUDIO_STORY_QUERY: the dated origin story', () => {
     const run = from(malformed, () => getStudioStory());
     await expect(run).rejects.toThrow(SanityContentError);
     await expect(run).rejects.toThrow(/foundedOn/);
+  });
+});
+
+/* ------------------------------------------------------------ PROSE_PAGES_QUERY */
+
+describe('PROSE_PAGES_QUERY: the body of a page that is only prose', () => {
+  it('projects the heading, the lede and both levels of the section array', async () => {
+    const prose = await from(full, () => getProsePage(ROUTE_FOR_PROSE));
+
+    expect(prose).toEqual({
+      id: PROSE_PAGE_DOC._id,
+      route: ROUTE_FOR_PROSE,
+      heading: { hr: 'HR prose heading', en: 'EN prose heading' },
+      lede: { hr: 'HR prose lede.', en: 'EN prose lede.' },
+      sections: [
+        {
+          heading: { hr: 'HR prose section one', en: 'EN prose section one' },
+          body: [
+            { hr: 'HR prose one one.', en: 'EN prose one one.' },
+            { hr: 'HR prose one two.', en: 'EN prose one two.' },
+          ],
+        },
+        {
+          heading: { hr: 'HR prose section two', en: 'EN prose section two' },
+          body: [{ hr: 'HR prose two one.', en: 'EN prose two one.' }],
+        },
+      ],
+    });
+  });
+
+  it('keeps both arrays in the order they were written', async () => {
+    // A two-level array that lost its order is an explanation given backwards, and no
+    // decoder can detect it: every member is present and every one is well-formed.
+    const prose = await from(full, () => getProsePage(ROUTE_FOR_PROSE));
+    expect(prose.sections.map((section) => section.heading.hr)).toEqual([
+      'HR prose section one',
+      'HR prose section two',
+    ]);
+    expect(prose.sections[0]!.body.map((paragraph) => paragraph.hr)).toEqual([
+      'HR prose one one.',
+      'HR prose one two.',
+    ]);
+  });
+
+  it('names the route rather than reporting an empty dataset when there is none', async () => {
+    /**
+     * `minimum: 0`, for `pagesByRoute`'s reason: `requireDocuments` can only count, and
+     * with three documents present and the one this page wants absent a count check says
+     * „the dataset holds 3 … this is an empty dataset", naming neither the route nor the
+     * document. The per-route message is the one written for the failure that happens.
+     */
+    const run = from(empty, () => getProsePage(ROUTE_FOR_PROSE));
+    await expect(run).rejects.toThrow(SanityContentError);
+    await expect(run).rejects.toThrow(ROUTE_FOR_PROSE);
+  });
+
+  it('names the route and both documents when two describe it', async () => {
+    // Which heading the page got would otherwise depend on query order.
+    const twice = fixtureOf(
+      [PROSE_PAGE_DOC, { ...PROSE_PAGE_DOC, _id: `${PROSE_PAGE_DOC._id}-copy` }],
+      'projections-two-prose',
+    );
+    const run = from(twice, () => getProsePage(ROUTE_FOR_PROSE));
+    await expect(run).rejects.toThrow(SanityContentError);
+    await expect(run).rejects.toThrow(`${PROSE_PAGE_DOC._id}-copy`);
+  });
+
+  it('names the section and the paragraph index when one is malformed', async () => {
+    // „a paragraph is not an object with `hr` and `en`" is useless to Mina when there are
+    // a dozen of them, which is why the error carries both indices.
+    const broken = fixtureOf(
+      [
+        {
+          ...PROSE_PAGE_DOC,
+          sections: [
+            {
+              _key: 's1',
+              _type: 'prosePageSection',
+              heading: { _type: 'localeString', hr: 'HR', en: 'EN' },
+              body: [
+                { _key: 's1p1', _type: 'localeText', hr: 'HR one.', en: 'EN one.' },
+                { _key: 's1p2', _type: 'localeText', hr: 'HR two.' },
+              ],
+            },
+          ],
+        },
+      ],
+      'projections-broken-prose',
+    );
+    const run = from(broken, () => getProsePage(ROUTE_FOR_PROSE));
+    await expect(run).rejects.toThrow(SanityContentError);
+    await expect(run).rejects.toThrow(/sections\[0\]\.body\[1\]/);
   });
 });
 

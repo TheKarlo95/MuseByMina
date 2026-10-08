@@ -315,9 +315,14 @@ src/lib/sanity/             the one read path; pages import this and nothing els
 src/lib/sanity/sanity.types.ts   generated from the schema + the queries
 ```
 
-Document types: `siteSettings` and `studioStory` (both singletons), `page`, `class`,
-`scheduleSlot`, `instructor`, `pricingTier`, `event`, `galleryImage`, `post`, `faq`. Field
-labels and descriptions are **Croatian**, because the person editing them is.
+Document types: `siteSettings` and `studioStory` (both singletons), `page`, `prosePage`,
+`class`, `scheduleSlot`, `instructor`, `pricingTier`, `event`, `galleryImage`, `post`,
+`faq`. Field labels and descriptions are **Croatian**, because the person editing them is.
+
+`page` and `prosePage` are both keyed by route and answer different questions about one
+page: `page` is the browser tab and the search result, `prosePage` is the text on the page.
+Only a page whose body is prose from the CMS has the second — `/whatisbachata` today
+(MUSE-65), and the type was designed for MUSE-27's other three trust pages.
 
 A singleton gets a fixed document id, a sidebar entry of its own and no "create new"
 button (`sanity/structure.ts`, `sanity.config.ts`), because its query pins that id — so a

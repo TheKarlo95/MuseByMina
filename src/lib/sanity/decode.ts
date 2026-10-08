@@ -585,6 +585,70 @@ export function decodePage(row: unknown): PageMetaDoc {
 }
 
 /**
+ * One section of a prose page: a subheading and the paragraphs under it.
+ *
+ * `heading` becomes an `<h2>` and `body` becomes the `<p>`s below it, which is why the
+ * paragraphs are an array of their own rather than one string with blank lines in it —
+ * see the long note on the type in `sanity/schemaTypes/documents/prose.ts`.
+ */
+export interface ProseSection {
+  heading: Record<Locale, string>;
+  /** Paragraphs, in the order they were written. At least one. */
+  body: Record<Locale, string>[];
+}
+
+/**
+ * The prose of a page that is only prose (MUSE-65) — `/whatisbachata` today, and the
+ * shape MUSE-27's other three trust pages are built for.
+ *
+ * Keyed by `route`, like `PageMetaDoc`, and for the same reason: which pages exist stays
+ * in `ROUTES`, and the CMS owns a page's words and never its existence.
+ *
+ * Every field is required, and there is no optional one to argue about: a prose page with
+ * no heading, no lede or no sections is a page with nothing on it, which is the one case
+ * `decode.ts` exists to refuse. The error names the section and the paragraph **by
+ * index** — `sections[1].body[2]` — because „a paragraph is not an object with `hr` and
+ * `en`" is useless to Mina when there are a dozen of them (the same reason
+ * `referencedTextList` names the index).
+ */
+export interface ProsePage {
+  id: string;
+  route: string;
+  heading: Record<Locale, string>;
+  lede: Record<Locale, string>;
+  sections: ProseSection[];
+}
+
+export function decodeProsePage(row: unknown): ProsePage {
+  const where = frame(row, 'prosePage');
+  const sections = read(row, 'sections');
+  if (!Array.isArray(sections) || sections.length === 0) {
+    fail(at(where, 'sections'), 'at least one section', sections);
+  }
+
+  return {
+    id: where.id,
+    route: text(row, 'route', where),
+    heading: localised(row, 'heading', where),
+    lede: localised(row, 'lede', where),
+    sections: sections.map((section, index) => {
+      const here = at(where, `sections[${index}]`);
+      if (typeof section !== 'object' || section === null) {
+        fail(here, 'a section with a heading and paragraphs', section);
+      }
+      const body = read(section, 'body');
+      if (!Array.isArray(body) || body.length === 0) {
+        fail(at(here, 'body'), 'at least one paragraph', body);
+      }
+      return {
+        heading: localised(section, 'heading', here),
+        body: body.map((_, position) => localisedMember(body, position, here, 'body')),
+      };
+    }),
+  };
+}
+
+/**
  * A schedule row, decoded straight into the existing `ClassEntry`.
  *
  * The `ClassEntry` extension is not decoration: `Schedule.astro` and `Home.astro` both

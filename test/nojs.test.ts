@@ -105,10 +105,13 @@ describe('the built site ships no JavaScript files and no CMS client', () => {
       'en/pricing/index.html',
       'en/privacy/index.html',
       'en/schedule/index.html',
+      'en/whatisbachata/index.html',
       'index.html',
       'pricing/index.html',
       'privacy/index.html',
       'schedule/index.html',
+      // MUSE-65's `/whatisbachata`, with the `prosePage` document that makes it buildable.
+      'whatisbachata/index.html',
     ]);
   });
 });
