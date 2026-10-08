@@ -8,7 +8,7 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, extname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { TestCase, TestModule } from 'vitest/node';
@@ -22,9 +22,11 @@ import {
   copyPasteTripwire,
   deletions,
   frag,
+  INERT_EXTENSIONS,
   inspectedFiles,
   listed,
   processStarts,
+  testFiles,
   uncheckedKinds,
 } from './helpers/source-guard';
 
@@ -244,11 +246,17 @@ describe('the rules are enforced on the test tree, not remembered', () => {
     expect(listed(uncheckedKinds())).toEqual([]);
   });
 
-  it('reads more than one kind of file', () => {
-    // Proof against the regression, from the tree itself rather than from the list: the
-    // only `.astro` file under `test/` is inspected, so "every file" is not ".ts".
-    expect(inspectedFiles()).toContain('test/preview/aboutus.astro');
-    expect(new Set(inspectedFiles().map((f) => f.replace(/^.*\./, '.'))).size).toBeGreaterThan(1);
+  it('skips nothing it walks except data that cannot execute', () => {
+    // The walk and the filter are separate claims, and it was the *filter* that was
+    // broken: `.endsWith('.ts')`. This says the filter drops only inert data, whatever
+    // the tree happens to hold — so it keeps holding when `test/preview/aboutus.astro`
+    // is deleted with the ticket that routes the page, and when the next kind of helper
+    // arrives.
+    const inert = new Set<string>(INERT_EXTENSIONS);
+    const inspected = new Set(inspectedFiles());
+    const skipped = testFiles().filter((file) => !inspected.has(file));
+
+    expect(skipped.filter((file) => !inert.has(extname(file).toLowerCase()))).toEqual([]);
   });
 
   it('lets no suite name a build directory of its own', () => {
@@ -392,7 +400,7 @@ describe('the guard catches what it claims to, and nothing else', () => {
 describe('the run reports a dead hook rather than swallowing it', () => {
   const config = readFileSync(join(ROOT, 'vitest.config.ts'), 'utf8');
 
-  it('still empties the scratch root once, before the workers start', () => {
+  it('still prunes the scratch root once, before the workers start', () => {
     expect(config).toContain('globalSetup');
     expect(config).toContain('clean-scratch');
   });
