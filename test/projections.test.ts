@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
@@ -52,8 +54,19 @@ import {
 // The literal query text, imported rather than retyped — see the note below on why a
 // copy here would defeat the whole suite. `FIXTURE_ENV` and `runFixtureQuery` come from
 // the read path's own module for the same reason.
-import { PAGES_QUERY } from '../src/lib/sanity/queries';
+import { EVENTS_QUERY, PAGES_QUERY, POSTS_QUERY } from '../src/lib/sanity/queries';
+// The whole module as well, so the parameter cross-check below covers every query there
+// is rather than the ones somebody remembered to list.
+import * as QUERIES from '../src/lib/sanity/queries';
 import { FIXTURE_ENV, runFixtureQuery } from '../src/lib/sanity/fixture';
+// MUSE-51: `runQuery` is the branch point between the two read paths, and the parameter
+// guard sits in front of it, so the live arm is reachable here without a network call.
+// `requireDocuments` and `decodeEvent` are what `getEvents` wraps — imported so a
+// `getEvents` call with the parameter dropped can be written out, which `getEvents`
+// itself will not do.
+import { runQuery } from '../src/lib/sanity/client';
+import { decodeEvent, requireDocuments } from '../src/lib/sanity/decode';
+import { queryParameters } from '../src/lib/sanity/params';
 
 /**
  * MUSE-44 — the nine GROQ queries nothing ever ran.
@@ -113,6 +126,7 @@ let danglingAuthor: string;
 let noAuthor: string;
 let danglingOverride: string;
 let partialDanglingOverride: string;
+let empty: string;
 
 beforeAll(() => {
   full = fixtureOf(FULL, 'projections-full');
@@ -143,6 +157,17 @@ beforeAll(() => {
     [SLOT_PARTIAL_DANGLING_OVERRIDE, CLASS_TWO, INSTRUCTOR_A, INSTRUCTOR_B, INSTRUCTOR_C],
     'projections-partial-dangling-override',
   );
+
+  /**
+   * MUSE-51's control: a dataset with nothing in it at all.
+   *
+   * A reachable, parseable, genuinely empty dataset is the case the parameter guard must
+   * **not** touch. "No upcoming events" is a real state of this studio and `minimum: 0` is
+   * how a page says so, so the two assertions it anchors are that the call still returns
+   * `[]` with the parameter supplied, and that `minimum: 1` still produces the existing
+   * empty-dataset `SanityContentError`, word for word.
+   */
+  empty = fixtureOf([], 'projections-empty');
 });
 
 /**
@@ -167,6 +192,26 @@ async function from<T>(fixture: string, read: () => Promise<T>): Promise<T> {
     return await read();
   } finally {
     process.env[FIXTURE_ENV] = previous;
+  }
+}
+
+/**
+ * Run a reader with **no** fixture, i.e. down the live arm of `runQuery`.
+ *
+ * Used by exactly one block below — the MUSE-51 parameter guard — and it is the only
+ * thing in this file that can take that arm, because the guard it asserts is the only
+ * thing on it that returns before a request is made. Nothing here reaches the network
+ * while the guard exists; a run that *does* reach it is the guard having been deleted,
+ * which is the failure the block is watching for.
+ */
+async function withoutFixture<T>(read: () => Promise<T>): Promise<T> {
+  const previous = process.env[FIXTURE_ENV];
+  delete process.env[FIXTURE_ENV];
+  try {
+    return await read();
+  } finally {
+    if (previous === undefined) delete process.env[FIXTURE_ENV];
+    else process.env[FIXTURE_ENV] = previous;
   }
 }
 
@@ -1115,6 +1160,256 @@ describe('$now is a boundary, asserted rather than assumed', () => {
     expect(EVENT_ENDING_NOW.endsAt).toBe(NOW.toISOString());
     expect(POST_NOW.publishedAt).toBe(NOW.toISOString());
     expect(new Date(POST_FUTURE.publishedAt as string).getTime()).toBeGreaterThan(NOW.getTime());
+  });
+});
+
+/* ------------------------------------------- a missing query parameter (MUSE-51) */
+
+describe('a query run without a parameter it references', () => {
+  /**
+   * MUSE-51. The second confirmed `groq-js`-vs-live divergence, after drafts.
+   *
+   * `EVENTS_QUERY` and `POSTS_QUERY` reference `$now`. Omit it and the two read paths used
+   * to disagree about whether anything was wrong:
+   *
+   *     live API   HTTP 400 `queryParseError`, "param $now referenced, but not provided"
+   *     `groq-js`  `[]`
+   *
+   * So one mistake surfaced as two error classes — `SanityUnavailableError` live,
+   * `SanityContentError: … this is an empty dataset, not a broken query` offline — and the
+   * offline message asserted the one thing that is false.
+   *
+   * **And the count check was the only thing that noticed.** That is the part these tests
+   * are really about. `requireDocuments` defaults `minimum` to 1, which is why "0 events"
+   * went red at all; `getEvents({ minimum: 0 })` is a documented call for a studio with no
+   * upcoming events, and with it the whole failure was silent — a blank `/events`
+   * published offline while the deploy failed with a transport error.
+   *
+   * The count check cannot be the instrument, because it is wrong in both directions: it
+   * fires on a legitimate empty result and says nothing about a broken query. So the guard
+   * is in `src/lib/sanity/params.ts`, it runs before the query does, and `runQuery` calls
+   * it **in front of the branch** — which is what lets the last test here assert the two
+   * paths produce the same message rather than two wordings that happen to agree.
+   *
+   * MUSE-44's verification ritual — misspell `$now` in each of the two queries and confirm
+   * the suite goes red — passed before this and passed for the wrong reason: via the count.
+   * It now goes red naming the parameter, and it goes red with `minimum: 0` too.
+   */
+
+  /**
+   * `getEvents`, with the parameter dropped.
+   *
+   * Written out rather than called, because `getEvents` defaults `now` and cannot be made
+   * to omit it — which is also why nothing in production is broken today. Every other
+   * element is the reader's own: `runQuery` with `EVENTS_QUERY`, then `requireDocuments`
+   * with the caller's `minimum` and the real decoder. So this is the mistake MUSE-24 would
+   * make the first time `/events` is built, in the shape it would make it.
+   */
+  async function eventsWithoutNow(fixture: string, minimum: number): Promise<unknown> {
+    return from(fixture, async () => {
+      const rows = await runQuery<unknown>(EVENTS_QUERY);
+      return requireDocuments(rows, 'event', decodeEvent, minimum);
+    });
+  }
+
+  it('fails naming the parameter, not the document count', async () => {
+    const error = await eventsWithoutNow(full, 1).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(SanityUnavailableError);
+    expect(error).not.toBeInstanceOf(SanityContentError);
+
+    const message = (error as Error).message;
+    expect(message, 'names the parameter').toContain('$now');
+    expect(message, 'names the query').toContain('_type == "event"');
+    // The two sentences the old failure produced, neither of which was true.
+    expect(message, 'does not blame the dataset').not.toMatch(/empty dataset/);
+    expect(message, 'does not report a document count').not.toMatch(/document\(s\)/);
+  });
+
+  it('still fails with `minimum: 0`, where the count check says nothing at all', async () => {
+    /**
+     * The acceptance criterion this ticket turns on, and the reason the fix is not a
+     * better message on the count check. `minimum: 0` is `getEvents`'s documented way of
+     * saying "no upcoming events is a real state"; with the parameter dropped, zero rows
+     * is then exactly what the reader was told to expect.
+     */
+    const error = await eventsWithoutNow(full, 0).catch((cause: unknown) => cause);
+
+    expect(error, 'a missing parameter with minimum: 0 published an empty page').toBeInstanceOf(
+      SanityUnavailableError,
+    );
+    expect((error as Error).message).toContain('$now');
+  });
+
+  it('fails the same way for `POSTS_QUERY`, the other query that takes `$now`', async () => {
+    const run = runFixtureQuery(POSTS_QUERY, {}, full);
+    await expect(run).rejects.toThrow(SanityUnavailableError);
+    await expect(run).rejects.toThrow(/\$now/);
+  });
+
+  it('treats a parameter supplied as `undefined` as not supplied', async () => {
+    // `@sanity/client` serialises parameters with `JSON.stringify`, which has no spelling
+    // for `undefined`, so `{now: undefined}` reaches the API as the same absence. Reporting
+    // the two differently would be a distinction only this code can see.
+    const run = runFixtureQuery(EVENTS_QUERY, { now: undefined }, full);
+    await expect(run).rejects.toThrow(SanityUnavailableError);
+    await expect(run).rejects.toThrow(/\$now/);
+  });
+
+  it('leaves a genuinely empty dataset saying what it said before', async () => {
+    /**
+     * The control, and the thing this ticket must not break: with the parameter supplied,
+     * an empty dataset is content, not a broken query. Both halves of that are asserted —
+     * `minimum: 0` returns `[]` and builds clean, `minimum: 1` produces the existing
+     * `SanityContentError` with its existing sentence.
+     */
+    const none = await from(empty, () => getEvents({ now: NOW, minimum: 0 }));
+    expect(none).toEqual([]);
+
+    const error = await from(empty, () => getEvents({ now: NOW })).catch(
+      (cause: unknown) => cause,
+    );
+    expect(error).toBeInstanceOf(SanityContentError);
+    expect((error as Error).message).toContain('this is an empty dataset, not a broken query');
+    expect((error as Error).message).toContain('The dataset holds 0 `event` document(s)');
+  });
+
+  it('fails identically on both read paths, which is the whole point', async () => {
+    /**
+     * The acceptance criterion in its sharpest form: *the same* error, not two errors that
+     * mean the same thing. `runQuery` checks the parameters before it chooses a source, so
+     * the two arms cannot drift apart — and a guard moved into either arm alone fails this
+     * assertion rather than passing on the strength of the wording being similar.
+     *
+     * The live arm makes no request: the guard returns before `sanityClient()` is reached.
+     * If this test ever hangs or reports a transport failure, that is the guard being gone.
+     */
+    const offline = (await from(full, () => runQuery(EVENTS_QUERY)).catch(
+      (cause: unknown) => cause,
+    )) as Error;
+    const live = (await withoutFixture(() => runQuery(EVENTS_QUERY)).catch(
+      (cause: unknown) => cause,
+    )) as Error;
+
+    expect(offline).toBeInstanceOf(SanityUnavailableError);
+    expect(live).toBeInstanceOf(SanityUnavailableError);
+    expect(live.name).toBe(offline.name);
+    expect(live.message).toBe(offline.message);
+    expect(live.message).toContain('$now');
+  });
+
+  it('names every missing parameter, and only the missing ones', async () => {
+    // No query in `queries.ts` takes two parameters today, so the shape of the message a
+    // second one needs is asserted here rather than discovered by whoever adds it. The
+    // parameter that *was* supplied must not appear in the demand — a message that asks
+    // for something already given sends the reader to the wrong call site.
+    const error = (await runFixtureQuery(
+      '*[_type == $type && startsAt >= $now && venue == $venue]',
+      { type: 'event' },
+      empty,
+    ).catch((cause: unknown) => cause)) as Error;
+
+    expect(error).toBeInstanceOf(SanityUnavailableError);
+    expect(error.message, 'demands both missing parameters').toContain('`$now` and `$venue`');
+    expect(error.message, 'and accounts for all three').toContain(
+      'Referenced: `$now`, `$type` and `$venue`',
+    );
+    expect(error.message, 'and for the one that was supplied').toContain('Supplied:   `$type`');
+  });
+});
+
+/* ------------------------------------- the scanner against the real parser (MUSE-51) */
+
+describe('the parameter scanner agrees with `groq-js`, query by query', () => {
+  /**
+   * MUSE-51's one soft spot, pinned.
+   *
+   * `queryParameters` scans the query text rather than parsing it, because the guard has to
+   * run on the **live** path too and `groq-js` is a devDependency imported dynamically —
+   * deliberately, so nothing a deploy depends on needs it installed
+   * (`src/lib/sanity/fixture.ts`, reason 4). A second implementation for the second path
+   * would be two things able to disagree about the question they exist to settle.
+   *
+   * So there is one scanner, and this is what makes it trustworthy: for every query in
+   * `queries.ts`, the names it finds are compared against the `Parameter` nodes in the real
+   * parse tree. A query whose parameters the scanner cannot see — a shape nobody has
+   * written yet, a reference inside something the scan skips — is a red test here rather
+   * than a guard that silently stops guarding.
+   */
+  async function parsedParameters(query: string): Promise<string[]> {
+    const { parse } = await import('groq-js');
+    const names = new Set<string>();
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        for (const member of node) walk(member);
+        return;
+      }
+      if (typeof node !== 'object' || node === null) return;
+      const record = node as Record<string, unknown>;
+      if (record.type === 'Parameter' && typeof record.name === 'string') names.add(record.name);
+      for (const value of Object.values(record)) walk(value);
+    };
+    walk(parse(query));
+    return [...names].sort();
+  }
+
+  /** Every exported query constant, by name, read off the module rather than listed. */
+  const all: [string, string][] = Object.entries(QUERIES).flatMap(([name, value]) =>
+    typeof value === 'string' ? [[name, value] satisfies [string, string]] : [],
+  );
+
+  it('reads every query in `queries.ts`, so this is not a sample', () => {
+    /**
+     * The count is read off the module's own source rather than written down, so a query
+     * added tomorrow joins the cross-check by existing. A literal here would be the thing
+     * this whole file exists to stop: MUSE-44's census said eleven and the file holds
+     * twelve, because MUSE-49 added one — and a number in a test is exactly as current as
+     * the last person who remembered to change it.
+     */
+    const source = readFileSync(
+      new URL('../src/lib/sanity/queries.ts', import.meta.url),
+      'utf8',
+    );
+    const declared = [...source.matchAll(/^export const (\w+) = define/gm)].map((m) => m[1]);
+
+    expect(declared.length).toBeGreaterThan(1);
+    expect(all.map(([name]) => name).sort()).toEqual([...declared].sort());
+    expect(declared).toContain('EVENTS_QUERY');
+    expect(declared).toContain('POSTS_QUERY');
+  });
+
+  for (const [name, query] of all) {
+    it(`finds the same parameters in ${name} as the parser does`, async () => {
+      expect(queryParameters(query)).toEqual(await parsedParameters(query));
+    });
+  }
+
+  it('finds `$now` in the two queries that take it, and nothing in the other nine', () => {
+    const withParameters = all.filter(([, query]) => queryParameters(query).length > 0);
+    expect(withParameters.map(([name]) => name).sort()).toEqual([
+      'EVENTS_QUERY',
+      'POSTS_QUERY',
+    ]);
+    expect(queryParameters(EVENTS_QUERY)).toEqual(['now']);
+    expect(queryParameters(POSTS_QUERY)).toEqual(['now']);
+  });
+
+  it('ignores a `$` that is text rather than a reference', async () => {
+    // The false-positive direction, which is the one that would break a working build: a
+    // scanner that counted these would demand a parameter no caller can supply. Checked
+    // against the parser too, so "text" is the parser's opinion and not this test's.
+    const cases = [
+      '*[_type == "page" && title == "$now"]',
+      "*[_type == \"page\" && title == '$now']",
+      '*[_type == "page"]{ "a$b": title }',
+      '// $now is a parameter in the other queries\n*[_type == "page"]{ _id }',
+      '*[_type == "page"]{ "quoted\\"$now": _id }',
+    ];
+
+    for (const query of cases) {
+      expect(queryParameters(query), query).toEqual([]);
+      expect(await parsedParameters(query), query).toEqual([]);
+    }
   });
 });
 

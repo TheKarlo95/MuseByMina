@@ -1,6 +1,7 @@
 ---
 import { localeUrl, type Locale } from '../lib/i18n';
 import { CTA } from '../lib/nav';
+import { addressLines, getSiteSettings } from '../lib/sanity';
 import {
   classCount,
   daysWithClasses,
@@ -66,9 +67,31 @@ const { locale, entries } = Astro.props;
  */
 const minutes = uniformDuration(entries);
 
+/**
+ * The street, from the CMS — the fifth address surface (MUSE-50).
+ *
+ * The eyebrow used to spell the street out as a literal, inside the composed label
+ * below. MUSE-20 moved the address into `siteSettings` and rewired the footer, `/`,
+ * `/contact` and the privacy notice to read it; this one was missed because the review
+ * grepped for the identifier `STUDIO.street`, and an identifier search cannot see a
+ * string buried in a longer one. The result was four surfaces that follow the Studio and
+ * a fifth that does not — drift that shows itself only on the day the studio moves, which
+ * is the one day anybody is relying on the CMS to fix it everywhere at once.
+ *
+ * `addressLines` is the same splitter the footer and the JSON-LD block use, so "the
+ * street half of the address" has one definition rather than a second `split(',')` here.
+ * The city half is deliberately not wanted: the label names the street beside the page's
+ * own word for itself, and adding the city would be a different label.
+ *
+ * `test/contentdrift.test.ts` is the part that lasts — two edits do not stop a sixth
+ * copy — and it is also why this comment does not quote the street. A stale copy in prose
+ * is believed rather than noticed.
+ */
+const street = addressLines(await getSiteSettings()).street;
+
 const t = {
   hr: {
-    eyebrow: 'Raspored · Ilica 209',
+    eyebrow: `Raspored · ${street}`,
     h1: 'Tjedni raspored',
     lede: [
       minutes === undefined ? undefined : `Satovi traju ${minutesPhrase(minutes, 'hr')}.`,
@@ -86,7 +109,7 @@ const t = {
     trialLede: 'Prvi sat je besplatan.',
   },
   en: {
-    eyebrow: 'Schedule · Ilica 209',
+    eyebrow: `Schedule · ${street}`,
     h1: 'Weekly schedule',
     lede: [
       minutes === undefined ? undefined : `Classes run ${minutesPhrase(minutes, 'en')}.`,
