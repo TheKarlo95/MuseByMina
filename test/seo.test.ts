@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -351,57 +351,315 @@ describe('AC4: the deploy target is env-driven, not hardcoded', () => {
     for (const file of [...ARTEFACTS, ...sitemapChildren(apex)]) {
       const txt = apex.read(file);
       expect(txt, file).toContain(APEX_DEPLOY.SITE);
+      // Derived from the target, not spelled again: a literal here is a second copy of
+      // the host inside the check against copies of the host (MUSE-42).
       expect(txt, `${file} still mentions the old host`).not.toContain(
-        'thekarlo95.github.io',
+        new URL(PAGES_DEPLOY.SITE).host,
       );
-      expect(txt, `${file} still mentions the old base path`).not.toContain('MuseByMina');
+      expect(txt, `${file} still mentions the old base path`).not.toContain(
+        PAGES_DEPLOY.BASE.replace(/^\/+|\/+$/g, ''),
+      );
     }
   });
 
   it('keeps the sub-path out of the apex build entirely', () => {
     const apexSitemap = sitemapChildren(apex).map((f) => apex.read(f));
     for (const url of apexSitemap.flatMap(locs)) {
-      expect(url.startsWith('https://muse.example')).toBe(true);
+      expect(url.startsWith(APEX_DEPLOY.SITE)).toBe(true);
     }
+  });
+
+});
+
+/**
+ * MUSE-42 — the deploy host appears nowhere in a build made for a different host.
+ *
+ * `CLAUDE.md`: no file may name the deploy host; it lives in exactly one place,
+ * `astro.config.mjs`, as the overridable `SITE`/`BASE` default. That is what makes a
+ * domain move (MUSE-29) a config change rather than a search-and-replace.
+ *
+ * The check used to be a **hardcoded list of two source directories**, `src/` and
+ * `public/`, with a file-count floor underneath it. Three things were wrong with that,
+ * and the third is the one that mattered:
+ *
+ *   1. The floor was satisfiable by one of the two trees, so it could not tell
+ *      "`public/` is absent" from "`public/` has four hundred unscanned files".
+ *   2. MUSE-35 moved six files *into* `src/`, which widened the slack rather than
+ *      closing it — the patch made the guard weaker while looking like a fix.
+ *   3. It named two directories out of eight. A host in `sanity/`, `scripts/`, `logo/`
+ *      or `.github/` was invisible, and `sanity/` now feeds page content — so a host
+ *      string in a seed document reached the rendered page with nothing to say so.
+ *
+ * So the guarantee moved to **the built output**, where the requirement actually lives.
+ * The suite already builds under two deploy targets, so the stronger statement is nearly
+ * free: build with `SITE` pointing at a second host, and assert the first appears nowhere
+ * in what that build emitted. That claim is immune to directory naming, to a new
+ * top-level folder, to `publicDir` changing, and to content arriving from Sanity rather
+ * than from a file — there is no list of places to keep up to date, because the output is
+ * not a place, it is the whole deliverable.
+ *
+ * The source scan below is kept, demoted, and **no longer carries the guarantee**. It is
+ * a fast failure that names the offending *file*, which `dist/en/index.html` cannot; and
+ * it covers the one case the output check structurally cannot see — a host spelled
+ * conditionally, so that it only renders under the live target.
+ */
+describe('AC4 (MUSE-42): no build names a host it was not built for', () => {
+  /**
+   * The needle, derived from the deploy target the suite builds under.
+   *
+   * Not spelled again as a literal. A second copy of the host inside the check *for*
+   * copies of the host is the shape of this whole defect — and it would also make this
+   * file report itself, which is how an exemption list starts.
+   */
+  const DEPLOY_HOST = new URL(PAGES_DEPLOY.SITE).host;
+  /** The other half of the deploy target: the sub-path a project Pages site is served from. */
+  const DEPLOY_SUBPATH = PAGES_DEPLOY.BASE.replace(/^\/+|\/+$/g, '');
+  const OTHER_HOST = new URL(APEX_DEPLOY.SITE).host;
+
+  /** Every file in `build`'s output containing `needle`, as output-relative paths. */
+  function outputsNaming(build: Build, needle: string): string[] {
+    return build
+      .allFiles()
+      .filter((file) => readFileSync(join(build.outDir, file)).includes(needle));
+  }
+
+  /** The output file a route is published as — `build.format: 'directory'`. */
+  function outputPathOf(route: string): string {
+    return route === '/' ? 'index.html' : `${route.slice(1)}/index.html`;
+  }
+
+  /**
+   * What the scan is known to have read.
+   *
+   * Asserted *by name*, from the page list this file derives off `src/pages/`, rather
+   * than as a count. "No offenders" is a true statement about an empty scan, and a floor
+   * is a count that a shrinking scan can still clear — both of which this check has
+   * already been through once. Nothing here is satisfiable by having scanned less: a
+   * page that stops being emitted fails this rather than quietly leaving the sweep.
+   */
+  it('reads every page and artefact the build emitted', () => {
+    const scanned = new Set(apex.allFiles());
+    for (const route of ROUTES) {
+      expect(scanned.has(outputPathOf(route)), `${route} was not scanned`).toBe(true);
+    }
+    for (const artefact of ['robots.txt', 'llms.txt', 'sitemap-index.xml']) {
+      expect(scanned.has(artefact), `${artefact} was not scanned`).toBe(true);
+    }
+    // Including the bytes nobody thinks of as text. A host baked into a font or an
+    // image is still a host in the deployed artefact, and `allFiles` is the whole tree.
+    expect([...scanned].some((f) => f.endsWith('.woff2'))).toBe(true);
+  });
+
+  it('finds the host in the build that is supposed to have it', () => {
+    // The positive control, and the reason the assertion below can fail. A broken needle,
+    // an unreadable output or an empty file list would all make "the host appears nowhere"
+    // pass for the wrong reason; none of them survive this.
+    expect(outputsNaming(pages, DEPLOY_HOST)).toContain('index.html');
+    expect(outputsNaming(pages, DEPLOY_HOST).length).toBeGreaterThan(1);
+  });
+
+  it('names the second target, so the rebuilt output is not simply inert', () => {
+    expect(outputsNaming(apex, OTHER_HOST)).toContain('index.html');
+  });
+
+  /** The acceptance criterion, in one line. */
+  it('leaves no trace of the first host anywhere in the second build', () => {
+    expect(outputsNaming(apex, DEPLOY_HOST)).toEqual([]);
+  });
+
+  it('leaves no trace of the first deploy sub-path either', () => {
+    // MUSE-29 moves both halves of the target. A `/MuseByMina/…` asset path surviving
+    // into an apex build 404s every reference to it (MUSE-8), so the sub-path has to go
+    // the same way the host does.
+    expect(outputsNaming(apex, DEPLOY_SUBPATH)).toEqual([]);
+  });
+});
+
+/**
+ * The fast source scan. Secondary — see the note on the block above.
+ *
+ * It exists for two reasons and claims nothing beyond them: a failure here names the
+ * *file*, and a host spelled conditionally would render only under the live target and so
+ * never reach the second build. If this and the output check ever disagree, the output
+ * check is right.
+ *
+ * It takes its scan root from **the repository**, and its exclusions from `.gitignore`.
+ * There is therefore no list of directories to keep exhaustive — which is the defect it
+ * replaces. The exclusions are a list, but they only ever cause the scan to read *more*
+ * than it has to: a pattern that stops matching means an extra tree gets swept, which is
+ * a loud false positive rather than silent coverage loss. That direction is the point.
+ */
+describe('MUSE-42: the host is written in one file, and the repo says which', () => {
+  const DEPLOY_HOST = new URL(PAGES_DEPLOY.SITE).host;
+
+  /**
+   * The paths that may name the host, and the reason each one has to.
+   *
+   * A prefix ending in `/` covers a tree. Every entry is checked below to still be
+   * *live* — to exist and to actually contain the host — so a stale exemption is an
+   * error rather than a widening nobody notices.
+   */
+  const MAY_NAME_THE_HOST: { path: string; why: string }[] = [
+    {
+      path: 'astro.config.mjs',
+      why: 'defines it, as the overridable SITE default. This is the one place.',
+    },
+    {
+      path: '.github/workflows/deploy.yml',
+      why:
+        'passes the deploy target in. It is where a *different* host is legitimately ' +
+        'named, because overriding SITE there is how MUSE-29 actually happens.',
+    },
+    {
+      path: 'test/',
+      why:
+        'is the only thing that must name two targets at once — it builds under both ' +
+        'and asserts the first appears nowhere in the second. Its copy of the live ' +
+        'target is pinned to astro.config.mjs by the last test in this block, so it ' +
+        'cannot go stale the way a prose copy can.',
+    },
+  ];
+
+  /** `.gitignore`, as patterns: comments and blanks dropped, slashes trimmed. */
+  function notSource(): string[] {
+    return readFileSync(join(ROOT, '.gitignore'), 'utf8')
+      .split('\n')
+      .map((line) => line.replace(/#.*$/, '').trim())
+      .map((line) => line.replace(/^\/+|\/+$/g, ''))
+      .filter(Boolean);
+  }
+
+  function escapeRe(text: string): string {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /** Does `rel` — a repo-relative path — match something `.gitignore` disclaims? */
+  function isIgnored(rel: string, patterns: string[]): boolean {
+    if (rel === '.git' || rel.startsWith('.git/')) return true;
+    return patterns.some((pattern) => {
+      if (pattern.includes('/')) {
+        return rel === pattern || rel.startsWith(`${pattern}/`);
+      }
+      const glob = new RegExp(`^${pattern.split('*').map(escapeRe).join('[^/]*')}$`);
+      return rel.split('/').some((segment) => glob.test(segment));
+    });
+  }
+
+  /** Every file in the repository that is not disclaimed, as repo-relative paths. */
+  function repoSources(): string[] {
+    const patterns = notSource();
+    const descend = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = join(dir, entry.name);
+        const rel = relative(ROOT, full).replace(/\\/g, '/');
+        if (isIgnored(rel, patterns)) return [];
+        return entry.isDirectory() ? descend(full) : [rel];
+      });
+    return descend(ROOT).sort();
+  }
+
+  function exempt(file: string): boolean {
+    return MAY_NAME_THE_HOST.some(
+      ({ path }) => file === path || (path.endsWith('/') && file.startsWith(path)),
+    );
+  }
+
+  it('scans every top-level entry the repository has, naming none of them', () => {
+    // The anti-narrowing assertion, and the whole difference from the old check. The
+    // scan is derived from what is on disk, so a renamed directory, a new one, or a
+    // changed `publicDir` is swept the day it lands with nobody editing this file.
+    const patterns = notSource();
+    const scanned = new Set(repoSources().map((file) => file.split('/')[0]!));
+
+    for (const entry of readdirSync(ROOT, { withFileTypes: true })) {
+      if (isIgnored(entry.name, patterns)) continue;
+      // An empty directory contributes no files and is not a hole; git cannot hold one.
+      if (entry.isDirectory() && readdirSync(join(ROOT, entry.name)).length === 0) continue;
+      expect(scanned.has(entry.name), `${entry.name} is in the repo and was not scanned`)
+        .toBe(true);
+    }
+  });
+
+  it('reaches the trees the two-directory list could not see', () => {
+    // Named explicitly because these are the ones the defect was about. `src/` and
+    // `public/` were the whole of the old scan; `sanity/` feeds page content, and
+    // `logo/`, `scripts/` and `.github/` were never read at all.
+    const files = repoSources();
+    for (const tree of ['src/', 'sanity/', 'scripts/', 'logo/', '.github/', 'test/']) {
+      expect(files.filter((f) => f.startsWith(tree)).length, `${tree} is unscanned`)
+        .toBeGreaterThan(0);
+    }
+    expect(files).toContain('astro.config.mjs');
+    expect(files).toContain('package.json');
+    // And nothing from a dependency tree or a build, which is what `.gitignore` is for.
+    expect(files.filter((f) => f.startsWith('node' + '_modules'))).toEqual([]);
+    expect(files.filter((f) => f.startsWith('dist/'))).toEqual([]);
+  });
+
+  it('disclaims only what .gitignore disclaims, and no tracked tree', () => {
+    const patterns = notSource();
+    for (const tree of ['src', 'sanity', 'scripts', 'logo', '.github', 'test', 'public']) {
+      expect(isIgnored(tree, patterns), tree).toBe(false);
+    }
+    // A worktree under `.claude/` is another checkout of this repo, host and all. It is
+    // ignored, and `.claude` itself is not — so project config is still swept.
+    expect(isIgnored('.claude/worktrees/agent-x/src/pages/index.astro', patterns)).toBe(true);
+    expect(isIgnored('.claude/settings.json', patterns)).toBe(false);
   });
 
   /**
-   * The trees this check walks, and what each is expected to contain.
+   * **The decision this ticket asked for, written down: `logo/README.md` fails.**
    *
-   * `public/` is currently absent: MUSE-35 moved the fonts — the only thing in it —
-   * into `src/assets/`, so that Vite resolves them in dev as well as in the build. It
-   * stays listed for the day something static comes back.
+   * A host string there reaches no rendered page, so the output check above cannot see
+   * it, and the honest question is whether that is a defect. It is, for three reasons:
    *
-   * `minimum` is asserted **per root**, not against the total, and that distinction is
-   * the whole point. A single `expect(total).toBeGreaterThan(20)` is satisfied by `src/`
-   * alone with room to spare — and this very ticket *widened* that slack by moving six
-   * files into `src/`. It could not tell "`public/` is absent" from "`public/` has four
-   * hundred files in it", and would only fire if both trees vanished at once. Per root,
-   * an absent tree is an explicit fact with an expected count beside it rather than an
-   * arithmetic coincidence.
+   *   1. `CLAUDE.md`'s rule is a claim about the *repository* — "the host lives in
+   *      exactly one place" — not about `dist/`. The cost of MUSE-29 is not only a wrong
+   *      URL in the output; it is every stale copy a human then has to find, and a stale
+   *      copy in prose is believed rather than noticed.
+   *   2. Exempting it requires the check to reason about whether a file "reaches the
+   *      output", and that reasoning is exactly what this ticket deletes. "`logo/`
+   *      reaches nothing" is a fact about today's site, not an invariant — markdown is
+   *      one content collection away from shipping, and `sanity/` *already* stopped
+   *      being inert, which is how this hole opened.
+   *   3. Strictness is cheap here and the escape hatch is one line with a reason beside
+   *      it. The files that must name the host are few, and each is listed above with
+   *      why — and asserted live, so the list cannot rot into a blanket.
+   *
+   * Applied, not just asserted: `README.md` named the host in a copy-pasteable `ORIGIN=`
+   * command and now spells it `$SITE`, because a rule that exempts its own first
+   * counter-example is not a rule.
    */
-  const HOST_SCAN: { dir: string; minimum: number }[] = [
-    { dir: 'src', minimum: 25 },
-    { dir: 'public', minimum: 0 },
-  ];
+  it('lets nothing but the config, the deploy workflow and the suite name the host', () => {
+    const offenders = repoSources()
+      .filter((file) => !exempt(file))
+      .filter((file) => readFileSync(join(ROOT, file)).includes(DEPLOY_HOST));
+    expect(offenders).toEqual([]);
+  });
 
-  it('walks the trees it claims to, or says one is missing', () => {
-    for (const { dir, minimum } of HOST_SCAN) {
-      const full = join(ROOT, dir);
-      const found = existsSync(full) ? walk(full).length : 0;
-      expect(found, `${dir}/ has ${found} files, expected at least ${minimum}`)
-        .toBeGreaterThanOrEqual(minimum);
+  it('keeps every exemption live, so the list cannot rot into a blanket', () => {
+    const files = repoSources();
+    for (const { path, why } of MAY_NAME_THE_HOST) {
+      const covered = files.filter(
+        (file) => file === path || (path.endsWith('/') && file.startsWith(path)),
+      );
+      expect(covered.length, `${path} is exempt and matches nothing`).toBeGreaterThan(0);
+      const names = covered.some((file) =>
+        readFileSync(join(ROOT, file)).includes(DEPLOY_HOST),
+      );
+      expect(names, `${path} no longer names the host, so the exemption ("${why}") is dead`)
+        .toBe(true);
     }
   });
 
-  it('has no deploy host written into the source tree', () => {
-    const sources = HOST_SCAN.map(({ dir }) => join(ROOT, dir))
-      .filter((dir) => existsSync(dir))
-      .flatMap(walk);
-
-    const offenders = sources.filter((f) =>
-      readFileSync(f).includes('thekarlo95.github.io'),
-    );
-    expect(offenders.map((f) => relative(ROOT, f))).toEqual([]);
+  it('pins the deploy target the suite builds under to the config default', () => {
+    // What makes `test/`'s exemption honest rather than convenient: the suite's copy of
+    // the live target is the config's, and a drift fails here instead of turning the
+    // needle above into a string that matches nothing.
+    const config = readFileSync(join(ROOT, 'astro.config.mjs'), 'utf8');
+    expect(config).toContain(`?? '${PAGES_DEPLOY.SITE}'`);
+    expect(config).toContain(`?? '${PAGES_DEPLOY.BASE}'`);
+    // And the two targets have to be genuinely different, or none of this proves anything.
+    expect(new URL(APEX_DEPLOY.SITE).host).not.toBe(new URL(PAGES_DEPLOY.SITE).host);
   });
 });
