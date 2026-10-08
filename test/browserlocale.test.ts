@@ -408,9 +408,15 @@ describe('nothing can open a browser context of its own', () => {
     // matching does not fail them — it makes them pass over nothing, which is the exact
     // shape of "a check that confirms the wrong thing" this ticket is an instance of. So
     // the discovery is asserted before anything is asserted with it.
-    expect(scripts()).toEqual(['scripts/a11y.mjs', 'scripts/schedule-ux.mjs', 'scripts/screenshot-themes.mjs']);
+    expect(scripts()).toEqual([
+      'scripts/a11y.mjs',
+      'scripts/budget.mjs',
+      'scripts/schedule-ux.mjs',
+      'scripts/screenshot-themes.mjs',
+    ]);
     expect(suites()).toEqual([
       'test/browserlocale.test.ts',
+      'test/budget.test.ts',
       'test/contact.test.ts',
       'test/fonts.test.ts',
       'test/lang.test.ts',

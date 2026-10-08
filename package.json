@@ -15,6 +15,7 @@
     "shots": "node scripts/screenshot-themes.mjs",
     "astro": "astro",
     "ds": "node scripts/check-tokens.mjs",
+    "budget": "node scripts/budget.mjs",
     "format": "prettier --write",
     "format:check": "node scripts/check-format.mjs",
     "ux:schedule": "node scripts/schedule-ux.mjs",

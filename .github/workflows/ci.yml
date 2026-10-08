@@ -80,6 +80,16 @@ jobs:
           # /schedule's responsive shift, keyboard operation and filters —
           # the MUSE-6 criteria a DOM-only test cannot reach.
           npm run ux:schedule
+          # The performance budget's readable half (MUSE-63): one line per page with
+          # budget, actual and headroom, over the `dist` this job already built. It is
+          # here and not in a sixth job for the reason MUSE-58's format check is in
+          # `designsystem` — this job already pays for `npm ci`, a build and a browser,
+          # and the measurement itself is ~8 s of that. The *gate* over both deploy
+          # targets is `test/budget.test.ts`, inside `npm test` in the `check` job above,
+          # so a page over budget is red whether or not this step runs; what this adds is
+          # the table in the log, which is the half a person reads. No route list and no
+          # server to start: both come off the build (MUSE-55, MUSE-52).
+          npm run budget
 
   sanity:
     name: sanity schema & types
