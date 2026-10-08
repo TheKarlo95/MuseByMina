@@ -77,17 +77,24 @@ export const CTA = {
  * deliberately no copy of them here: a value in both places is a value that drifts, and
  * the dataset is what deploys.
  *
- * These two stay:
+ * These stay:
  *
  *   - `country` — a translated word rather than part of the address. Mina types one
  *     address, and „Hrvatska"/"Croatia" is the site saying it in the page's language.
  *     A CMS field for it would be a field whose two values must match a locale, which is
  *     the kind of thing a typo makes incoherent rather than merely wrong.
+ *   - `countryCode` — the same country as an ISO 3166-1 alpha-2 code, which is what
+ *     schema.org's `addressCountry` asks for (MUSE-31). It sits here, beside the word,
+ *     rather than in `src/lib/structured-data.ts`, so that the two renderings of one fact
+ *     are in one place and a relocation changes both lines at once. It is deliberately
+ *     *not* derived from `country`: a name-to-code table is a second thing to maintain,
+ *     and these are two spellings of a constant, not a conversion.
  *   - `maps` — a Google Maps share link, which has no field in the schema. It is also
  *     the one value here a wrong edit would break silently: a mistyped URL still looks
  *     like a link.
  */
 export const STUDIO = {
   country: { hr: 'Hrvatska', en: 'Croatia' },
+  countryCode: 'HR',
   maps: 'https://maps.app.goo.gl/PK2hgiB5ALUi93Er7',
 } as const;

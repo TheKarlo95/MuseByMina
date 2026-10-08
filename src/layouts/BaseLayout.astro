@@ -36,6 +36,8 @@ import {
   routeKey,
   type Locale,
 } from '../lib/i18n';
+import { getSiteSettings } from '../lib/sanity';
+import { jsonLd, structuredData } from '../lib/structured-data';
 /**
  * The two faces the first paint needs, imported rather than named as a path.
  *
@@ -101,6 +103,34 @@ const canonical = new URL(localeUrl(route, locale), Astro.site).href;
  */
 const localeRouting = indexable;
 const skipLabel = locale === 'hr' ? 'Preskoči na sadržaj' : 'Skip to content';
+
+/**
+ * The page's structured data (MUSE-31) — built here, from the same singleton the footer
+ * renders, and emitted in exactly one place on the whole site.
+ *
+ * `getSiteSettings()` is memoised for the life of the build, so this is not a second
+ * read: it is the *same promise* `Footer.astro` awaits on every page. That is the point
+ * rather than an optimisation — "the block agrees with the visible page" is true by
+ * construction when both project one object, and would be a thing to keep testing if
+ * either assembled its own copy. `src/lib/structured-data.ts` has the long version.
+ *
+ * Gated on `indexable` for the same reason the canonical is: the host serves the 404's
+ * body for any unknown path, so it has no URL of its own, and a block keyed on a URL that
+ * is itself a 404 describes a page that does not exist.
+ *
+ * `Astro.site` is always set — `astro.config.mjs` always sets it — and is the only thing
+ * that knows the deploy's origin, so no URL in the block names a host (MUSE-8).
+ */
+const ldJson = indexable
+  ? jsonLd(
+      structuredData({
+        settings: await getSiteSettings(),
+        locale,
+        canonical,
+        site: Astro.site!,
+      }),
+    )
+  : undefined;
 ---
 
 <!doctype html>
@@ -182,6 +212,13 @@ const skipLabel = locale === 'hr' ? 'Preskoči na sadržaj' : 'Skip to content';
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     {indexable && <meta property="og:url" content={canonical} />}
+
+    {/* The site's only `application/ld+json` tag, and `test/structured-data.test.ts`
+        asserts that it is the only one: a second emission site is a second answer to
+        "does the markup agree with the page". `is:inline` because this is data, not a
+        module — Astro must not try to bundle it, and nothing may ship as a `.js` file
+        (`test/nojs.test.ts`). `set:html` because the payload is already JSON. */}
+    {ldJson && <script type="application/ld+json" is:inline set:html={ldJson} />}
   </head>
 
   <body>
