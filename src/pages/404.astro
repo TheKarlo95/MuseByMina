@@ -1,6 +1,7 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { LOCALES, localeUrl, type Locale } from '../lib/i18n';
+import { carryLocation } from '../lib/lang';
 
 /**
  * **The one page with no locale twin, so it is written in both languages.**
@@ -26,7 +27,8 @@ import { LOCALES, localeUrl, type Locale } from '../lib/i18n';
  *      thing to do on the page you are shown *because* something was broken.
  *   3. **The exits are real links.** Each half links its own locale's homepage, which
  *      resolves 200 — so "leave in your language" is a click rather than a redirect, and
- *      no URL that cannot exist is named anywhere.
+ *      no URL that cannot exist is named anywhere. They go through `carryLocation`, so
+ *      each one *names* the language it leads to; see the note at the exits below.
  *   4. **It is what static hosts do**, and the cost is four lines of copy on a page nobody
  *      should be reading for long.
  *
@@ -75,7 +77,41 @@ const EXITS: Record<Locale, { heading: string; lede: string; cta: string }> = {
             */}
             <h1 class="display">{EXITS[l].heading}</h1>
             <p class="lede">{EXITS[l].lede}</p>
-            <a class="btn" href={localeUrl('/', l)}>
+            {/*
+              `carryLocation`, not `localeUrl` alone — the href has to *name* the language
+              it leads to (MUSE-56).
+
+              The two exits are not symmetric in what they point at, and that is the whole
+              bug. `/MuseByMina/en/` does not language-detect, so the English exit always
+              landed in English. `/MuseByMina/` is the Croatian homepage, **the one route
+              on the site that does** — so the Croatian exit handed the click straight to
+              browser detection, which then overruled it: an `en-US`, `de-DE` or
+              `en`-storing visitor who deliberately pressed „Početna" was given the
+              English site. Every acceptance criterion of MUSE-38, which wrote these two
+              links, passes while that is true; the cohort it harms is a Croatian reader
+              whose browser is not configured Croatian, which in Zagreb is ordinary.
+
+              `?lang=` is the strongest routing signal and the only one that acts on every
+              page (`src/lib/lang.ts`), so a stamped href cannot be reinterpreted — and it
+              is what makes the press *persist*, which neither exit used to do: the
+              English one landed on a page with nothing to read, so it stored nothing
+              either, and the next bare visit detected from scratch.
+
+              Stamped here at render time rather than by a script on load, which is the
+              opposite of the header switcher (`src/components/LocaleSwitch.astro`) and
+              deliberately so. The switcher must stay bare in the markup because it is on
+              every page and a crawler would be offered a second URL for all of them; this
+              page is one page, `noindex`, and reason 2 above is that it must be legible
+              and leavable with no script at all. A rewrite-on-load exit would put the
+              durability of the only affordance this page has behind the one dependency it
+              is written to avoid.
+
+              There is nothing to carry: a URL built during the build has no query and no
+              fragment, and the dead URL the visitor arrived at is the broken link's, not
+              the homepage's. So both of `carryLocation`'s carry arguments are left at
+              their defaults and only the stamp is wanted.
+            */}
+            <a class="btn" href={carryLocation(localeUrl('/', l), l)}>
               {EXITS[l].cta}
             </a>
           </div>
