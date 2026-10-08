@@ -66,7 +66,8 @@ jobs:
       # on a fresh runner, but leaving the daemon here would mean the audited origin is a
       # daemon again the next time this job is copied, and the scripts no longer have a
       # port to be handed. Each check logs the fingerprint of the build it measured.
-      # No route list. `npm run a11y` reads the set off the build it just made
+      #
+      # No route list either. `npm run a11y` reads the set off the build it just made
       # (MUSE-55) — every HTML file in `dist`, each at the URL the host serves it and the
       # status the host answers, so the error page is audited in both locales and a new
       # page under `src/pages/` is audited the day it builds. The list that used to live
