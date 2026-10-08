@@ -252,6 +252,40 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   back twice; `test/isolation.test.ts` now fails if a suite names a build directory,
   deletes anything, or spawns its own build.
 
+  **The cache root is the half that actually fixed it, and it lives in
+  `astro.config.mjs`** — two lines taking `cacheDir` and `vite.cacheDir` from
+  `BUILD_CACHE_DIR`. `outDir` never was the whole story: Astro's and Vite's caches derive
+  from the *project root*, so no per-suite output name can isolate them, and Vite's dep
+  optimiser commits by renaming `node_modules/.vite/deps` aside and deleting it under the
+  other nine builds. Until MUSE-34 nothing asserted those two lines — deleting them left
+  all ten files and 204 tests green with the shared cache back. They are now checked twice:
+  the config is evaluated with the variable set and unset, and a real build has to leave
+  its caches under the directory it was given. ("Afterwards `node_modules/.astro` does not
+  exist" was tried and rejected — `npm run build` creates it legitimately and vitest
+  creates `node_modules/.vite` itself, so the absence check is vacuous or flaky depending
+  on what ran first.)
+
+  **The guard reads syntax, not words** (`test/helpers/source-guard.ts`). The old scan
+  searched raw text for `rmSync`/`rmdir`/`promises.rm(` across `test/**/*.ts`, which was
+  wrong in three directions at once: an `.mjs` helper was never walked, `import { rm }
+  from 'node:fs/promises'` matched no needle, and a doc comment mentioning `rmSync` failed
+  CI while a real `rm` beside it passed. Rules are now stated against an import's
+  *exported* name, a call's callee and a string literal's value, so an alias cannot hide
+  and prose cannot trip them; every extension under `test/` must be declared parsed,
+  markup or inert, so a file nothing reads is a failure rather than a blind spot. The
+  textual scan survives as a *tripwire* over comment-blanked code — it is what catches an
+  `rm -rf` handed to a shell — and the guard's own behaviour has tests, including the
+  evasions MUSE-34 demonstrated. One trap if you edit it: blank comments from the
+  **parser's** comment ranges, never a bare `ts.createScanner` loop, which desyncs on the
+  first template literal with a substitution and then reads every comment as code.
+
+  **`globalSetup` prunes by age; it does not empty the scratch root.** The root was the
+  last shared mutable path in the design, and emptying it meant a second vitest in the
+  same checkout — `--watch` in another terminal, or a second agent in one worktree —
+  deleted the first one's builds mid-flight, which is MUSE-17's flake wearing a different
+  hat. An hour is fifteen times the longest a build can live, needs no lock and no pid
+  file, and cannot reach anything a live run could still be using.
+
 ## Sanity (MUSE-19, MUSE-20)
 
 - **The build reads Sanity, so a Sanity outage blocks every PR and every deploy.** Three

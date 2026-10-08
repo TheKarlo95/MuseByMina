@@ -18,6 +18,13 @@ import type { Reporter, TestCase, TestModule } from 'vitest/node';
  * distinction the summary cannot: which file never ran, and how many assertions were
  * therefore never made. Tests the author wrote as `.skip`/`.todo` are left alone — only
  * tests that were meant to run and did not are reported.
+ *
+ * **Both halves of that are tested** (MUSE-34). Its only guard used to be
+ * `expect(config).toContain('hook-failure-reporter')`, which says a reporter is
+ * registered and nothing about what it reports — invert the `mode` filter in `neverRan`
+ * and the textual check stayed green while a dead file went unannounced and every
+ * deliberate `.skip` was announced as broken. `test/isolation.test.ts` hands this class
+ * the four module states that matter and reads what it writes.
  */
 export default class HookFailureReporter implements Reporter {
   onTestRunEnd(testModules: ReadonlyArray<TestModule>): void {

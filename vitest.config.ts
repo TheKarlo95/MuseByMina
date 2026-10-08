@@ -27,9 +27,12 @@ const test: TestUserConfig = {
    * `test/pricing.test.ts` points it at a dataset of its own and nothing here changes.
    */
   env: { MUSE_CONTENT_FIXTURE: 'sanity/seed/content.ndjson' },
-  // Housekeeping only: empties the build scratch root once, before the parallel
-  // workers start. Isolation itself comes from `test/helpers/scratch.ts`, which hands
-  // every build a directory no other suite can name (MUSE-17).
+  // Housekeeping only: prunes stale directories from the build scratch root once, before
+  // the parallel workers start. Isolation itself comes from `test/helpers/scratch.ts`,
+  // which hands every build a directory no other suite can name and a cache root of its
+  // own (MUSE-17). It prunes *by age* rather than emptying the root, so a second vitest in
+  // this checkout cannot delete this one's builds — see the file (MUSE-34), and
+  // `test/isolation.test.ts`, which asserts both halves of that against a real run.
   globalSetup: ['test/helpers/clean-scratch.ts'],
   // `fileParallelism` stays on. The suite launches ten real `astro build` runs and
   // serialising the files would roughly triple the wall clock; with the output

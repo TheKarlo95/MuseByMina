@@ -13,9 +13,11 @@ const ROOT = fileURLToPath(new URL('../..', import.meta.url));
  * build staging area with `fs.rename`, which fails with EXDEV when the output directory
  * is on a different filesystem.
  *
- * `test/helpers/clean-scratch.ts` empties it once per run as a `globalSetup`, before any
- * worker exists. That is the only `rm` in the test tree, and `test/isolation.test.ts`
- * fails if a second one appears.
+ * `test/helpers/clean-scratch.ts` prunes it once per run as a `globalSetup`, before any
+ * worker exists, and prunes **by age** — it is the last shared mutable path in a design
+ * whose point is that nothing is shared, and a second vitest in the same checkout used to
+ * delete the first one's builds mid-flight (MUSE-34). That is the only `rm` in the test
+ * tree, and `test/isolation.test.ts` fails if a second one appears.
  */
 export const SCRATCH = join(ROOT, 'node_modules/.muse-test-builds');
 
@@ -44,6 +46,22 @@ export const SCRATCH = join(ROOT, 'node_modules/.muse-test-builds');
 export function claimOutDir(hint?: string): string {
   mkdirSync(SCRATCH, { recursive: true });
   return mkdtempSync(join(SCRATCH, `${label(hint) || callingSuite() || 'suite'}-`));
+}
+
+/**
+ * Where the build that writes to `outDir` keeps its caches.
+ *
+ * A sibling of the output rather than a child of it, so it is minted with the output and
+ * pruned with it, and so it cannot turn up in `dist` — `test/nojs.test.ts` asserts the
+ * built output contains no `.js` file, and Vite's optimised dependencies are a few
+ * hundred of them.
+ *
+ * It is a function because `test/isolation.test.ts` has to be able to say where a build's
+ * caches should have landed, and because `astroBuild` and `astroDev` have to agree. One
+ * expression in three places was the shape of MUSE-10.
+ */
+export function cacheDirFor(outDir: string): string {
+  return `${outDir}.cache`;
 }
 
 /** A directory-name fragment and nothing else: no separators, no `..`, no surprises. */
@@ -102,7 +120,10 @@ const VITEST_LEAKS = [
  * the *project root*, which every concurrent build shares — and Vite's dep optimiser
  * commits by renaming `node_modules/.vite/deps` aside and deleting it. No per-suite
  * output name can isolate a directory the suite never names, so `astro.config.mjs` takes
- * the cache root from this variable and each build gets its own.
+ * the cache root from this variable and each build gets its own. Those two lines in the
+ * config *are* the fix, and until MUSE-34 nothing asserted them — delete them and the
+ * whole suite stayed green with the shared cache back. `test/isolation.test.ts` is what
+ * keeps them now, against a real build.
  *
  * On failure the child's output is folded into the thrown error. `execFileSync` with
  * `stdio: 'pipe'` throws `Command failed: npx astro build …` and keeps the actual Astro
@@ -118,7 +139,7 @@ export function astroBuild(env: NodeJS.ProcessEnv, hint?: string): string {
   try {
     execFileSync('npx', ['astro', 'build', '--outDir', outDir], {
       cwd: ROOT,
-      env: { ...childEnv, ...env, BUILD_CACHE_DIR: `${outDir}.cache` },
+      env: { ...childEnv, ...env, BUILD_CACHE_DIR: cacheDirFor(outDir) },
       stdio: 'pipe',
     });
   } catch (cause) {
@@ -252,7 +273,7 @@ export async function astroDev(
     ['astro', 'dev', '--ignore-lock', '--port', String(port)],
     {
       cwd: ROOT,
-      env: { ...childEnv, ...env, BUILD_CACHE_DIR: `${cacheDir}.cache` },
+      env: { ...childEnv, ...env, BUILD_CACHE_DIR: cacheDirFor(cacheDir) },
       stdio: ['ignore', 'pipe', 'pipe'],
       // Its own process group, so `stop()` can take the Astro server down with the
       // `npx` shim that spawned it — see `signalGroup`.
