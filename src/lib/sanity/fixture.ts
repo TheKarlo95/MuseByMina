@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 
 import { SanityUnavailableError } from './decode';
+import { inDevServer } from './dev';
 import { requireQueryParameters } from './params';
 
 /**
@@ -96,9 +97,36 @@ import { requireQueryParameters } from './params';
  *      `vitest.config.ts`.
  *   4. `groq-js` is a devDependency and is imported dynamically, so nothing about the
  *      live read path depends on it being installed at all.
+ *
+ * ---
+ *
+ * **It is also how you develop offline, and MUSE-47 added nothing to do it.**
+ *
+ * Since MUSE-20 the site cannot render without the network: `npm run dev` fetches live
+ * and a page whose read fails is a page that does not render, so an outage, a train, or a
+ * flaky connection stops local work. The answer is this path, invoked by hand:
+ *
+ *     MUSE_CONTENT_FIXTURE=content/seed.ndjson npm run dev
+ *
+ * and `runQuery`'s unreachable-API error prints that line **when it is a dev server
+ * asking**, so the person who just lost the network is told on the page in front of them
+ * rather than in a document they would have to already know about.
+ *
+ * There is deliberately **no `npm run dev:offline`, and no second variable.** Barrier 3
+ * forbids a `package.json` script from assigning this one — correctly: a script is one
+ * typo away from the build. A boolean of its own, gated to dev, was the alternative and
+ * was rejected: it buys forty characters of typing and costs a second name that every
+ * guard in the repository would from then on have to remember, which is the defect this
+ * repo has now re-filed eight times. So the convenient flag is the inconvenient one, and
+ * none of the four barriers above moved.
  */
 
-/** The environment variable that selects a local content source. Test-only. */
+/**
+ * The environment variable that selects a local content source.
+ *
+ * For the test suite (`vitest.config.ts` sets it) and for working offline by hand — see
+ * the note above. Never for a deploy, and barrier 3 is what makes that a test.
+ */
 export const FIXTURE_ENV = 'MUSE_CONTENT_FIXTURE';
 
 /** The path a local content source was requested at, or `undefined` for the live API. */
@@ -168,8 +196,26 @@ function published(document: unknown): boolean {
 
 let cached: { path: string; dataset: unknown[] } | undefined;
 
-/** Parse the NDJSON once per build, however many queries a build runs. */
+/**
+ * Parse the NDJSON once per build, however many queries a build runs.
+ *
+ * **Per build, and not under a dev server (MUSE-47).** This cache is the second half of
+ * the staleness MUSE-47 is about, and it is the half that is easy to miss: `./index.ts`
+ * memoises two readers, so against the live dataset a dev server freezes the singleton
+ * and the page titles and nothing else. Here it freezes *everything*, because every
+ * query is answered from one parse — so a dev server pointed at a fixture went on
+ * serving the file as it was at first render even for the readers that do re-query. That
+ * is measurable: editing the fixture under a running `astro dev` moved no byte of
+ * `/schedule/`, title, instructors and footer alike.
+ *
+ * Re-reading costs a `readFileSync` and a `JSON.parse` of fifteen documents per query,
+ * which is nothing against a page render, and it buys the thing this path is for away
+ * from the test suite: editing `content/seed.ndjson` and reloading shows the edit.
+ * `inDevServer()` is the same gate `./index.ts` uses, for the reason given in `./dev.ts`
+ * — a deploy cannot set it.
+ */
 function dataset(path: string): unknown[] {
+  if (inDevServer()) return readDataset(path);
   if (cached?.path !== path) cached = { path, dataset: readDataset(path) };
   return cached.dataset;
 }

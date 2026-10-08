@@ -24,7 +24,8 @@ Astro inlines them.
 ## Commands
 
 ```bash
-npm run dev        # http://localhost:4321/MuseByMina/
+npm run dev        # http://localhost:4321/MuseByMina/ — fetches content live
+MUSE_CONTENT_FIXTURE=content/seed.ndjson npm run dev   # …or from the seed, offline
 npm run build
 npm run preview    # dist, served the way GitHub Pages serves it — not `astro preview`
 npm run typecheck  # astro check
@@ -440,6 +441,17 @@ Two consequences worth knowing before they surprise you:
   deliberate — the alternative is publishing pages with empty titles — but it is a real
   availability dependency, and `ci.yml`'s `continue-on-error` probe step does not soften
   it.
+- **`npm run dev` fetches live too, so working offline is the line above** (MUSE-47).
+  There is no fallback and no `dev:offline` script: a build that substituted the seed for
+  an unreachable dataset is the deploy those four guarantees exist to prevent, and a
+  `package.json` script that assigned the variable is one typo from being that build. You
+  do not have to remember the command — a dev server whose query cannot be answered prints
+  it, and while the variable is set every page says `[content] FIXTURE` in the log.
+- **A dev server re-reads content on every request; a build reads once** (MUSE-47). So a
+  Studio edit shows up on reload locally, and a build still issues one query per reader.
+  The `[content]` line names which of the two is in force. The gate is `import.meta.hot`
+  (`src/lib/sanity/dev.ts`) rather than an environment variable, precisely so that nothing
+  a workflow can set changes which one a deploy gets.
 - **What the site said before the migration is frozen in `test/content.test.ts`.** It is
   the only copy of those strings left, and it is what makes "byte-identical to the previous
   deploy" an assertion instead of a command run once by hand. It is allowed to stop

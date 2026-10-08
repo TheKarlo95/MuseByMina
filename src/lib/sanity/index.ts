@@ -1,5 +1,6 @@
 import { ROUTES, inertRouteWarning } from '../pages';
 import { runQuery, sanitySource, type SanitySource } from './client';
+import { inDevServer } from './dev';
 import {
   SanityContentError,
   type PageMetaDoc,
@@ -72,13 +73,35 @@ import {
  *
  * ---
  *
- * **Each reader is memoised for the life of the build.**
+ * **Each reader is memoised for the life of the build — and *only* of a build (MUSE-47).**
  *
  * `Footer.astro` reads the singleton, and it renders on nine pages; `TrialForm.astro`
  * reads it too, on two of them. Without memoisation that is a dozen identical HTTP
  * requests per build for one document that cannot change while the build runs. The cache
  * is a promise rather than a value, so concurrent renders share one request, and it lives
  * for the process — a build is one process, and the next build starts a new one.
+ *
+ * Every clause of that paragraph is a statement about `astro build`, and MUSE-47 is what
+ * happens when it is read as a statement about the module. **A dev server is also one
+ * process, and it lives for days.** „The document cannot change while the build runs"
+ * becomes „the document cannot change while you work", which is false, and the symptom is
+ * the worst available shape: measured on this repo before the fix, three reloads of
+ * `/schedule/` against the live dataset issued `PAGES_QUERY` **once**,
+ * `SITE_SETTINGS_QUERY` **once** and `SCHEDULE_QUERY` **three times** — so the schedule
+ * refreshed and the page's `<title>`, the footer and the JSON-LD did not. Content that
+ * partly updates does not read as a cache; it reads as „my change didn't save".
+ *
+ * So the cache is per-*build*, and `perBuild` below is the only place that is decided.
+ * `inDevServer()` (`./dev.ts`) is the gate, and it is deliberately not readable from the
+ * environment — a deploy cannot turn the memoisation off by setting anything.
+ *
+ * One consequence to know about, dev-only and documented rather than fixed: with the
+ * cache off, `Footer.astro` and `src/lib/structured-data.ts` each issue their own
+ * `SITE_SETTINGS_QUERY` within one render, so a publish landing in the millisecond
+ * between them would make the visible address and the JSON-LD disagree for one reload.
+ * In a build they are one query and cannot. „The block and the visible page agree" is
+ * asserted field by field against `dist` (`test/structured-data.test.ts`), which is a
+ * build, so the claim the suite makes stays exactly as true as it was.
  */
 
 export type {
@@ -118,18 +141,66 @@ export interface ListOptions {
   minimum?: number;
 }
 
-let settings: Promise<SiteSettings> | undefined;
-
-/** The site-wide singleton: studio name, tagline, summary, address, email, socials. */
-export async function getSiteSettings(): Promise<SiteSettings> {
-  settings ??= (async () => {
-    const row = await runQuery<unknown>(SITE_SETTINGS_QUERY);
-    return requireDocument(row, 'siteSettings', decodeSiteSettings);
-  })();
-  return settings;
+/**
+ * Read once per build, and once per *call* under a dev server (MUSE-47).
+ *
+ * The promise is the cached thing, not the value, so concurrent renders inside one build
+ * share a single request rather than racing to start their own. Returned by identity:
+ * `getSiteSettings() === getSiteSettings()` is true in a build, which is the exact
+ * statement „one query per reader" makes, and is how `test/devcontent.test.ts` asserts it
+ * without instrumenting the client.
+ *
+ * Under a dev server there is no cache at all — not a shorter-lived one. A clock would
+ * need a number nobody can justify, and the thing a cache would buy here is a few
+ * milliseconds on a page nobody but us is loading.
+ */
+function perBuild<T>(read: () => Promise<T>): () => Promise<T> {
+  let cached: Promise<T> | undefined;
+  return () => {
+    if (inDevServer()) return read();
+    cached ??= read();
+    return cached;
+  };
 }
 
-let pages: Promise<Map<string, PageMetaDoc>> | undefined;
+/**
+ * The last inert-route warning printed, or `undefined` when the last look found none.
+ *
+ * MUSE-46 prints its warning from inside `pagesByRoute`, which until MUSE-47 ran once per
+ * process — so "warn when a document is inert" and "warn once" were the same statement and
+ * neither needed writing down. `perBuild` above has now separated them: under a dev server
+ * the reader runs per request, and an unchanged complaint repeated on every reload is noise
+ * in the one stream MUSE-47 just put the `[content]` regime line into.
+ *
+ * **Keyed on the message, not on a count**, and that is the whole of the choice. "Print it
+ * once per process" would reintroduce MUSE-47's own defect in miniature: fix the document,
+ * reload, and the log would go on showing a condition that no longer holds — or, having
+ * already printed, would never say anything about the state you actually have. Keyed on
+ * the text, a *changed* problem is always reported, an unchanged one is reported once, and
+ * a fixed one stops being reported, which is the only honest set of three. No clock.
+ *
+ * In a build this is dead weight by construction — the reader runs once, so the first
+ * look is the only look and the output is byte-identical to MUSE-46's. `test/routes.test.ts`
+ * asserts that warning against a real build's log and is untouched by any of this.
+ */
+let inertWarned: string | undefined;
+
+const siteSettings = perBuild(async () => {
+  const row = await runQuery<unknown>(SITE_SETTINGS_QUERY);
+  return requireDocument(row, 'siteSettings', decodeSiteSettings);
+});
+
+/**
+ * The site-wide singleton: studio name, tagline, summary, address, email, socials.
+ *
+ * Not `async`: it hands back the memoised promise itself, so two callers in one build
+ * hold the same object. An `async` wrapper would allocate a fresh promise per call and
+ * make „the same memoised promise" unobservable, which is the only cheap way to assert
+ * the memoisation is still there.
+ */
+export function getSiteSettings(): Promise<SiteSettings> {
+  return siteSettings();
+}
 
 /**
  * Every `page` document, keyed by route, with the routes the site serves guaranteed.
@@ -156,58 +227,60 @@ let pages: Promise<Map<string, PageMetaDoc>> | undefined;
  * that is *not* the common one. The count check is the wrong instrument here because this
  * reader knows precisely which documents it wants, so it does the reporting itself.
  */
-async function pagesByRoute(): Promise<Map<string, PageMetaDoc>> {
-  pages ??= (async () => {
-    const rows = await runQuery<unknown>(PAGES_QUERY);
-    const documents = requireDocuments(rows, 'page', decodePage, 0);
+const pagesByRoute = perBuild(async (): Promise<Map<string, PageMetaDoc>> => {
+  const rows = await runQuery<unknown>(PAGES_QUERY);
+  const documents = requireDocuments(rows, 'page', decodePage, 0);
 
-    // MUSE-46, and before the checks below rather than after: a document for a route the
-    // site does not serve is inert, so it is a warning and not a failure — but it has to
-    // be *said* even on a build that is about to fail for a different reason. The whole
-    // decision, and why this strength and not another, is at `inertRouteWarning`.
-    const inert = inertRouteWarning(documents);
-    if (inert !== undefined) console.warn(inert);
+  // MUSE-46, and before the checks below rather than after: a document for a route the
+  // site does not serve is inert, so it is a warning and not a failure — but it has to
+  // be *said* even on a build that is about to fail for a different reason. The whole
+  // decision, and why this strength and not another, is at `inertRouteWarning`.
+  //
+  // The `inertWarned` comparison is MUSE-47's half and nothing to do with severity: this
+  // reader used to run once per process, so "warn when it happens" and "warn once" were
+  // the same sentence. Under a dev server it now runs per request — see `inertWarned`.
+  const inert = inertRouteWarning(documents);
+  if (inert !== undefined && inert !== inertWarned) console.warn(inert);
+  inertWarned = inert;
 
-    const byRoute = new Map<string, PageMetaDoc>();
-    const duplicated: string[] = [];
-    for (const document of documents) {
-      if (byRoute.has(document.route)) duplicated.push(document.route);
-      byRoute.set(document.route, document);
-    }
+  const byRoute = new Map<string, PageMetaDoc>();
+  const duplicated: string[] = [];
+  for (const document of documents) {
+    if (byRoute.has(document.route)) duplicated.push(document.route);
+    byRoute.set(document.route, document);
+  }
 
-    const missing = ROUTES.filter(({ route }) => !byRoute.has(route)).map((r) => r.route);
-    if (missing.length > 0 || duplicated.length > 0) {
-      throw new SanityContentError(
-        [
-          `The \`page\` documents do not match the routes the site serves.`,
-          missing.length > 0
-            ? `  No \`page\` document describes: ${missing.join(', ')}. Add one in the ` +
-              `Studio under „Naslovi i opisi stranica” and pick that route — without it ` +
-              `the page would publish with an empty <title> and no description. The query ` +
-              `ran and the API answered, so this is a document that is not there, not a ` +
-              `broken read path.`
-            : '',
-          duplicated.length > 0
-            ? `  More than one \`page\` document describes: ${duplicated.join(', ')}. ` +
-              `Which title the page gets would depend on query order; open „Naslovi i ` +
-              `opisi stranica” and delete the spare.`
-            : '',
-          `  Routes the site serves: ${ROUTES.map((r) => r.route).join(', ')}.`,
-          `  Documents found: ${
-            documents.length === 0
-              ? 'none at all'
-              : documents.map((d) => `${d.route} (${d.id})`).join(', ')
-          }.`,
-        ]
-          .filter(Boolean)
-          .join('\n'),
-      );
-    }
+  const missing = ROUTES.filter(({ route }) => !byRoute.has(route)).map((r) => r.route);
+  if (missing.length > 0 || duplicated.length > 0) {
+    throw new SanityContentError(
+      [
+        `The \`page\` documents do not match the routes the site serves.`,
+        missing.length > 0
+          ? `  No \`page\` document describes: ${missing.join(', ')}. Add one in the ` +
+            `Studio under „Naslovi i opisi stranica” and pick that route — without it ` +
+            `the page would publish with an empty <title> and no description. The query ` +
+            `ran and the API answered, so this is a document that is not there, not a ` +
+            `broken read path.`
+          : '',
+        duplicated.length > 0
+          ? `  More than one \`page\` document describes: ${duplicated.join(', ')}. ` +
+            `Which title the page gets would depend on query order; open „Naslovi i ` +
+            `opisi stranica” and delete the spare.`
+          : '',
+        `  Routes the site serves: ${ROUTES.map((r) => r.route).join(', ')}.`,
+        `  Documents found: ${
+          documents.length === 0
+            ? 'none at all'
+            : documents.map((d) => `${d.route} (${d.id})`).join(', ')
+        }.`,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    );
+  }
 
-    return byRoute;
-  })();
-  return pages;
-}
+  return byRoute;
+});
 
 /**
  * The `page` documents, in the order `src/lib/pages.ts` lists the routes.
