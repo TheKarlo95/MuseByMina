@@ -182,8 +182,15 @@ export async function startPreview(
       return;
     }
     if (served.status === 404) {
+      // The build's own error page, body and all, exactly as the deploy serves it for an
+      // unknown path (MUSE-38). A stub body here is why no browser suite could see that
+      // the 404 shipped no language handling at all.
       res.writeHead(404, { 'content-type': MIME['.html']! });
-      res.end('<!doctype html><title>404</title>not found');
+      res.end(
+        served.file === undefined
+          ? '<!doctype html><title>404</title>not found'
+          : readFileSync(join(outDir, served.file)),
+      );
       return;
     }
     // The table lives in `./serve.ts` now — `servePages` renders to a browser too

@@ -58,6 +58,14 @@ export async function servePages(build: Build): Promise<Host> {
       return;
     }
     if (served.status === 404) {
+      // The build's own `404.html` when the resolver found one — what GitHub Pages serves
+      // for an unknown path, and the only way a browser suite can reach the error page at
+      // all (MUSE-38).
+      if (served.file !== undefined) {
+        res.writeHead(404, { 'Content-Type': MIME['.html']! });
+        res.end(readFileSync(join(build.outDir, served.file)));
+        return;
+      }
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('Not Found');
       return;

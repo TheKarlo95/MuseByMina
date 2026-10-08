@@ -13,8 +13,12 @@ interface Props {
    * unknown path, so the page has no address — `/404/`, `/en/404` and `/en/404/` are
    * all themselves 404s. The language switcher is a prefix swap on the current route,
    * which makes it two dead links on the one page a visitor reaches *because* a link
-   * was dead. `BaseLayout` passes its `indexable` prop straight through, because "has
-   * no URL of its own" is exactly what that prop already means.
+   * was dead.
+   *
+   * `BaseLayout` passes `localeTwin`, which is this question and only this one. It used to
+   * pass `indexable` — true of every page here, and a claim about crawlers — which also
+   * took `langInitScript` off the error page and so discarded a `?lang=` that was meant to
+   * work everywhere (MUSE-38).
    */
   localeSwitch?: boolean;
 }

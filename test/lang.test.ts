@@ -469,3 +469,228 @@ describe('a stored choice is obeyed rather than merely noticed (MUSE-33)', () =>
     }
   });
 });
+
+/**
+ * MUSE-38 — the page a lost visitor actually meets.
+ *
+ * GitHub Pages serves one root `404.html` for every unknown path. MUSE-13 gated the locale
+ * switcher on `indexable` — correctly, because the switcher is a prefix swap and `/en/404/`
+ * is itself a 404 — and the same flag was also gating `langInitScript`, so the error page
+ * shipped no language handling of any kind. MUSE-33 then made `?lang=` the strongest
+ * routing signal "on every page", which this one page could not honour. Reproduced on the
+ * deploy as `nav=en-US /nope/?lang=en → 404 lang=hr-HR switcher=0 stored=null`.
+ *
+ * Two things have to be true here and they pull in opposite directions: the choice is read
+ * and persisted, and **nothing navigates**, because there is nowhere for this page to
+ * navigate to. The body is bilingual so that reading and leaving never depended on a
+ * script in the first place; the script's only job on this page is to carry the preference
+ * forward. Both halves are driven against a real unknown path — `test/helpers/preview.ts`
+ * now serves the build's own `404.html` for one, which is what the live host does and what
+ * made this reproducible at all.
+ */
+describe('an unknown path is readable, and keeps the choice (MUSE-38)', () => {
+  /** A path the build has no page for — what a stale or mistyped link looks like. */
+  const MISSING = '/nope';
+
+  /** The exit link inside a locale's half of the bilingual body. */
+  const exitIn = (locale: string): string => `main [lang="${locale}"] a[href]`;
+
+  interface Landing {
+    page: Page;
+    /** The HTTP status the document itself came back with. */
+    status: number;
+    close(): Promise<void>;
+  }
+
+  /**
+   * Land on `url` and keep the response, which `visit` above does not expose.
+   *
+   * Through `openRedirectProbe` for the same reason the rest of this file uses it: where
+   * the browser ends up is the thing under test, so the door that pins a locale and
+   * asserts the landing would pin the subject out of existence (MUSE-48). The browser
+   * language is named, never defaulted.
+   */
+  async function land(
+    url: string,
+    opts: { locale: string; storedLang?: string; javaScript?: boolean } = {
+      locale: FOREIGN_LOCALE,
+    },
+  ): Promise<Landing> {
+    const { page, close } = await openRedirectProbe(browser, {
+      navigatorLocale: opts.locale,
+      storedLang: opts.storedLang,
+      context: {
+        viewport: { width: 1280, height: 900 },
+        ...(opts.javaScript === false ? { javaScriptEnabled: false } : {}),
+      },
+    });
+    const response = await page.goto(url, { waitUntil: 'networkidle' });
+    return { page, status: response?.status() ?? 0, close };
+  }
+
+  it('serves the real error page for a path that does not exist', async () => {
+    // The harness first: if this is a stub body, everything below is measuring nothing.
+    const { page, status, close } = await land(urlFor(MISSING));
+    try {
+      expect(status).toBe(404);
+      expect(new URL(page.url()).pathname).toBe(pagePath(MISSING));
+      expect(await page.locator('main').count()).toBe(1);
+      expect(await page.locator('footer').count()).toBe(1);
+    } finally {
+      await close();
+    }
+  });
+
+  it('can be read and left in English by an en-US browser, with nothing stored', async () => {
+    // The ticket's first acceptance criterion, with no `?lang=` and no stored value —
+    // nothing but a browser that is not Croatian, which is the common case.
+    const { page, close } = await land(urlFor(MISSING), { locale: FOREIGN_LOCALE });
+    try {
+      for (const locale of ['hr', 'en']) {
+        expect(
+          await page.locator(`main [lang="${locale}"]`).first().isVisible(),
+          `the ${locale} half is not visible`,
+        ).toBe(true);
+      }
+      // Readable *and* leavable: the English half's exit is a link to the English site.
+      const exit = page.locator(exitIn('en')).first();
+      expect(await exit.getAttribute('href')).toBe(pagePath('/en'));
+      expect(await exit.isVisible()).toBe(true);
+
+      // And no switcher, which is MUSE-13's constraint and still holds: there is no
+      // `/en/404/` for it to point at.
+      expect(await page.locator('[data-locale-switch]').count()).toBe(0);
+    } finally {
+      await close();
+    }
+  });
+
+  it('reads just as well with JavaScript off', async () => {
+    // Why the body is bilingual rather than selected client-side: the page a visitor
+    // reaches because something was broken must not depend on a script to be legible.
+    const { page, close } = await land(urlFor(MISSING), {
+      locale: FOREIGN_LOCALE,
+      javaScript: false,
+    });
+    try {
+      for (const locale of ['hr', 'en']) {
+        expect(await page.locator(`main [lang="${locale}"]`).first().isVisible()).toBe(true);
+      }
+      expect(await page.locator(exitIn('en')).first().getAttribute('href')).toBe(
+        pagePath('/en'),
+      );
+    } finally {
+      await close();
+    }
+  });
+
+  it('leaves in English in one click', async () => {
+    const { page, close } = await land(urlFor(MISSING), { locale: FOREIGN_LOCALE });
+    try {
+      await page.locator(exitIn('en')).first().click();
+      await page.waitForLoadState('networkidle');
+      expect(new URL(page.url()).pathname).toBe(pagePath('/en'));
+      expect(await page.getAttribute('html', 'lang')).toBe('en');
+    } finally {
+      await close();
+    }
+  });
+
+  it('persists ?lang= rather than discarding it, and does not navigate', async () => {
+    // The reported line: `stored=null`. Both locales, because "stored the parameter" and
+    // "stored the page's own language" are indistinguishable from the `hr` case alone.
+    for (const requested of ['en', 'hr'] as const) {
+      const { page, status, close } = await land(urlFor(MISSING, `?lang=${requested}`), {
+        locale: FOREIGN_LOCALE,
+      });
+      try {
+        expect(await storedLang(page), requested).toBe(requested);
+        // Nowhere to go: a hop would land on a `/en/404/` the host cannot serve.
+        expect(new URL(page.url()).pathname, requested).toBe(pagePath(MISSING));
+        expect(status, requested).toBe(404);
+      } finally {
+        await close();
+      }
+    }
+  });
+
+  it('folds the case of a hand-typed ?lang=, here as everywhere', async () => {
+    const { page, close } = await land(urlFor(MISSING, '?lang=EN'));
+    try {
+      expect(await storedLang(page)).toBe('en');
+    } finally {
+      await close();
+    }
+  });
+
+  it('stores nothing for a ?lang= naming no locale', async () => {
+    const { page, close } = await land(urlFor(MISSING, '?lang=de'));
+    try {
+      expect(await storedLang(page)).toBeNull();
+      expect(new URL(page.url()).pathname).toBe(pagePath(MISSING));
+    } finally {
+      await close();
+    }
+  });
+
+  it('carries the choice to the page they go to next', async () => {
+    // The half of the bug that outlives the 404: the preference has to reach wherever the
+    // visitor goes, which is the whole reason persisting it is not merely cosmetic. One
+    // browser, two navigations, and the browser prefers the *other* language each time so
+    // that only the stored value can explain the landing.
+    for (const [requested, landing] of [
+      ['en', '/en'],
+      ['hr', '/'],
+    ] as const) {
+      const locale = requested === 'en' ? CROATIAN_LOCALE : FOREIGN_LOCALE;
+      const visitor = await session(locale);
+      try {
+        await visitor.open(urlFor(MISSING, `?lang=${requested}`));
+        expect(new URL(visitor.page.url()).pathname, requested).toBe(pagePath(MISSING));
+        expect(await storedLang(visitor.page), requested).toBe(requested);
+
+        await visitor.open(urlFor('/'));
+        expect(new URL(visitor.page.url()).pathname, requested).toBe(pagePath(landing));
+      } finally {
+        await visitor.close();
+      }
+    }
+  });
+
+  it('does not bounce on a stored choice, in either direction', async () => {
+    // A stored value is an inference about the visitor, not a request attached to this
+    // URL, so it never routes a deep page (`detect` is the homepage's alone) — and here
+    // there is no twin to route to even if it did. Read, left alone, not acted on.
+    for (const stored of ['en', 'hr'] as const) {
+      for (const locale of [FOREIGN_LOCALE, CROATIAN_LOCALE]) {
+        const { page, close } = await land(urlFor(MISSING), { locale, storedLang: stored });
+        try {
+          const where = `stored=${stored} browser=${locale}`;
+          expect(new URL(page.url()).pathname, where).toBe(pagePath(MISSING));
+          expect(await storedLang(page), where).toBe(stored);
+          // Still readable in both languages whatever is stored — the body does not
+          // change, which is the point of it being bilingual.
+          expect(await page.locator(exitIn('en')).first().isVisible(), where).toBe(true);
+          expect(await page.locator(exitIn('hr')).first().isVisible(), where).toBe(true);
+        } finally {
+          await close();
+        }
+      }
+    }
+  });
+
+  it('adds no entry to the history stack, so Back still works', async () => {
+    // Nothing navigates here, so the error page must cost a visitor nothing to escape
+    // from: Back goes where they came from, not through a replaced URL.
+    const baseline = await land(urlFor(MISSING), { locale: CROATIAN_LOCALE });
+    const foreign = await land(urlFor(MISSING, '?lang=en'), { locale: FOREIGN_LOCALE });
+    try {
+      expect(await foreign.page.evaluate(() => history.length)).toBe(
+        await baseline.page.evaluate(() => history.length),
+      );
+    } finally {
+      await Promise.all([baseline.close(), foreign.close()]);
+    }
+  });
+});
+

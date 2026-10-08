@@ -90,8 +90,22 @@ function paramName(pair: string): string {
 }
 
 export interface LangRouting {
-  /** This same route in `locale`, deploy base and trailing slash included. */
-  urlFor(locale: Locale): string;
+  /**
+   * This same route in `locale`, deploy base and trailing slash included — or `null` when
+   * this page has no addressable twin in that locale.
+   *
+   * `null` is the error page's answer for every locale (MUSE-38). GitHub Pages serves one
+   * root `404.html` for every unknown path, so `/404/`, `/en/404` and `/en/404/` are all
+   * themselves 404s: there is no URL to send anybody to. A locale with no URL is therefore
+   * a locale this script cannot navigate to — which is a *different* statement from "this
+   * page does not route by language", and keeping them different is the whole of MUSE-38.
+   * The choice is still read and still persisted; only the hop is impossible.
+   *
+   * Expressed per locale rather than as one boolean because that is the shape the fact has:
+   * the day a page exists in Croatian and not in English, `go()` already does the right
+   * thing for it without a second flag deciding what "has a twin" means.
+   */
+  urlFor(locale: Locale): string | null;
   /** The locale this page is rendered in. */
   locale: Locale;
   /**
@@ -104,7 +118,14 @@ export interface LangRouting {
 }
 
 /**
- * Runs as a blocking inline script, in `<head>`, on every page that has a locale twin.
+ * Runs as a blocking inline script, in `<head>`, on **every** page the site builds.
+ *
+ * It used to run on every page that had a locale twin, which sounds like the same thing
+ * and is not. `BaseLayout.astro` derived that from `indexable`, so the error page — the
+ * page a lost visitor is most likely to meet — shipped no language handling at all, and
+ * the `?lang=` MUSE-33 documented as working everywhere was silently discarded there
+ * (MUSE-38). Whether a page has a twin to *navigate* to is now a fact about each URL, held
+ * in `urlFor` above; whether the script runs is not a question any more.
  *
  * The site is statically hosted with no edge compute, so there is no IP geolocation —
  * the browser's own language preference is the signal. Croatian stays the default and
@@ -171,6 +192,9 @@ export interface LangRouting {
  *     does not `detect`, so nothing there can reconsider.
  *   - an unrecognised `?lang=` rides along in the carried query and reads as "nothing
  *     asked for" at the destination too, exactly as it did at the origin.
+ *   - a locale this page has no URL in is not a hop at all, so the error page records the
+ *     choice and stays exactly where it is (MUSE-38). A redirect to the `/en/404/` the
+ *     host cannot serve would be a dead end dressed as a fix.
  *
  * `replaceState` semantics (`location.replace`) keep the origin out of the history stack,
  * so Back cannot return to a page that would immediately bounce forward again. The other
@@ -198,7 +222,20 @@ export interface LangRouting {
  * `test/localeswitch.test.ts` drive both halves in a real browser.
  */
 export function langInitScript({ urlFor, locale, detect }: LangRouting): string {
-  const urls = Object.fromEntries(LOCALES.map((l) => [l, urlFor(l)]));
+  /**
+   * Only the locales this page actually has a URL in.
+   *
+   * A locale `urlFor` answers `null` for is left out of the map entirely rather than
+   * carried as a null, so the error page's markup contains no `/en/404/` at all — a URL
+   * the host cannot serve, sitting in an inline script, is a navigation waiting for
+   * somebody to re-enable one (MUSE-38).
+   */
+  const urls: Partial<Record<Locale, string>> = {};
+  for (const l of LOCALES) {
+    const url = urlFor(l);
+    if (url !== null) urls[l] = url;
+  }
+
   return `
 (function () {
   try {
@@ -229,10 +266,21 @@ export function langInitScript({ urlFor, locale, detect }: LangRouting): string 
     }
 
     // The one navigation this script can perform: this same route in another locale,
-    // query and fragment carried over byte for byte. Already there is not a navigation.
+    // query and fragment carried over byte for byte. Already there is not a navigation --
+    // and neither is a locale this page has no URL in.
+    //
+    // URLS is missing a locale only on a page with no twin there, which today means the
+    // error page: the host serves one root error document for every unknown path, so
+    // there is no English one to replace this location with (MUSE-38). Every caller
+    // funnels through here, so "the choice was recorded, nothing moved" is true of all of
+    // them without any branch having to know it.
+    //
+    // Note this comment names no path. It ships inside the page, and a URL the host
+    // cannot serve is better not written there at all, even as prose.
     function go(locale) {
-      if (locale === HERE) return;
-      location.replace(URLS[locale] + location.search + location.hash);
+      var url = URLS[locale];
+      if (locale === HERE || url === undefined) return;
+      location.replace(url + location.search + location.hash);
     }
 
     var param = new URLSearchParams(location.search).get(${JSON.stringify(LANG_PARAM)});

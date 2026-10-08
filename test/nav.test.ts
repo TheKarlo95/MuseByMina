@@ -1,9 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import {
   basePath,
   buildSite,
   canonicalOf,
+  declaredAlternates,
   isOwnAsset,
   PAGES_DEPLOY,
   pageRefs,
@@ -12,6 +16,7 @@ import {
 } from './helpers/build';
 import { resolveRequest, servePages, type Host } from './helpers/serve';
 import { DEFAULT_LOCALE, LOCALES, type Locale } from '../src/lib/i18n';
+import { LANG_PARAM, LANG_STORAGE_KEY } from '../src/lib/lang';
 import { MORE_NAV, PRIMARY_NAV } from '../src/lib/nav';
 
 /**
@@ -676,6 +681,295 @@ describe('the error page is a way out, not a second dead end', () => {
         .filter((ref) => ref.page === page)
         .map((ref) => addressOf(ref.request).route);
       expect(routes, `${page} does not link the homepage`).toContain('/');
+    }
+  });
+});
+
+/**
+ * MUSE-38 — "may search engines index this" and "may this page route by language" are
+ * two questions, and for one release they had one answer.
+ *
+ * MUSE-13 wrote `const localeRouting = indexable;` in `BaseLayout.astro` and `404.astro`
+ * passes `indexable={false}`, so the error page shipped neither the locale switcher (right
+ * — there is no `/en/404/` to point at) nor `langInitScript` (wrong). MUSE-33 then made
+ * `?lang=` the strongest routing signal and documented it as acting on *every* page, which
+ * it could not do here because the script that reads it was absent. An `en-US` visitor
+ * following a stale link got an all-Croatian page, no switcher, and a `?lang=en` that was
+ * discarded rather than persisted — so the preference did not even reach wherever they
+ * went next.
+ *
+ * The split is `indexable` (a crawler question) and `localeTwin` (is there an addressable
+ * page for this route in each locale). The error page is the witness that they are now
+ * independent: unindexed, and language-aware anyway. The source guard below is what stops
+ * the alias coming back, because an alias is the one shape of this bug that reads as
+ * tidying up.
+ */
+describe('indexability and language handling are separate questions (MUSE-38)', () => {
+  const LAYOUT = fileURLToPath(new URL('../src/layouts/BaseLayout.astro', import.meta.url));
+
+  /** The inline `<script>` blocks of a built page. */
+  function inlineScripts(html: string): string[] {
+    return [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
+  }
+
+  /** Does this page carry the locale-routing script at all? */
+  function routesByLanguage(html: string): boolean {
+    return inlineScripts(html).some(
+      (body) => body.includes(LANG_STORAGE_KEY) && body.includes(`"${LANG_PARAM}"`),
+    );
+  }
+
+  /** `<meta name="robots">`'s content, or `undefined`. */
+  function metaRobots(html: string): string | undefined {
+    return /<meta\s+name="robots"\s+content="([^"]*)"/.exec(html)?.[1];
+  }
+
+  it('ships the language script on the error page, which is not indexable', () => {
+    // The bug, stated as the two halves that have to hold at once. Either one alone was
+    // already true before the fix.
+    for (const page of errorPages()) {
+      const html = build.read(page);
+      expect(metaRobots(html), `${page} is not noindex`).toMatch(/\bnoindex\b/);
+      expect(
+        routesByLanguage(html),
+        `${page} ships no locale-routing script, so ?lang= is discarded there`,
+      ).toBe(true);
+    }
+  });
+
+  it('ships it on every other page too, so the error page is not a special case', () => {
+    for (const page of build.htmlFiles()) {
+      expect(routesByLanguage(build.read(page)), `${page} ships no locale-routing script`).toBe(
+        true,
+      );
+    }
+  });
+
+  it('keeps the error page unindexed: no canonical, no hreflang, no og:url', () => {
+    for (const page of errorPages()) {
+      const html = build.read(page);
+      expect(canonicalOf(html), `${page} declares a canonical`).toBeUndefined();
+      expect([...declaredAlternates(html).keys()], `${page} declares hreflang`).toEqual([]);
+      expect(html, `${page} declares an og:url`).not.toMatch(/property="og:url"/);
+      expect(html, `${page} emits a structured-data block`).not.toMatch(
+        /type="application\/ld\+json"/,
+      );
+    }
+  });
+
+  it('is the only page that is not indexable, and every indexable one says nothing', () => {
+    // The other direction: `noindex` must not have spread to a page that has a URL.
+    const unindexed = build
+      .htmlFiles()
+      .filter((page) => metaRobots(build.read(page)) !== undefined);
+    expect(unindexed).toEqual(errorPages());
+  });
+
+  it('derives neither flag from the other in the layout', () => {
+    // `const localeRouting = indexable;` is the regression, and it reads as a tidy-up
+    // rather than as a decision — which is why it is pinned against the source instead of
+    // only against today's output. Two props, neither assigned from the other.
+    //
+    // Comments are stripped first, because the layout quotes the offending line in the
+    // note explaining it: a guard that cannot tell code from the documentation of the bug
+    // it guards against would make writing that note impossible.
+    const layout = readFileSync(LAYOUT, 'utf8');
+    expect(layout).toContain('indexable');
+    expect(layout).toContain('localeTwin');
+
+    const code = layout
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+    expect(code, 'the comment stripper ate the frontmatter').toContain('Astro.props');
+    expect(
+      /\b(?:const|let|var)\s+\w+\s*=\s*(?:indexable|localeTwin)\s*[;,]/.test(code),
+      'one locale/indexing flag is aliased from the other again',
+    ).toBe(false);
+  });
+});
+
+/**
+ * The error page reads, and lets you leave, in either language.
+ *
+ * There is one `404.html` for the whole site — GitHub Pages serves it for every unknown
+ * path — so it has no locale twin and cannot have a switcher: `/en/404/` is itself a 404,
+ * and a switcher pointing at it was the dead link MUSE-13 removed. The body is therefore
+ * bilingual: both languages are in the markup, each marked with its own `lang`, each with
+ * its own exit. That holds with JavaScript off, with `localStorage` blocked, and on the
+ * first paint — none of which is true of selecting one language client-side.
+ *
+ * Asserted through the markup's `lang` attributes and the links' destinations rather than
+ * against the copy, so a reworded page still has to offer both languages a way out.
+ */
+describe('the error page is bilingual, and both exits are real (MUSE-38)', () => {
+  /** The `lang` values declared *inside* `<main>` on a built page. */
+  function langsInMain(html: string): string[] {
+    const main = /<main\b[^>]*>([\s\S]*?)<\/main>/.exec(html);
+    expect(main, 'no <main> in the built page').not.toBeNull();
+    return [...new Set([...main![1]!.matchAll(/\blang="([^"]*)"/g)].map((m) => m[1]!))].sort();
+  }
+
+  /** The outer element carrying `lang="<locale>"`, innerHTML only. */
+  function blockWithLang(html: string, locale: string): string | undefined {
+    const open = new RegExp(`<(\\w+)\\b[^>]*\\blang="${locale}"[^>]*>`).exec(html);
+    if (open === null) return undefined;
+    const tag = open[1]!;
+    const rest = html.slice(open.index + open[0].length);
+    let depth = 1;
+    for (const m of rest.matchAll(new RegExp(`<(/?)${tag}\\b[^>]*>`, 'g'))) {
+      depth += m[1] === '/' ? -1 : 1;
+      if (depth === 0) return rest.slice(0, m.index);
+    }
+    return rest;
+  }
+
+  it('marks a block in every locale the site has', () => {
+    for (const page of errorPages()) {
+      expect(langsInMain(build.read(page)), `${page} is not bilingual`).toEqual(
+        [...LOCALES].sort(),
+      );
+    }
+  });
+
+  it('offers a heading and an exit inside each locale block', () => {
+    for (const page of errorPages()) {
+      const html = build.read(page);
+      for (const locale of LOCALES) {
+        const block = blockWithLang(html, locale);
+        expect(block, `${page} has no block for ${locale}`).not.toBeUndefined();
+        expect(/<h1\b/.test(block!), `${page}'s ${locale} block has no heading`).toBe(true);
+        expect(/<a\b[^>]*href=/.test(block!), `${page}'s ${locale} block has no exit`).toBe(
+          true,
+        );
+      }
+    }
+  });
+
+  it('links both locale homepages, and nothing that looks like a localised 404', () => {
+    for (const page of errorPages()) {
+      const reached = crawl(isAnchor)
+        .filter((ref) => ref.page === page)
+        .map((ref) => addressOf(ref.request));
+
+      for (const locale of LOCALES) {
+        expect(
+          reached.some((at) => at.locale === locale && at.route === '/'),
+          `${page} offers no way out in ${locale}`,
+        ).toBe(true);
+      }
+
+      // MUSE-13's dead link, which must not come back in either direction. AC1 above
+      // already fetches every href; this names the specific URL that cannot exist, so a
+      // failure says why rather than just reporting a 404.
+      expect(
+        reached.filter((at) => at.route === '/404').map((at) => at.locale),
+        `${page} links a localised 404, which the host cannot serve`,
+      ).toEqual([]);
+    }
+  });
+
+  it('ships no URL for a page the host cannot serve, not even inside the script', () => {
+    // `langInitScript` is handed a URL per locale, and on a page with no twin it must be
+    // handed none: a localised error URL baked into an inline script is a navigation
+    // waiting for somebody to re-enable `go()` on this page.
+    //
+    // Matched on the path fragment rather than on the full deploy-base spelling, because
+    // the first version of this assertion looked for `/MuseByMina/en/404/` and so missed
+    // the string sitting in a *comment* inside the inline script — which does ship, and
+    // which a reader greppping the built page would read as the dead link being back.
+    for (const locale of LOCALES) {
+      for (const page of errorPages()) {
+        expect(build.read(page), `${page} names ${locale}/404`).not.toContain(
+          `${locale}/404`,
+        );
+      }
+    }
+  });
+});
+
+/**
+ * MUSE-38's second finding — the footer is the only chrome that can say where you are on
+ * `/privacy/`, and it said nothing.
+ *
+ * `/privacy/` and `/en/privacy/` are deliberately out of the nav (`src/lib/nav.ts`): the
+ * privacy notice is the footnote the trial form links to, not a destination. So the
+ * footer is the only list that contains it — and the footer carried no `aria-current` at
+ * all, which left the one page the primary nav cannot mark marked by nothing.
+ *
+ * The rule is MUSE-39's, as that ticket's own suite states it: whatever carries
+ * `aria-current` must either not be a link, or be a link to exactly where we already are.
+ * A footer entry pointing at the current page satisfies the second clause, so it stays an
+ * `<a>` — unlike the locale switcher's own-locale entry, whose href carried a `?lang=`
+ * the current address did not have. `page` rather than `true`, the same as the nav.
+ */
+describe('the footer says where you are (MUSE-38)', () => {
+  interface Marked {
+    tag: string;
+    href: string | undefined;
+    value: string;
+  }
+
+  /** Everything inside `<footer>` carrying `aria-current`. */
+  function markedInFooter(html: string): Marked[] {
+    const footer = /<footer\b[^>]*>([\s\S]*?)<\/footer>/.exec(html);
+    expect(footer, 'no <footer> in the built page').not.toBeNull();
+    return [...footer![1]!.matchAll(/<(\w+)\b([^>]*\baria-current="([^"]*)"[^>]*)>/g)].map(
+      (m) => ({
+        tag: m[1]!,
+        href: /\bhref="([^"]*)"/.exec(m[2]!)?.[1],
+        value: m[3]!,
+      }),
+    );
+  }
+
+  /** The URL path the host serves a built page at. */
+  function ownPath(page: string): string {
+    return `${basePath(build)}${page.replace(/(^|\/)index\.html$/, '$1')}`;
+  }
+
+  /** Every built page that has a URL of its own — the error page is not one. */
+  function addressable(): string[] {
+    const errors = new Set(errorPages());
+    return build.htmlFiles().filter((page) => !errors.has(page));
+  }
+
+  it('marks exactly one footer entry on every page that has a URL', () => {
+    for (const page of addressable()) {
+      const marked = markedInFooter(build.read(page));
+      expect(marked.length, `${page}'s footer marks ${marked.length} entries, not 1`).toBe(1);
+      expect(marked[0]!.value, `${page} uses aria-current="${marked[0]!.value}"`).toBe('page');
+    }
+  });
+
+  it('marks the entry that points at the page it is on', () => {
+    // The thing `aria-current` asserts, and the only way to get it wrong quietly: a
+    // marked link to somewhere else reads as "you are here" about another page.
+    for (const page of addressable()) {
+      const marked = markedInFooter(build.read(page))[0]!;
+      if (marked.href === undefined) continue;
+      expect(marked.href, `${page}'s footer marks a link to somewhere else`).toBe(
+        ownPath(page),
+      );
+    }
+  });
+
+  it('marks the privacy notice on the one page the nav cannot reach', () => {
+    // The ticket's finding, named. `/privacy/` is in no menu by design, so if the footer
+    // does not mark it nothing does.
+    const privacy = addressable().filter((page) => /(?:^|\/)privacy\/index\.html$/.test(page));
+    expect(privacy.length, 'the build has no privacy page in either locale').toBe(
+      LOCALES.length,
+    );
+    for (const page of privacy) {
+      expect(markedInFooter(build.read(page))[0]!.href).toBe(ownPath(page));
+    }
+  });
+
+  it('marks nothing in the footer of a page the footer does not list', () => {
+    // The error page's route is in no list, so there is nothing to mark — and marking
+    // something anyway would be the same lie in the other direction.
+    for (const page of errorPages()) {
+      expect(markedInFooter(build.read(page))).toEqual([]);
     }
   });
 });

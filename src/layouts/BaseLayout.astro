@@ -78,8 +78,38 @@ interface Props {
    * alternate would promise an `/en/404/` that does not exist. `noindex` is the honest
    * answer, and it keeps the MUSE-9 rule — every declared URL resolves 200 — exact
    * rather than carved around.
+   *
+   * **This is a question about crawlers and nothing else.** It used to answer a second
+   * one as well; see `localeTwin`.
    */
   indexable?: boolean;
+  /**
+   * Is there an addressable page for this route in each locale?
+   *
+   * The error page is the one place the answer is no, and it is the whole of MUSE-38.
+   * GitHub Pages serves one root `404.html` for every unknown path, so `/404/`, `/en/404`
+   * and `/en/404/` are all themselves 404s. Two things follow, and only two:
+   *
+   *   - the language switcher cannot render, because it is a prefix swap on the current
+   *     route and would be two dead links on the one page a visitor reaches *because* a
+   *     link was dead (MUSE-13);
+   *   - `langInitScript` has nowhere to navigate, so it is handed no URL for either
+   *     locale and its one `go()` becomes a no-op.
+   *
+   * What does **not** follow is that the page stops handling language. MUSE-13 wrote
+   * `const localeRouting = indexable;` — true of today's pages, and a different claim —
+   * so the error page shipped no `langInitScript` either, and MUSE-33's `?lang=`, which
+   * acts on every page by design, was discarded rather than persisted on the one page a
+   * stale link actually lands on. One flag was answering "should a crawler index this" and
+   * "may this page route by language" at once; they are two props now, and neither is
+   * derived from the other. `test/nav.test.ts` pins both the behaviour and the absence of
+   * the alias, because an alias reads as a tidy-up rather than as a decision.
+   *
+   * A page with no twin still says which language it is written in, and the error page
+   * answers that by being bilingual rather than by choosing client-side — see
+   * `src/pages/404.astro`.
+   */
+  localeTwin?: boolean;
 }
 
 const {
@@ -88,20 +118,24 @@ const {
   description,
   detectLanguage = false,
   indexable = true,
+  localeTwin = true,
 } = Astro.props;
 
 const route = routeKey(Astro.url.pathname);
 const canonical = new URL(localeUrl(route, locale), Astro.site).href;
 
 /**
- * Does this page have a locale twin to route to?
+ * This route in each locale — or `null` for a locale it has no page in.
  *
- * The same condition as `indexable`, and for the same reason: the host serves the 404 body
- * for any unknown path, so its `Astro.url.pathname` is `/404/` and the `/en/404/` this
- * would compute is not a page either. Sending a 404 to another 404 in a different language
- * helps nobody, so the locale script rides with having a URL of one's own.
+ * `langInitScript` navigates only to a locale it was handed a URL for, so this is the
+ * single place "there is nowhere to send them" is said, and it is said per locale rather
+ * than as a flag the script has to interpret (MUSE-38). On the error page both answers are
+ * `null`: `Astro.url.pathname` there is `/404/`, so the URL this would otherwise compute is
+ * `/en/404/`, which the host cannot serve either. Sending a 404 to another 404 in a
+ * different language helps nobody — but *reading* the request and persisting it is not a
+ * navigation, and that is the half that used to be missing.
  */
-const localeRouting = indexable;
+const localeHref = (l: Locale): string | null => (localeTwin ? localeUrl(route, l) : null);
 const skipLabel = locale === 'hr' ? 'Preskoči na sadržaj' : 'Skip to content';
 
 /**
@@ -144,19 +178,20 @@ const ldJson = indexable
     {/* Locale routing, also pre-paint: `?lang=` has to be honoured before the wrong
         language is painted, and it is honoured on every page (MUSE-33). `detect` is what
         narrows the *inferred* half — a stored choice, the browser's preference — to the
-        homepage. Never move this into a component; it must block. */}
-    {
-      localeRouting && (
-        <script
-          is:inline
-          set:html={langInitScript({
-            urlFor: (l) => localeUrl(route, l),
-            locale,
-            detect: detectLanguage,
-          })}
-        />
-      )
-    }
+        homepage. Never move this into a component; it must block.
+
+        Unconditional, which is MUSE-38: this used to be gated on `indexable` by way of an
+        alias, so the error page silently dropped the one script that reads `?lang=`. A
+        page with no locale twin is handled by `localeHref` answering `null` — the script
+        ships, reads the request, persists it, and has nowhere to go. */}
+    <script
+      is:inline
+      set:html={langInitScript({
+        urlFor: localeHref,
+        locale,
+        detect: detectLanguage,
+      })}
+    />
 
     <title>{title}</title>
     <meta name="description" content={description} />
@@ -224,11 +259,11 @@ const ldJson = indexable
   <body>
     <a class="skip-link" href="#main">{skipLabel}</a>
     {/*
-      `indexable` is also the answer to "does this page have a URL of its own", which is
-      what decides whether a language switcher can work at all — see Header's prop
-      (MUSE-13).
+      Whether a language switcher can work at all is "does this route have a page in each
+      locale" — `localeTwin`, not `indexable` (MUSE-38). The two agree on every page the
+      site has today and are not the same question; see Header's prop (MUSE-13).
     */}
-    <Header locale={locale} localeSwitch={indexable} />
+    <Header locale={locale} localeSwitch={localeTwin} />
     <main id="main">
       <slot />
     </main>
