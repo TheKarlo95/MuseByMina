@@ -1154,4 +1154,39 @@ describe('the generated types cannot go stale unnoticed', () => {
       'npm run sanity:build',
     );
   });
+
+  it('pins the GROQ engine the suite believes, exactly (MUSE-51)', () => {
+    /**
+     * `API_VERSION` in `src/lib/sanity/client.ts` is a pinned date rather than `'latest'`,
+     * for a reason that is written out there: GROQ's behaviour is versioned, and a floating
+     * version means a build in six months can answer a query differently from a build
+     * today with no commit in between.
+     *
+     * `groq-js` is the *same* exposure on the other read path, and the only consumer of
+     * GROQ semantics in the suite: it is what decides, offline, what every query in
+     * `queries.ts` means. A caret range would let a minor bump change what ten builds'
+     * worth of assertions believe — silently, in a `npm install` that was meant to be a
+     * patch bump of something else, and with the live `API_VERSION` still saying the thing
+     * it said before. The two environments would then disagree about GROQ, which is
+     * precisely the class of defect MUSE-51 is about: the divergence register at the top of
+     * `src/lib/sanity/fixture.ts` lists two, and a floating engine is how a third arrives
+     * without anybody going looking.
+     *
+     * So: exact, not `^` and not `~`. Bumping it is a commit, and the suite is what says
+     * whether the new semantics agree with the pinned API version.
+     */
+    const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+    const pinned = pkg.devDependencies['groq-js'];
+
+    expect(pinned, '`groq-js` must be declared — the fixture read path evaluates with it.')
+      .toBeTruthy();
+    expect(
+      pinned,
+      'Pin `groq-js` to an exact version. It decides what every query means offline, ' +
+        'and `API_VERSION` is pinned for exactly the same reason.',
+    ).toMatch(/^\d+\.\d+\.\d+$/);
+
+    // And it stays a devDependency: the live read path must not need it installed.
+    expect(pkg.dependencies['groq-js']).toBeUndefined();
+  });
 });
