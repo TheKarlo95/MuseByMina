@@ -36,6 +36,17 @@ const CROATIAN_LOCALE = 'hr-HR';
 /** A locale switch link, by the locale it switches *to*. */
 const switchTo = (locale: Locale): string => `[data-locale-switch] a[data-locale="${locale}"]`;
 
+/**
+ * Any switcher entry, by the locale it names — link or not.
+ *
+ * `switchTo` above is deliberately an `a`: a *switch* is a thing you can follow, and a
+ * selector that quietly matched a non-link would let the switcher stop being one without
+ * a single assertion changing. The own-locale entry is not a switch (MUSE-39), so the
+ * assertions about it select on the entry rather than on the element it happens to be.
+ */
+const entryFor = (locale: Locale): string =>
+  `[data-locale-switch] [data-locale="${locale}"]`;
+
 let browser: Browser;
 let preview: Preview;
 /** `http://127.0.0.1:<port>` — the preview origin without the deploy base. */
@@ -321,7 +332,8 @@ describe('locale switch — the fragment survives (MUSE-16)', () => {
       // language rather than a bare path the auto-redirect is free to reinterpret. What
       // is still not invented is anything else — no `#`, no trailing `?`, no reordering.
       expect(await switchHref(page, 'hr')).toBe(`${pagePath('/')}?${LANG_PARAM}=hr`);
-      expect(await switchHref(page, 'en')).toBe(`${pagePath('/en')}?${LANG_PARAM}=en`);
+      // And not stamped onto the locale being read, which is not a link at all (MUSE-39).
+      expect(await page.locator(switchTo('en')).count()).toBe(0);
 
       await clickAndSettle(page, switchTo('hr'));
 
@@ -622,9 +634,22 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
     const { page, close } = await visit(urlFor('/en', TRIAL), { locale: FOREIGN_LOCALE });
     try {
       expect(await switchHref(page, 'hr')).toBe(`${pagePath('/')}?${LANG_PARAM}=hr${TRIAL}`);
+      // The English entry is where the visitor already is, so it is not a link to carry
+      // anything — the durability claim is about the language they are *not* reading
+      // (MUSE-39). The same href seen from the other side is asserted below.
+      expect(await page.locator(switchTo('en')).count()).toBe(0);
+    } finally {
+      await close();
+    }
+  });
+
+  it('advertises the other language from the Croatian side too', async () => {
+    const { page, close } = await visit(urlFor('/', TRIAL), { locale: CROATIAN_LOCALE });
+    try {
       expect(await switchHref(page, 'en')).toBe(
         `${pagePath('/en')}?${LANG_PARAM}=en${TRIAL}`,
       );
+      expect(await page.locator(switchTo('hr')).count()).toBe(0);
     } finally {
       await close();
     }
@@ -724,10 +749,156 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
       const page = await ctx.newPage();
       await page.goto(urlFor('/en/schedule'), { waitUntil: 'load' });
       expect(await switchHref(page, 'hr')).toBe(pagePath('/schedule'));
-      expect(await switchHref(page, 'en')).toBe(pagePath('/en/schedule'));
+      // And one link rather than two: the self-reference a crawler was being offered is
+      // gone with it (MUSE-39), which is the markup `test/urls.test.ts` walks.
+      expect(await page.locator('[data-locale-switch] a').count()).toBe(1);
+      expect(await page.getAttribute(entryFor('en'), 'aria-current')).toBe('page');
     } finally {
       await ctx.close();
     }
+  });
+});
+
+/** One switcher entry as the browser sees it, `aria-current` and resolved href included. */
+interface Entry {
+  locale: string | null;
+  /** The element's resolved `href`, or `null` when it is not a link at all. */
+  resolved: string | null;
+  ariaCurrent: string | null;
+}
+
+/** Every entry the switcher renders, in DOM order. */
+function entries(page: Page): Promise<Entry[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('[data-locale-switch] [data-locale]')].map(
+      (el) => ({
+        locale: el.dataset.locale ?? null,
+        resolved: el instanceof HTMLAnchorElement ? el.href : null,
+        ariaCurrent: el.getAttribute('aria-current'),
+      }),
+    ),
+  );
+}
+
+/**
+ * MUSE-39 — the entry for the locale you are already reading must not be a navigation.
+ *
+ * MUSE-33 stamped `?lang=` onto *every* switcher href, the own-locale one included, which
+ * is how `/en/schedule/`'s EN entry came to point at `/en/schedule/?lang=en`. Nothing
+ * broke: the destination serves the same page and the inline script reads `?lang=en` there
+ * as satisfied. But activating it reloaded the document where it used to do nothing, and
+ * `aria-current` was left on a link pointing somewhere other than the current address —
+ * which is the single thing that attribute asserts.
+ *
+ * The assertions below are written against the behaviour rather than against the markup,
+ * so they hold for either fix the ticket offers: whatever carries `aria-current` must
+ * either not be a link or be a link to exactly where we already are, and activating it
+ * must not navigate. A test that asserted `SPAN` would be asserting the choice.
+ */
+describe('the entry for the locale you are reading is inert (MUSE-39)', () => {
+  it('carries aria-current on the locale being read, and on nothing else', async () => {
+    // Pinned Croatian, and the landing URL asserted, because Playwright defaults to
+    // `en-US` and an unpinned probe measures whichever page detection sent it to
+    // (MUSE-48). `/en/schedule/` does not detect, so this is belt and braces — and it is
+    // the belt that catches the day something here starts to.
+    const { page, close } = await visit(urlFor('/en/schedule'), { locale: CROATIAN_LOCALE });
+    try {
+      expect(page.url()).toBe(urlFor('/en/schedule'));
+
+      const marked = (await entries(page)).filter((entry) => entry.ariaCurrent !== null);
+      expect(marked.map((entry) => entry.locale)).toEqual(['en']);
+      // If it is still a link, it has to be a link to *here*. This is the inaccuracy:
+      // MUSE-33 left `aria-current` on an href pointing at `…/en/schedule/?lang=en`.
+      if (marked[0]!.resolved !== null) expect(marked[0]!.resolved).toBe(page.url());
+      // `page`, not `true`. `true` is the generic fallback for a set with no better
+      // token; this is a page out of a set of pages, which is what the nav already says
+      // (`Header.astro`).
+      expect(marked[0]!.ariaCurrent).toBe('page');
+    } finally {
+      await close();
+    }
+  });
+
+  it('does not navigate when the locale being read is activated', async () => {
+    const { page, close } = await visit(urlFor('/en/schedule'), { locale: CROATIAN_LOCALE });
+    try {
+      expect(page.url()).toBe(urlFor('/en/schedule'));
+
+      // Two independent measurements, because each passes alone while the page visibly
+      // reloads: a main-frame navigation, and a request for the document itself.
+      let navigations = 0;
+      let documents = 0;
+      page.on('framenavigated', (frame) => {
+        if (frame === page.mainFrame()) navigations += 1;
+      });
+      page.on('request', (request) => {
+        if (request.resourceType() === 'document') documents += 1;
+      });
+
+      const url = page.url();
+      const depth = await page.evaluate(() => history.length);
+
+      await page.locator(entryFor('en')).click();
+      // Long enough that a navigation would have started if there were going to be one.
+      await page.waitForTimeout(500);
+
+      expect(navigations, 'activating the current locale navigated').toBe(0);
+      expect(documents, 'activating the current locale re-requested the document').toBe(0);
+      expect(page.url()).toBe(url);
+      // And no history entry, which is what makes Back behave afterwards.
+      expect(await page.evaluate(() => history.length)).toBe(depth);
+    } finally {
+      await close();
+    }
+  });
+
+  it('leaves the other locale a durable link, by click and by middle-click', async () => {
+    // The half that must *not* change. `?lang=` on the other locale's href is the whole
+    // of MUSE-33: it is what a middle-click, an "open in new tab" and a copied address
+    // carry, none of which fire a `click` event for a handler to help.
+    const { page, context, close } = await visit(urlFor('/en/schedule'), {
+      locale: FOREIGN_LOCALE,
+    });
+    try {
+      expect(await switchHref(page, 'hr')).toBe(
+        `${pagePath('/schedule')}?${LANG_PARAM}=hr`,
+      );
+      expect(await storedLang(page)).toBe(null);
+
+      const opened = context.waitForEvent('page', { timeout: 15_000 });
+      await page.locator(switchTo('hr')).click({ button: 'middle' });
+      const tab = await opened;
+      await tab.waitForLoadState('load');
+      await tab.waitForFunction(() => localStorage.getItem('muse-lang') !== null, null, {
+        timeout: 15_000,
+      });
+      expect(tab.url()).toBe(urlFor('/schedule', `?${LANG_PARAM}=hr`));
+      expect(await tab.getAttribute('html', 'lang')).toBe('hr-HR');
+      expect(await storedLang(tab)).toBe('hr');
+    } finally {
+      await close();
+    }
+  });
+
+  it('leaves the other locale durable when its address is copied out', async () => {
+    // "Copy link address" yields the `href` attribute and nothing else — no handler, no
+    // referrer, no storage. So the href is fetched in a browser that has never seen the
+    // site and prefers the other language, which is the only way to tell "the link named
+    // the language" apart from "the visitor happened to be sent there anyway".
+    const { page, close } = await visit(urlFor('/en/schedule'), { locale: FOREIGN_LOCALE });
+    let copied: string;
+    try {
+      copied = (await switchHref(page, 'hr'))!;
+    } finally {
+      await close();
+    }
+    expect(copied).toBe(`${pagePath('/schedule')}?${LANG_PARAM}=hr`);
+
+    const result = await landing({ from: `${host}${copied}`, locale: FOREIGN_LOCALE });
+    expect(new URL(result.url).pathname).toBe(pagePath('/schedule'));
+    expect(result.htmlLang).toBe('hr-HR');
+    expect(result.stored).toBe('hr');
+    expect(result.navigations).toBe(1);
   });
 });
 
@@ -839,6 +1010,104 @@ describe('an unusable instruction hands the decision back (MUSE-33)', () => {
 });
 
 /**
+ * MUSE-39 — `?lang=EN` is somebody asking for English, not a typo to be ignored.
+ *
+ * Matching was case-sensitive, so `EN`, `En` and `HR` all fell through as unrecognised.
+ * That was *correct* under the rule above — an unrecognised value must not masquerade as a
+ * decision — but `lang` is a parameter a human hand-types or hand-edits out of a shared
+ * link, and falling through is invisible: no English, and no indication why.
+ *
+ * Folding cannot reintroduce MUSE-33's bug, because a folded value either names a locale
+ * or still does not: `de` folds to `de` and is still nobody's language here. So the only
+ * outcomes that change are the ones that were previously *unreachable* — no spelling in
+ * MUSE-33's 240-case cross-product was anything but lowercase or `de`. The two axes gain
+ * a mixed-case value below rather than this block standing alone, so the new spellings
+ * compose with a stored choice and a browser preference rather than only being checked
+ * in isolation.
+ *
+ * `toLowerCase`, not `toLocaleLowerCase`: the latter folds `I` to `ı` under a Turkish
+ * locale, which would make `?lang=EN` work everywhere except in Turkey.
+ */
+describe('a hand-typed ?lang= is matched case-insensitively (MUSE-39)', () => {
+  /** The walk the ticket asks for, in both browsers. */
+  const SPELLINGS = ['en', 'EN', 'En', 'hr', 'HR', 'de'] as const;
+
+  it('reads every spelling of a locale as that locale, and nothing else as one', async () => {
+    const cases = SPELLINGS.flatMap((requested) =>
+      [CROATIAN_LOCALE, FOREIGN_LOCALE].map((locale) => {
+        const folded = requested.toLowerCase();
+        const known = folded === 'hr' || folded === 'en';
+        // Unfolded, this is a request. Unrecognised, it hands the decision to the
+        // browser — which is the rule MUSE-33 established and this must not touch.
+        const want = known ? folded : locale === CROATIAN_LOCALE ? 'hr' : 'en';
+        return {
+          requested,
+          locale,
+          label: `?${LANG_PARAM}=${requested} browser=${locale}`,
+          want: {
+            path: pagePath(want === 'en' ? '/en' : '/'),
+            htmlLang: want === 'en' ? 'en' : 'hr-HR',
+            // Only a request is recorded, and only ever in canonical lowercase.
+            stored: known ? folded : null,
+          },
+        };
+      }),
+    );
+    expect(cases.length).toBe(SPELLINGS.length * 2);
+
+    const results = await inParallel(cases, 6, (c) =>
+      landing({ from: urlFor('/', `?${LANG_PARAM}=${c.requested}`), locale: c.locale }),
+    );
+
+    for (const [index, result] of results.entries()) {
+      const c = cases[index]!;
+      expect(new URL(result.url).pathname, c.label).toBe(c.want.path);
+      expect(result.htmlLang, c.label).toBe(c.want.htmlLang);
+      expect(result.stored, c.label).toBe(c.want.stored);
+      // Still one hop, whatever the spelling: the destination reads the same parameter
+      // the same way, so there is nothing there to reconsider.
+      expect(result.navigations, c.label).toBe(c.want.path === pagePath('/') ? 1 : 2);
+    }
+  });
+
+  it('acts on a deep page for a mixed-case value, both directions', async () => {
+    for (const [from, requested, to, stored] of [
+      ['/schedule', 'EN', '/en/schedule', 'en'],
+      ['/en/schedule', 'Hr', '/schedule', 'hr'],
+    ] as const) {
+      // The browser prefers the language the link is *not* asking for, so detection
+      // cannot be what explains the outcome — and a deep page does not detect anyway.
+      const locale = stored === 'en' ? CROATIAN_LOCALE : FOREIGN_LOCALE;
+      const result = await landing({
+        from: urlFor(from, `?${LANG_PARAM}=${requested}`),
+        locale,
+      });
+      const where = `${from} ?${LANG_PARAM}=${requested}`;
+      expect(new URL(result.url).pathname, where).toBe(pagePath(to));
+      expect(result.stored, where).toBe(stored);
+      expect(result.navigations, where).toBe(2);
+    }
+  });
+
+  it('obeys a stored value whose case differs, and writes none back', async () => {
+    // Where an uppercase stored value can come from: a hand-edited key, another tab, or a
+    // build that predates the fold. It is matched, and it is *not* rewritten — the one
+    // place this script writes is the `?lang=` branch above, which folds before storing,
+    // so no uppercase value can originate here however the key is read.
+    for (const [stored, locale, landed] of [
+      ['EN', CROATIAN_LOCALE, '/en'],
+      ['HR', FOREIGN_LOCALE, '/'],
+    ] as const) {
+      const result = await landing({ from: urlFor('/'), locale, storedLang: stored });
+      const where = `stored=${stored} browser=${locale}`;
+      expect(new URL(result.url).pathname, where).toBe(pagePath(landed));
+      expect(result.navigations, where).toBe(landed === '/' ? 1 : 2);
+      expect(result.stored, where).toBe(stored);
+    }
+  });
+});
+
+/**
  * Every combination, enumerated, because this is the seam where the three rules meet.
  *
  * `?lang=`, a stored choice and the browser's preference now compose, and MUSE-16 already
@@ -850,10 +1119,14 @@ describe('an unusable instruction hands the decision back (MUSE-33)', () => {
  * `navigations` is 1 for "stayed" and 2 for "one hop". It is never allowed to be 3.
  */
 describe('the precedence rules compose without a loop (MUSE-33)', () => {
-  /** `?lang=` values worth distinguishing: absent, each locale, and a non-locale. */
-  const REQUESTED = [undefined, 'hr', 'en', 'de'] as const;
+  /**
+   * `?lang=` values worth distinguishing: absent, each locale, a non-locale — and since
+   * MUSE-39 a locale spelled in the wrong case, which is now a request like any other and
+   * has to compose with the two signals below it rather than only be checked on its own.
+   */
+  const REQUESTED = [undefined, 'hr', 'en', 'de', 'EN'] as const;
   /** Stored values, on the same axis. */
-  const STORED = [undefined, 'hr', 'en', 'de'] as const;
+  const STORED = [undefined, 'hr', 'en', 'de', 'HR'] as const;
   /** One page that language-detects and one that must not, in both locales. */
   const ROUTES = [
     ['/', 'hr'],
@@ -881,10 +1154,15 @@ describe('the precedence rules compose without a loop (MUSE-33)', () => {
     stored: string | undefined,
     browserIsCroatian: boolean,
   ): 'hr' | 'en' {
-    if (requested === 'hr' || requested === 'en') return requested;
+    // Case-folded, because a locale named in any case is a locale named (MUSE-39). The
+    // fold is *all* that changed: `de` folds to `de` and is still not an answer, so every
+    // row that existed before this rule reads exactly as it did.
+    const asked = requested?.toLowerCase();
+    const remembered = stored?.toLowerCase();
+    if (asked === 'hr' || asked === 'en') return asked;
     // Detection — the stored choice included — is the default locale's homepage only.
     if (!(here === 'hr' && route === '/')) return here;
-    if (stored === 'hr' || stored === 'en') return stored;
+    if (remembered === 'hr' || remembered === 'en') return remembered;
     return browserIsCroatian ? 'hr' : 'en';
   }
 
