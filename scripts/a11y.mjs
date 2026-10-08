@@ -1,20 +1,32 @@
 import { chromium } from 'playwright';
 import { AxeBuilder } from '@axe-core/playwright';
 
+import { openSiteOrExit } from './dist-origin.mjs';
+
 /**
  * Design system §11 makes accessibility a hard requirement in BOTH themes, with
  * published contrast tables. This is the gate that keeps that mechanical.
  */
-const ORIGIN = process.env.ORIGIN ?? 'http://localhost:4321';
-const BASE = process.env.BASE ?? '/MuseByMina';
 const ROUTES = (process.env.ROUTES ?? '/,/en').split(',');
 
 /**
- * Page URLs carry a trailing slash (`trailingSlash: 'always'`, MUSE-9). Auditing the
- * unslashed spelling would audit a redirect, not the page.
+ * The server this audit measures — and the only thing that knows whose build is on it.
+ *
+ * No server is started for us and none is attached to: with nothing in the environment,
+ * `openSite` serves `dist` from an in-process host on an ephemeral port. That is MUSE-52.
+ * This script reported every route clean in both themes against a stale `astro preview`
+ * daemon belonging to a **different agent's worktree**, because `astro preview`
+ * daemonises here and silently reuses one on another port. The two checks below were
+ * both added for that class and neither could see it — a status and a redirect confirm
+ * *something* answered, not which build. An explicit `ORIGIN` is still honoured and is
+ * now proved byte-identical to the local build before anything is audited, and either
+ * way the two lines logged above name the build these results are about.
+ *
+ * Page URLs carry a trailing slash (`trailingSlash: 'always'`, MUSE-9); `site.url` is the
+ * one place that is added. Auditing the unslashed spelling would audit a redirect.
  */
-const pageUrl = (route) =>
-  `${ORIGIN}${BASE.replace(/\/+$/, '')}${route === '/' ? '' : route}/`;
+const site = await openSiteOrExit({ routes: ROUTES });
+const pageUrl = (route) => site.url(route);
 
 const browser = await chromium.launch();
 let failures = 0;
@@ -76,6 +88,7 @@ for (const route of ROUTES) {
 }
 
 await browser.close();
+await site.close();
 if (failures) {
   console.log(`\n${failures} violation(s) total`);
   process.exit(1);

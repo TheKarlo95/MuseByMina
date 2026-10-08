@@ -1,111 +1,32 @@
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 
+import {
+  extensionOf,
+  MIME,
+  resolveRequest,
+  type Served,
+} from '../../scripts/dist-origin.mjs';
 import { basePath, type Build } from './build';
 
 /**
  * A static host that resolves URLs the way GitHub Pages does.
  *
- * `astro preview` is not usable for this: it answers both `/MuseByMina` and
- * `/MuseByMina/` with 200 and never redirects, so the mismatch MUSE-9 is about is
- * invisible to it. The rules below were read off the live deploy with
- * `curl -o /dev/null -w '%{http_code} %{redirect_url}'`, and `test/urls.test.ts`
- * pins each of them so this model cannot quietly drift into being lenient:
+ * The resolver, the content types and the `Served` shape are **not defined here**. They
+ * live in `scripts/dist-origin.mjs` and are re-exported, because MUSE-52 gave the browser
+ * gates in `scripts/` their own in-process server over `dist` — they no longer attach to
+ * an `astro preview` daemon — and that server has to answer exactly what this one
+ * answers. Two models of the host would drift, and the lenient one would be the one that
+ * stopped noticing a trailing-slash regression (MUSE-9). The move is the only direction
+ * that works: a `.mjs` script cannot import a `.ts` helper, and `test/origin.test.ts`
+ * fails if a second `resolveRequest` reappears in this file.
  *
- *   /MuseByMina       301 -> /MuseByMina/     deploy root, spelled without its slash
- *   /MuseByMina/      200                     index.html of a directory, with the slash
- *   /MuseByMina/en    301 -> /MuseByMina/en/  directory, without the slash
- *   /MuseByMina/en/   200
- *   /MuseByMina/404   200                     extensionless resolution of 404.html
- *   /MuseByMina/404/  404                     …but not as a directory
- *   /MuseByMina/nope  404
+ * Everything the rules are, and why `astro preview` cannot stand in for them, is
+ * documented at the resolver. `test/urls.test.ts` pins each rule against the live
+ * deploy's observed behaviour.
  */
-export type Served =
-  | { status: 200; file: string }
-  | { status: 301; location: string }
-  | { status: 404 };
-
-/**
- * Content types for everything the build emits.
- *
- * Shared with `./preview.ts` rather than owned by it, because both helpers now serve
- * pages to a real browser. A stylesheet sent without `text/css` is ignored outright in
- * standards mode, and HTML without a charset turns every `č` into a replacement
- * character — so a server that omits these does not render a slightly different page,
- * it renders a different one.
- */
-export const MIME: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.txt': 'text/plain; charset=utf-8',
-  '.xml': 'application/xml; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.woff2': 'font/woff2',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.webp': 'image/webp',
-  '.ico': 'image/x-icon',
-};
-
-/** The lowercased extension of `file`, dot included, or `''`. */
-export function extensionOf(file: string): string {
-  const dot = file.lastIndexOf('.');
-  return dot === -1 ? '' : file.slice(dot).toLowerCase();
-}
-
-function isFile(outDir: string, relPath: string): boolean {
-  try {
-    return statSync(join(outDir, relPath)).isFile();
-  } catch {
-    return false;
-  }
-}
-
-/**
- * What the host answers for `requestPath`, given an output tree published under `base`.
- *
- * `base` carries its trailing slash (`/MuseByMina/`, or `/` on an apex domain), because
- * that prefix is the whole URL space the deploy owns.
- */
-export function resolveRequest(
-  outDir: string,
-  base: string,
-  requestPath: string,
-): Served {
-  if (!requestPath.startsWith(base)) {
-    // The deploy root written without its slash. Pages cannot serve this as a page —
-    // it is a directory — so it always redirects, whatever `build.format` is.
-    if (`${requestPath}/` === base) return { status: 301, location: base };
-    return { status: 404 };
-  }
-
-  let rel: string;
-  try {
-    rel = decodeURIComponent(requestPath.slice(base.length));
-  } catch {
-    return { status: 404 };
-  }
-
-  if (rel !== '' && isFile(outDir, rel)) return { status: 200, file: rel };
-
-  const index = join(rel, 'index.html');
-  if (isFile(outDir, index)) {
-    return requestPath.endsWith('/')
-      ? { status: 200, file: index }
-      : { status: 301, location: `${requestPath}/` };
-  }
-
-  // Pages serves `/foo` from `foo.html`, but not `/foo/`.
-  if (!requestPath.endsWith('/') && isFile(outDir, `${rel}.html`)) {
-    return { status: 200, file: `${rel}.html` };
-  }
-
-  return { status: 404 };
-}
+export { extensionOf, MIME, resolveRequest, type Served };
 
 /** One response, reduced to what a crawler decides on. */
 export interface Probe {

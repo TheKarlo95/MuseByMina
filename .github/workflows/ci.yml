@@ -59,11 +59,15 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run build
-      - name: Serve and audit
+      # No server to start. Both checks serve `dist` themselves, from an in-process host
+      # on a port the kernel picks (MUSE-52) — `astro preview` daemonises under the agent
+      # environment and silently reuses a daemon on another port, so a check pointed at
+      # one can audit a different worktree's build and report it clean. That cannot happen
+      # on a fresh runner, but leaving the daemon here would mean the audited origin is a
+      # daemon again the next time this job is copied, and the scripts no longer have a
+      # port to be handed. Each check logs the fingerprint of the build it measured.
+      - name: Audit
         run: |
-          npx astro preview --port 4321 &
-          # The trailing slash is the served URL; the unslashed spelling redirects (MUSE-9).
-          npx wait-on http://localhost:4321/MuseByMina/ --timeout 60000
           npm run a11y
           # /schedule's responsive shift, keyboard operation and filters —
           # the MUSE-6 criteria a DOM-only test cannot reach.
