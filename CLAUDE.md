@@ -169,10 +169,13 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   off the build: a route that lands tomorrow is budgeted the day it builds and there is no
   list to extend. Each number carries a sentence saying what it was measured at, and
   `test/budget.test.ts` reads the source's own JSDoc so raising one without saying
-  anything is a red test. Images are budgeted at **0** — no page has one, and the first
-  ticket that adds one raises that line on purpose. That is the whole argument for having
-  done this now: today every number passes at 1.2–1.6×, and after the gallery and the
-  portraits land the same numbers are a negotiation about which page to exempt.
+  anything is a red test. That is the whole argument for having done this now: today
+  every number passes at 1.2–1.6×, and after the gallery and the portraits land the same
+  numbers are a negotiation about which page to exempt. **The image line was the
+  tripwire and MUSE-64 is the ticket it was set for** — 0 → 16 KB, measured at 11.1 KB,
+  with the headroom sized for MUSE-40's icon and explicitly not for a photograph. The
+  *total* ceiling did not move, which is the shape to copy: raise the one kind on its own
+  merits and let the sum stay honest.
 
   The **font count has a floor, and the floor is the half that finds things.** It is
   MUSE-35: all six faces 404ed under `astro dev` for the life of the project, so
@@ -183,6 +186,26 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   entry points, one set of numbers: `test/budget.test.ts` is the gate and builds both
   deploy targets, `npm run budget` prints the table over `dist` and runs inside the
   existing `a11y` job (MUSE-58's precedent — not a sixth check).
+- **The brand lockup is the supplied artwork, rendered by `Lockup.astro` and nowhere
+  else** (MUSE-64). Design system §12 forbids *"rebuild the lockup from separate parts"*
+  by name, and two spans of Cormorant and Jost is that construction — it renders
+  perfectly, passes every contrast check and looks deliberate, which is why
+  `test/lockup.test.ts` reads the markup rather than the page. `src/assets/
+  muse-lockup-white.png` is the supplied transparent PNG trimmed to its 855 × 622 of ink;
+  `logo/` stays a source directory. One 320px WebP, 11.1 KB, no `srcset` (the gate runs
+  at `deviceScaleFactor: 1`, so a 1× entry would budget a file almost nobody fetches) and
+  **no theme swap** — both bands are `--surface-deep`, so the white variant is right on
+  both. §12's clear space is a *fraction of the drawn size*, so it is derived in
+  `src/lib/lockup.ts`, which refuses to draw below §12's 100px rather than clamping.
+
+  **The masthead is the one surface still breaking the rule, and it is measured, not
+  forgotten.** 100px wide is 73px tall at 1.372:1, against a 64px mobile band (§7.1); the
+  size that fits is 55px, where "DANCE STUDIO" and "BY MINA" stop being words. §12 names
+  the **icon-only mark** as the compact header's variant and that artwork does not exist
+  — MUSE-40. It is the single entry in `REBUILT_FROM_PARTS`, carrying its reason and that
+  ticket, and the entry is **asserted still live**, so fixing the header without deleting
+  the line is also red. Do not shrink the lockup into the band to make the guard green:
+  it would pass, and the logo would be illegible.
 - `rootPath()`/`rootUrl()` in `src/lib/site.ts` are for files the build publishes at the
   deploy root — `robots.txt`, `llms.txt`, the sitemap — and for a future `favicon.ico` or
   `CNAME`. They are **not** the way to reference a bundled asset; see the bullet above.

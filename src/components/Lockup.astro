@@ -1,0 +1,111 @@
+---
+/**
+ * **The brand lockup, as the supplied artwork — the only place it is rendered** (MUSE-64).
+ *
+ * Design system §12 forbids, by name, rebuilding the lockup from separate parts. Two
+ * spans of Cormorant and Jost positioned by CSS is that construction, and it is what the
+ * masthead and the footer both carried: a wordmark that looks deliberate and is not the
+ * logo. `test/lockup.test.ts` is the guard, and it reads the markup rather than the
+ * rendered page, because the rebuilt version renders perfectly.
+ *
+ * ## Why an `<Image>` of a raster and not an inline SVG
+ *
+ * There is no vector. Both files in `logo/` are a base64 PNG inside a mask with ~5.5° of
+ * skew — `.svg` by extension only. They cannot be recoloured with `fill` or
+ * `currentColor`, will not scale past their raster resolution, and weigh ~85 KB. So the
+ * honest options were to ship the raster properly or to redraw it, and a redraw by
+ * tracing is inventing brand. This ships the raster properly: trimmed of its transparent
+ * canvas, emitted once at `LOCKUP_EMITTED_WIDTH`, content-hashed by Vite, 11.1 KB of
+ * WebP with a pixel-exact alpha channel.
+ *
+ * `quality` is deliberately low and costs nothing. The artwork is pure white — every
+ * opaque pixel is `#FFFFFF` and the shape lives entirely in the alpha channel — so lossy
+ * RGB compression has no detail to lose, while `alphaQuality: 100` keeps the hairlines
+ * exact. Measured: q80/alpha100 is 11,358 bytes at alpha RMSE 0.00 against the
+ * full-fidelity resize; raising `quality` to 90 adds 520 bytes and changes nothing.
+ *
+ * ## Why no theme swap
+ *
+ * The header and footer bands are `--surface-deep`, which is plum-ink in *both* themes,
+ * so the white lockup is correct on both and the variant does not change. §12's
+ * `.logo-white` / `.logo-plum` utilities are for a logo on `--surface`, which this is
+ * not. One `<img>`, one URL, no flash, no JavaScript — and `test/lockup.test.ts` asserts
+ * the absence, because "no theme swap" is a thing that gets added back helpfully.
+ *
+ * ## Clear space
+ *
+ * §12: *"minimum equal to the cap height of 'MUSE' on all four sides."* That is a
+ * fraction of the drawn size, not a pixel count, so the component derives it from
+ * `width` via `lockupClearSpace`. It is `padding` on the wrapper rather than a margin on
+ * the image, so it cannot be collapsed by a neighbour's margin — which would make the
+ * rule quietly false on one side only.
+ *
+ * The block-start and inline-start sides are then pulled back flush with a negative
+ * margin, and that is not a cancellation. Clear space is a keep-out zone between the
+ * artwork and *other content*; the space a container already holds open on its own
+ * leading edges is clear space that exists. Without the pull the lockup would hang
+ * 31px inside a column whose every other line starts at the edge, which reads as a
+ * mistake rather than as a rule being observed. The trailing padding stays real, and it
+ * is the side that matters: the next element in flow is pushed clear of the artwork by
+ * the full cap height. The caller's job is to place this where the leading edges have
+ * at least that much space — in the footer they have 24–48px of gutter against a 31px
+ * requirement, which is why `LOCKUP_WIDTH` there is the number it is.
+ */
+import { Image } from 'astro:assets';
+
+import lockup from '../assets/muse-lockup-white.png';
+import { LOCKUP_EMITTED_WIDTH, lockupClearSpace, lockupHeight } from '../lib/lockup';
+
+interface Props {
+  /** How wide the lockup is drawn, in CSS pixels. Below §12's 100px minimum this throws. */
+  width: number;
+  /**
+   * The accessible name, or `''` for a lockup whose name is already carried by an
+   * ancestor — a link with its own `aria-label`, say. There is no default: an image of
+   * the brand name is either naming the brand or repeating a name something else gave,
+   * and which one it is depends on where it was placed. See `test/lockup.test.ts`.
+   */
+  alt: string;
+}
+const { width, alt } = Astro.props;
+
+const clear = lockupClearSpace(width);
+---
+
+<span
+  class="lockup"
+  style={`--lockup-width:${width}px;--lockup-clear:${clear}px`}
+>
+  <Image
+    src={lockup}
+    alt={alt}
+    width={LOCKUP_EMITTED_WIDTH}
+    height={lockupHeight(LOCKUP_EMITTED_WIDTH)}
+    format="webp"
+    quality={80}
+    loading="eager"
+    decoding="async"
+  />
+</span>
+
+<style>
+  .lockup {
+    display: block;
+    /* §12's clear space, on all four sides, derived from the drawn width. The box is the
+       artwork plus its clear space, so anything laid out against this element is outside
+       the protected zone by construction rather than by a number somebody chose. */
+    padding: var(--lockup-clear);
+    /* See the note above: the leading edges borrow the container's own gutter so the
+       artwork aligns with the content around it. The trailing sides keep their padding. */
+    margin-block-start: calc(-1 * var(--lockup-clear));
+    margin-inline-start: calc(-1 * var(--lockup-clear));
+    width: max-content;
+  }
+  .lockup img {
+    display: block;
+    width: var(--lockup-width);
+    /* The emitted width/height attributes reserve the box; `auto` keeps the ratio from
+       the attributes rather than restating it, so there is one source for the aspect. */
+    height: auto;
+  }
+</style>

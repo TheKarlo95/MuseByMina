@@ -252,7 +252,7 @@ describe('MUSE-63: a page over budget names itself', () => {
     { kind: 'html', bytes: { html: 60 * 1024 }, budget: '48.0 KB', actual: '60.0 KB' },
     { kind: 'css', bytes: { css: 90 * 1024 }, budget: '40.0 KB', actual: '90.0 KB' },
     { kind: 'font', bytes: { font: 400 * 1024 }, budget: '288.0 KB', actual: '400.0 KB' },
-    { kind: 'image', bytes: { image: 820_000 }, budget: '0', actual: '800.8 KB' },
+    { kind: 'image', bytes: { image: 820_000 }, budget: '16.0 KB', actual: '800.8 KB' },
   ];
 
   it.each(overruns)(

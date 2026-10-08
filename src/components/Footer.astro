@@ -2,6 +2,7 @@
 import { MORE_NAV, PRIMARY_NAV, STUDIO } from '../lib/nav';
 import { localeUrl, routeKey, type Locale } from '../lib/i18n';
 import { addressLines, getSiteSettings, socialUrl } from '../lib/sanity';
+import Lockup from './Lockup.astro';
 
 interface Props {
   locale: Locale;
@@ -79,14 +80,38 @@ const here = routeKey(Astro.url.pathname);
  * asserts that by splitting the file at the fence.
  */
 const settings = await getSiteSettings();
+
+/**
+ * **How wide the lockup is drawn here, in CSS pixels** (MUSE-64).
+ *
+ * 130, against design system §12's 100px minimum. The footer is the one surface on the
+ * site with room for the lockup at a size §12 is satisfied by: this column is `1.4fr` of
+ * a four-track grid inside a 1280px inner, so about 376px wide on desktop and the full
+ * gutter-to-gutter width on mobile.
+ *
+ * The number is set by the **clear space**, not by the column width. §12 wants the cap
+ * height of "MUSE" on all four sides, which at 130px is 31px, and 31px is what every
+ * neighbour here can afford: the grid gap between footer columns is `--space-6` (32px),
+ * the inner's desktop gutter is `--space-7` (48px) and its top padding is `--space-9`.
+ * Draw it at 160px instead and the clear space becomes 38px — wider than the 32px gap —
+ * so the lockup would be 6px short of its own rule against the column beside it, on the
+ * one surface where the rule can be kept. 130px keeps it everywhere.
+ *
+ * The masthead is the surface that cannot, and that is the finding MUSE-64 reports
+ * rather than works around: at 100px the lockup is 73px tall, and the header band is
+ * 64px on mobile and 80px on desktop (§7.1). It does not fit at §12's minimum with the
+ * clear space, and on mobile it does not fit at §12's minimum at all. §12's own variants
+ * table names the **icon-only mark** as the compact header's variant, and that artwork
+ * does not exist — MUSE-40, blocked. See the note in `Header.astro`.
+ */
+const LOCKUP_WIDTH = 130;
 const address = addressLines(settings);
 ---
 
 <footer class="footer">
   <div class="inner">
     <div class="col">
-      <p class="logoMark">Muse</p>
-      <p class="logoSub">by Mina</p>
+      <Lockup width={LOCKUP_WIDTH} alt={settings.studioName} />
       <p class="blurb">
         {settings.tagline[locale]}
       </p>
@@ -175,20 +200,6 @@ const address = addressLines(settings);
     }
   }
 
-  .logoMark {
-    font-family: var(--font-display);
-    font-size: 2rem;
-    line-height: 1;
-    margin: 0;
-  }
-  .logoSub {
-    font-family: var(--font-label);
-    font-size: 0.5625rem;
-    letter-spacing: 0.32em;
-    text-transform: uppercase;
-    color: var(--band-accent);
-    margin: 4px 0 var(--space-4);
-  }
   .blurb {
     font-size: 0.875rem;
     color: var(--band-muted);

@@ -34,6 +34,41 @@ const t = {
 
 <header class="header" data-header>
   <div class="inner">
+    {/*
+      **This is the lockup rebuilt from separate parts, which design system §12 forbids
+      by name, and MUSE-64 measured why it is still here rather than fixing it.**
+
+      The footer now carries the real artwork (`Lockup.astro`). The masthead cannot, and
+      the arithmetic is short enough to check:
+
+        - §12's minimum reproduction size for the lockup is **100px wide**. That is a
+          legibility floor, not a preference — the artwork carries three type sizes in
+          one image, and at 100px "DANCE STUDIO" and "BY MINA" are already at the edge of
+          readable. Rendered at 66px they are grey smears.
+        - The artwork is 855 × 622 after trimming, so 100px wide is **73px tall**.
+        - This band is **64px** on mobile and **80px** on desktop (§7.1), and §12 also
+          wants the cap height of "MUSE" — 24px at that size — clear on all four sides.
+
+      73 does not fit in 64 with the clear space, and it does not fit in 64 *without* it
+      either. The size that does fit the mobile band with its clear space is 55px wide,
+      a little over half §12's minimum. So every available move breaks one of the
+      design system's own rules, and which one to break is a brand decision rather than
+      an engineering one.
+
+      **§12 already answers this, and the answer is artwork that does not exist.** Its
+      variants table lists the icon-only mark (dancer + `M`) as the variant for exactly
+      this surface — "favicon, social avatar, **compact mobile header**" — against the
+      status "Missing". That is MUSE-40, blocked on artwork, and it is the proper fix
+      here. The alternative is a true vector redraw, which also unblocks the icon; both
+      are design work, and tracing one out of a 1254px PNG would be inventing brand.
+
+      Until one of those lands, this stays — deliberately, registered as the single
+      exemption in `test/lockup.test.ts`, which fails if a *second* component grows one
+      and fails again if this one is fixed without the exemption being deleted. Do not
+      quietly shrink the lockup into this band to make the guard go green: the guard
+      would pass and the logo would be illegible, which is the trade §12's minimum size
+      exists to refuse.
+    */}
     <a class="logo" href={localeUrl('/', locale)} aria-label={t.home}>
       <span class="logoMark">Muse</span>
       <span class="logoSub">by Mina</span>

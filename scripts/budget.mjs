@@ -167,31 +167,58 @@ export const BUDGET = {
      */
     font: 288 * 1024,
     /**
-     * Images: **zero, because no page has one.** Measured, not aspirational — `dist` holds
-     * no raster or vector asset at all today, which is exactly why this is the cheap
-     * moment.
+     * Images: measured worst is **11.1 KB on every page** — the brand lockup in the
+     * footer, and the only image the site has.
      *
-     * This is a tripwire and it is meant to be. The first ticket that puts an image on a
-     * page raises this line, in this file, with a sentence saying what it measured and
-     * why — and that is the conversation the ticket exists to force while it still costs
-     * one line. A number chosen now for a photograph nobody has taken would be fiction,
-     * and this repo has a rule about those (MUSE-36).
+     * This line was `0` until MUSE-64, which is the ticket the tripwire was set for: "the
+     * first ticket that puts an image on a page raises this line, in this file, with a
+     * sentence saying what it measured and why." So, the measurement.
+     *
+     * One file, `muse-lockup-white.*.webp`, 11,356 bytes, 320px wide, emitted once and
+     * used by the footer of all twelve pages at 160 CSS px — 2× for a retina display.
+     * Deliberately **no `srcset`**: a `densities={[1, 2]}` pair would save ~7 KB on a 1×
+     * display, and it would also mean this gate measured the 160px file (Playwright runs
+     * at `deviceScaleFactor: 1`) while nearly every real visitor downloaded the 320px
+     * one. A budget that measures a file the audience does not fetch is worse than a
+     * looser budget. The reasoning is in `src/lib/lockup.ts`.
+     *
+     * **16 KB is ~1.44×, 4.9 KB of headroom**, and the headroom is sized for one thing:
+     * the icon-only mark and the favicon (MUSE-40), which are small square assets and
+     * are the next images this site is going to grow. It is deliberately **not** enough
+     * for a second lockup-sized asset, and nowhere near a photograph — the style cards'
+     * 4:5 images and the hero (§7.2, §9) will each be larger than this entire line, so
+     * the ticket that lands the first one re-measures here rather than squeezing under.
+     *
+     * The thing this number cannot see is an image that is correctly sized and simply
+     * wrong — a logo served at 2000px would blow past it, a logo served at 320px and
+     * painted at 40px would not. `test/lockup.test.ts` owns that half, by pinning the
+     * emitted width to the width the component draws.
      */
-    image: 0,
+    image: 16 * 1024,
   },
   /**
-   * Total decompressed bytes. Measured worst is `/` at 296.1 KB, 82% of it webfont.
+   * Total decompressed bytes. Measured worst is `/` at **307.8 KB**, 79% of it webfont.
    *
-   * 360 KB is ~1.22×, 63.9 KB of headroom, and deliberately **tighter than the sum of the
-   * per-kind lines** (376 KB): without this, two kinds each growing to the top of its own
+   * 360 KB is ~1.17×, 52.2 KB of headroom, and deliberately **tighter than the sum of the
+   * per-kind lines** (392 KB): without this, two kinds each growing to the top of its own
    * budget would be a page nobody agreed to and nothing red.
+   *
+   * **The ceiling did not move when the lockup landed** (MUSE-64) — the measurement under
+   * it did, from 296.1 KB to 307.8 KB, and the headroom absorbed the 11.1 KB. That is the
+   * line doing its job rather than needing maintenance: a per-kind budget can be raised
+   * on its own merits while this one keeps the page as a whole honest about the sum. It
+   * is also now the tighter of the two constraints on the next image, which is the right
+   * way round.
    */
   total: 360 * 1024,
   /**
    * Requests a page makes, counting only the ones the host answered 200.
    *
-   * Measured 5 (`/en/privacy/`: the document, one stylesheet, three faces) to 9 (`/`: the
-   * document, two stylesheets, six faces). 14 is the ceiling, 5 of headroom.
+   * Measured 6 (`/en/privacy/`: the document, one stylesheet, three faces, the lockup) to
+   * 10 (`/`: the document, two stylesheets, six faces, the lockup). 14 is the ceiling, 4
+   * of headroom — MUSE-64 spent one of the five on an image every page shares, which is
+   * the cheapest shape an image can have here: one more request for the whole site
+   * rather than one per surface.
    *
    * Budgeted beside the bytes rather than instead of them, because the two fail in
    * opposite directions: an unoptimised image moves the bytes and not this, and a gallery
