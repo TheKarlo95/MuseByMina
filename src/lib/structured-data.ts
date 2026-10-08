@@ -16,8 +16,11 @@ import { addressLines, socialUrl, type SiteSettings } from './sanity';
  * that as an attempt to game it, and the way it happens is never malice — it is a second
  * copy of the content, assembled by hand, drifting one field at a time. This repository
  * has two live examples: MUSE-11, where the homepage's level names disagreed with
- * `/schedule`, and MUSE-50, still open, where one of five address surfaces still spells
- * `Ilica 209` in code and will keep the old street the day the studio moves.
+ * `/schedule`, and MUSE-50, where one of the five address surfaces spelled the street as
+ * a literal inside a longer label and would have kept the old one the day the studio
+ * moved. The street is deliberately not written out here: `test/contentdrift.test.ts`
+ * fails on any copy of a CMS-owned value under `src/`, prose included, because a stale
+ * copy in a comment is believed rather than noticed.
  *
  * So this module holds no studio details at all. It takes the `SiteSettings` the page
  * already rendered from — the same memoised `getSiteSettings()` promise the footer reads,

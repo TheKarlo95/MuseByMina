@@ -248,12 +248,28 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   somebody once ran — comparing the build to the seed it just read asserts nothing. When
   Mina legitimately rewords something, delete the entry with a sentence saying so; do not
   quietly update it to match.
-- **`siteSettings.address` is one field, rendered on four surfaces.** `addressLines`
+- **`siteSettings.address` is one field, rendered on five surfaces.** `addressLines`
   (`src/lib/sanity/decode.ts`) splits it on its one comma for the footer's two-line
   `<address>`; `ADDRESS_PATTERN` makes the Studio refuse what the build would refuse. The
   rule exists because a CMS field nothing renders is worse than no field — it looks like it
   works. Only `country` (a translated word) and `maps` (no field in the schema) are still
   code, in `STUDIO`.
+
+  It said **four** until MUSE-50: `/schedule`'s hero eyebrow spelled the street as a
+  literal inside a composed label („Raspored · …"), and MUSE-20's review found its
+  surfaces by grepping for the identifier `STUDIO.street`, which a string buried in a
+  longer string does not match. **The guard for this existed and was green** —
+  `test/content.test.ts` scanned `src/` for the seeded values — because its needle was the
+  whole field while the copy was the street half, and because its field list was written
+  by hand, so `class.slug` and `scheduleSlot.start` were never on it.
+  `test/contentdrift.test.ts` replaces it: a **registry** of every string field in the
+  seed, each one classified as CMS-owned or legitimately-in-code with the reason beside
+  it, the completeness of that classification asserted so a new field forces the decision,
+  the needles including what the read path *derives* (the street, not the city — „Zagreb"
+  is a declined word in the homepage h1 and the regulator's address in the privacy
+  notice), every exemption asserted still live, and a failure that names `file:line`. The
+  same file rebuilds the site from an edited address and demands all five surfaces move,
+  which is the only assertion a literal fails while it still happens to match.
 - **A component can be built before its page can be routed** (MUSE-23). `/aboutus` is
   built and deliberately not published: its `studioStory` and `instructor` documents do
   not exist, the read path fails the build naming a missing document, and a routed page

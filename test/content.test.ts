@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -443,56 +443,28 @@ describe('the migration is a committed artefact, not a Studio session', () => {
     expect(routes.sort()).toEqual(ROUTES.map((entry) => entry.route).sort());
   });
 
-  it('carries the content, so no copy of it is left under `src/`', () => {
-    /**
-     * The other half of "the words moved": they are not *also* still in the code.
-     *
-     * Asserted against the seeded values rather than by grepping `src/lib/pages.ts` for
-     * `title:`, which was the first attempt and tested nothing — pasting the strings into
-     * a new `src/lib/copy.ts` satisfies it completely, and an unrelated future field
-     * called `title` fails it for no reason.
-     *
-     * `name` is excluded: `ROUTES` keeps a Croatian `studioLabel` per route for the
-     * Studio's dropdown, which is Studio-only, never published, and documented as the one
-     * deliberate overlap — a dropdown has to name a page before a document for it exists.
-     */
-    const settings = seededSettings();
-    const forbidden = [
-      ...seedDocs()
-        .filter((doc) => doc._type === 'page')
-        .flatMap((doc) =>
-          (['title', 'description'] as const).flatMap((field) =>
-            LOCALES.map((locale) => (doc[field] as Bilingual)[locale]),
-          ),
-        ),
-      ...LOCALES.map((locale) => (settings.tagline as Bilingual)[locale]),
-      ...LOCALES.map((locale) => (settings.summary as Bilingual)[locale]),
-      settings.address as string,
-      settings.email as string,
-      ...(settings.social as { url: string }[]).map((entry) => entry.url),
-    ];
-
-    const walk = (dir: string): string[] =>
-      readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
-        entry.isDirectory() ? walk(join(dir, entry.name)) : [join(dir, entry.name)],
-      );
-
-    const offenders: string[] = [];
-    for (const file of walk(join(ROOT, 'src'))) {
-      const text = readFileSync(file, 'utf8');
-      for (const value of forbidden) {
-        if (text.includes(value)) {
-          offenders.push(`${relative(ROOT, file)} → ${JSON.stringify(value.slice(0, 40))}`);
-        }
-      }
-    }
-    expect(
-      offenders,
-      'This string is in Sanity now. A copy under `src/` is the drift the migration ' +
-        'exists to remove: the deploy renders the CMS value, so the copy is what nobody ' +
-        'notices is stale.',
-    ).toEqual([]);
-  });
+  /**
+   * **"No copy of it is left under `src/`" moved to `test/contentdrift.test.ts` (MUSE-50).**
+   *
+   * The assertion that used to be here was this one, and it was **green while the bug it
+   * exists for was live**. Two reasons, and both are the reason it is not here any more:
+   *
+   *   1. Its forbidden list was **assembled by hand**, field by field. `title`,
+   *      `description`, `tagline`, `summary`, `address`, `email` and the profile URLs were
+   *      named; `class.slug` and `scheduleSlot.start` arrived with MUSE-36 and nothing
+   *      added them, because nothing asked.
+   *   2. It matched the whole `address` — „Ilica 209, Zagreb". The straggler on
+   *      `/schedule` was the **street half** inside a composed eyebrow, and a needle that
+   *      is a superstring of the copy cannot find it. The migration splits that field with
+   *      `addressLines` for the footer, so the renderable value and the stored value are
+   *      not the same string.
+   *
+   * So it is a registry now: every string field in the seed is classified covered or
+   * exempt, the completeness of that classification is itself asserted, the needles include
+   * what `addressLines` derives, and the failure names `file:line`. The reasoning for each
+   * field — including the `name`/`studioLabel` overlap this comment used to carry — lives
+   * beside the registry.
+   */
 });
 
 /* ------------------------------------------------- the suite does not use the network */
