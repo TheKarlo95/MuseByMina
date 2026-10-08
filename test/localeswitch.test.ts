@@ -4,7 +4,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { launchChecks, openRedirectProbe } from '../scripts/browser-checks.mjs';
 import type { Locale } from '../src/lib/i18n';
 import { LANG_PARAM, LANG_STORAGE_KEY } from '../src/lib/lang';
-import { settleInteraction, settleNavigation, settleScroll } from './helpers/browser-settle';
+import {
+  settleInteraction,
+  settleMove,
+  settleNavigation,
+  settleNewTab,
+  settleScroll,
+} from './helpers/browser-settle';
 import { pagePath, startPreview, type Preview } from './helpers/preview';
 
 /**
@@ -113,25 +119,42 @@ async function visit(
  * Click `selector` and wait for whatever navigation it causes to settle.
  *
  * Covers both kinds: a locale switch is a document navigation, the header CTA to `#trial`
- * is a same-document hash change. Waiting on `load` would hang on the second, so this
- * waits for the URL to change and then for scrolling to stop.
+ * is a same-document hash change. Playwright reports a commit for both, which is why
+ * `settleMove` can be the one gate here — and why it is the gate rather than the in-page
+ * `location.href` poll this used to run. That poll observed the commit in the *renderer*,
+ * one bookkeeping removed from the `page.url()` the assertions below read; MUSE-61 is what
+ * that gap costs. A click that goes nowhere, or bounces straight back, is still reported by
+ * the wait naming where it stayed.
  */
 async function clickAndSettle(page: Page, selector: string): Promise<void> {
   const before = page.url();
   await page.locator(selector).click();
-  try {
-    await page.waitForFunction((was) => location.href !== was, before, { timeout: 10_000 });
-  } catch (cause) {
-    // A locale switch that redirects straight back to where it started looks exactly like
-    // this: the click lands, the navigation happens, and the URL is unchanged.
-    throw new Error(
-      `clicking ${selector} left the URL at ${before} — it went nowhere, or bounced back`,
-      { cause },
-    );
-  }
+  await settleMove(page, before, `${selector} to go somewhere other than ${before}`);
   await page.waitForLoadState('networkidle').catch(() => undefined);
   await page.evaluate(() => document.fonts.ready);
   await settleScroll(page);
+}
+
+/**
+ * Middle-click `selector` and hand back the tab it opened, once that tab holds a document.
+ *
+ * The one place in the suite a new tab is taken delivery of (MUSE-61). It was three copies
+ * of the same four lines, each gating on conditions a blank tab satisfies — and `tab.url()`
+ * read against the empty document Chromium opens a middle-clicked tab at is how a pull
+ * request touching no browser code went red. `settleNewTab` is the barrier; what it does
+ * *not* do, and why the `localStorage` wait that used to be here is gone, is written out
+ * at the helper.
+ */
+async function middleClickOpens(
+  page: Page,
+  context: BrowserContext,
+  selector: string,
+): Promise<Page> {
+  const opened = context.waitForEvent('page', { timeout: 15_000 });
+  await page.locator(selector).click({ button: 'middle' });
+  const tab = await opened;
+  await settleNewTab(tab, `the tab middle-clicking ${selector} opened`);
+  return tab;
 }
 
 interface Geometry {
@@ -644,17 +667,7 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
     try {
       expect(await storedLang(page)).toBe(null);
 
-      const opened = context.waitForEvent('page', { timeout: 15_000 });
-      await page.locator(switchTo('hr')).click({ button: 'middle' });
-      const tab = await opened;
-      await tab.waitForLoadState('load');
-      // Wait for the condition, not a duration. The destination runs a blocking inline
-      // script that may `location.replace` and then writes the choice; a fixed sleep is
-      // long enough on a quiet laptop and not on a loaded CI runner, which is exactly
-      // how this timed out at 30s in CI while passing in 1.2s locally.
-      await tab.waitForFunction((key) => localStorage.getItem(key) !== null, LANG_STORAGE_KEY, {
-        timeout: 15_000,
-      });
+      const tab = await middleClickOpens(page, context, switchTo('hr'));
 
       // Croatian, not bounced to `/en/` by the homepage redirect.
       expect(tab.url()).toBe(urlFor('/', `?${LANG_PARAM}=hr${TRIAL}`));
@@ -671,17 +684,7 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
       locale: CROATIAN_LOCALE,
     });
     try {
-      const opened = context.waitForEvent('page', { timeout: 15_000 });
-      await page.locator(switchTo('en')).click({ button: 'middle' });
-      const tab = await opened;
-      await tab.waitForLoadState('load');
-      // Wait for the condition, not a duration. The destination runs a blocking inline
-      // script that may `location.replace` and then writes the choice; a fixed sleep is
-      // long enough on a quiet laptop and not on a loaded CI runner, which is exactly
-      // how this timed out at 30s in CI while passing in 1.2s locally.
-      await tab.waitForFunction((key) => localStorage.getItem(key) !== null, LANG_STORAGE_KEY, {
-        timeout: 15_000,
-      });
+      const tab = await middleClickOpens(page, context, switchTo('en'));
 
       expect(tab.url()).toBe(urlFor('/en', `?${LANG_PARAM}=en${TRIAL}`));
       expect(await tab.getAttribute('html', 'lang')).toBe('en');
@@ -851,13 +854,11 @@ describe('the entry for the locale you are reading is inert (MUSE-39)', () => {
       );
       expect(await storedLang(page)).toBe(null);
 
-      const opened = context.waitForEvent('page', { timeout: 15_000 });
-      await page.locator(switchTo('hr')).click({ button: 'middle' });
-      const tab = await opened;
-      await tab.waitForLoadState('load');
-      await tab.waitForFunction((key) => localStorage.getItem(key) !== null, LANG_STORAGE_KEY, {
-        timeout: 15_000,
-      });
+      const tab = await middleClickOpens(page, context, switchTo('hr'));
+
+      // MUSE-61's failing line. The comparison is the judge and the wait above is only the
+      // proof that there is a document to judge — which is why `?lang=` going missing
+      // reads as „expected `?lang=hr`, received nothing" rather than as a timeout.
       expect(tab.url()).toBe(urlFor('/schedule', `?${LANG_PARAM}=hr`));
       expect(await tab.getAttribute('html', 'lang')).toBe('hr-HR');
       expect(await storedLang(tab)).toBe('hr');

@@ -9,7 +9,7 @@ import {
 import { DEFAULT_LOCALE, LOCALES, type Locale } from '../src/lib/i18n';
 import { LANG_PARAM, LANG_STORAGE_KEY } from '../src/lib/lang';
 import { ROUTES } from '../src/lib/pages';
-import { settleScroll } from './helpers/browser-settle';
+import { settleMove, settleScroll } from './helpers/browser-settle';
 import {
   pagePath,
   PREVIEW_BASE,
@@ -137,14 +137,18 @@ async function session(locale: string): Promise<Session> {
 /**
  * Activate `selector` and wait until the browser has finished moving.
  *
- * The condition, not a clock (MUSE-54). Two facts make this exact rather than a guess:
- * `langInitScript` is a **blocking inline script in `<head>`**, so a document that has
- * reached `readyState === 'complete'` has already decided whether to hop; and
- * `waitForFunction` polls on the page's own `requestAnimationFrame` and re-evaluates in
- * whatever document is current, so a redirect mid-flight is waited out rather than raced.
- * Together they say "the browser has stopped somewhere" — which is what a test reading
- * the landing URL needs, and what a fixed sleep cannot promise on a box running ten
- * builds.
+ * The condition, not a clock (MUSE-54), and the condition read where the assertion reads it
+ * (MUSE-61). `settleMove` wants two facts in order: the tab has **committed** somewhere
+ * other than where the click started, and that document has reached
+ * `readyState === 'complete'`. The second is exact rather than a guess because
+ * `langInitScript` is a **blocking inline script in `<head>`**, so a document that is
+ * complete has already decided whether to hop, and a hop still in flight is waited out
+ * rather than raced.
+ *
+ * This used to be one in-page `waitForFunction` comparing `location.href`. That is a true
+ * observation of the commit — in the *renderer*, which is one bookkeeping removed from the
+ * `page.url()` every caller then reads. MUSE-61 is the bill for that gap, in the neighbouring
+ * suite, and `settleMove` closes it by waiting on Playwright's own navigation event.
  *
  * The URL has to differ from where the click started, so a click that goes nowhere fails
  * here naming the selector rather than two assertions later as a wrong landing.
@@ -152,18 +156,7 @@ async function session(locale: string): Promise<Session> {
 async function follow(page: Page, selector: string): Promise<void> {
   const from = page.url();
   await page.locator(selector).first().click();
-  try {
-    await page.waitForFunction(
-      (was) => document.readyState === 'complete' && location.href !== was,
-      from,
-      { timeout: 20_000 },
-    );
-  } catch (cause) {
-    throw new Error(
-      `gave up waiting for ${selector} to settle somewhere other than ${from}`,
-      { cause },
-    );
-  }
+  await settleMove(page, from, `${selector} to settle somewhere other than ${from}`);
   await page.waitForLoadState('networkidle').catch(() => undefined);
 }
 
@@ -645,8 +638,12 @@ describe('an unknown path is readable, and keeps the choice (MUSE-38)', () => {
   it('leaves in English in one click', async () => {
     const { page, close } = await land(urlFor(MISSING), { locale: FOREIGN_LOCALE });
     try {
-      await page.locator(exitIn('en')).first().click();
-      await page.waitForLoadState('networkidle');
+      // Through `follow`, like every other activation in this file. It used to click and
+      // then wait on `networkidle` alone, which on a page that has not moved yet is
+      // *already* satisfied — the error page was loaded and quiet before the click — so the
+      // landing assertion could read the 404's own URL and the failure would have named the
+      // exit's href rather than the wait (MUSE-61).
+      await follow(page, exitIn('en'));
       expect(new URL(page.url()).pathname).toBe(pagePath('/en'));
       expect(await page.getAttribute('html', 'lang')).toBe('en');
     } finally {
