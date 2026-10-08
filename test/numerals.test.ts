@@ -3,9 +3,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { DEFAULT_LOCALE, LOCALES, type Locale } from '../src/lib/i18n';
 import { ROUTES } from '../src/lib/pages';
+import { formatPrice } from '../src/lib/pricing';
 import { launchChecks, openCheckPage } from '../scripts/browser-checks.mjs';
 import { startPreview, type Preview } from './helpers/preview';
-import { seededSchedule } from './helpers/seed';
+import { seedDocsOfType, seededSchedule } from './helpers/seed';
 
 /**
  * MUSE-14 — numerals set in the display face must be LINING figures.
@@ -609,4 +610,114 @@ describe('a digit inside a form control is a digit too (MUSE-57)', () => {
       await close();
     }
   });
+});
+
+/**
+ * MUSE-59 — the price on `/pricing`, which is the figure a visitor acts on.
+ *
+ * `/pricing` is a route since MUSE-59, and a price is the one number on this site somebody
+ * budgets around: `55 €` set in text figures reads as a raised `55`, and `100 €` reads
+ * `Ioo €`. It is also the exact case MUSE-57's comment predicted ("`/pricing` is built and
+ * waiting on content … the day its digits are inside a control and in the display face at
+ * once"), and the sweep two blocks up — every control on every route computing what the
+ * document computes — picked `/pricing` up the moment it was in `ROUTES`. What no computed
+ * value can say is whether the shaper *drew* lining glyphs, which is this file's whole
+ * argument, so the prices are measured.
+ *
+ * **Measured as three pictures of the same element rather than as an ink edge, and the €
+ * is why.** The rise measurement above works because a `<time>` holds nothing but digits
+ * and a colon. A price holds a EURO SIGN, which is drawn at cap height and is not a figure
+ * — so it is the topmost ink in the crop whichever figures the shaper picks, `oldstyle.top`
+ * equals `lining.top`, and the rise is zero for a page that is perfectly correct. Cropping
+ * the € out of the shot by hand is possible (a `Range` over the digit run) and brittle at
+ * exactly the wrong place: in English the price is `€55`, with no space between the symbol
+ * and the first digit, so one antialiased column of € inside the crop restores the bug.
+ *
+ * So instead: the element as the page renders it, the same element with `lining-nums`
+ * forced, and the same element with `oldstyle-nums` forced. The € is identical in all
+ * three and cancels. The page must be **pixel-identical** to the lining one and
+ * **different** from the old-style one — and that second half is what catches a display
+ * face with no `lnum` table, where all three pictures are the same and the declaration is
+ * inert.
+ */
+
+/** Every price the seed publishes, formatted per locale. Order is `/pricing`'s business. */
+const SEEDED_PRICES: Record<Locale, string[]> = Object.fromEntries(
+  LOCALES.map((locale) => [
+    locale,
+    seedDocsOfType('pricingTier').map((tier) => formatPrice(tier.priceEur as number, locale)),
+  ]),
+) as Record<Locale, string[]>;
+
+const PRICE_CASES = [
+  { name: 'hr · dark', route: '/pricing', locale: 'hr' as const, scheme: 'dark' as const },
+  { name: 'hr · light', route: '/pricing', locale: 'hr' as const, scheme: 'light' as const },
+  { name: 'en · dark', route: '/en/pricing', locale: 'en' as const, scheme: 'dark' as const },
+  { name: 'en · light', route: '/en/pricing', locale: 'en' as const, scheme: 'light' as const },
+];
+
+/** A shot of `el` with `variant` forced on it, and the inline style put back afterwards. */
+async function shotWith(el: Locator, variant: string): Promise<Buffer> {
+  await el.evaluate((node, value) => {
+    (node as HTMLElement).style.fontVariantNumeric = value;
+  }, variant);
+  const shot = await el.screenshot();
+  await el.evaluate((node) => {
+    (node as HTMLElement).style.fontVariantNumeric = '';
+  });
+  return shot;
+}
+
+describe('a price on /pricing is drawn in lining figures (MUSE-59)', () => {
+  it('has prices to measure, carrying the two glyphs the ticket is about', () => {
+    // The positive control: an empty subject satisfies every loop below. `1` and `0` are
+    // the glyphs MUSE-14 was filed for — a text-figure `1` reads as `I` and `0` as `o`.
+    expect(SEEDED_PRICES.hr.length).toBeGreaterThan(0);
+    const digits = SEEDED_PRICES.hr.join('');
+    expect(digits).toMatch(/1/);
+    expect(digits).toMatch(/0/);
+  });
+
+  for (const { name, route, locale, scheme } of PRICE_CASES) {
+    it(`draws the figures the document asks for — ${name}`, async () => {
+      const { page, close } = await visit(route, scheme);
+      try {
+        const prices = page.locator('[data-price]');
+        const count = await prices.count();
+        expect(count, `${route} shows no price`).toBe(SEEDED_PRICES[locale].length);
+
+        const seen: string[] = [];
+        for (let index = 0; index < count; index += 1) {
+          const el = prices.nth(index);
+          await el.scrollIntoViewIfNeeded();
+          seen.push(await el.evaluate((node) => node.textContent ?? ''));
+
+          const computed = await el.evaluate((node) => getComputedStyle(node).fontVariantNumeric);
+          const asRendered = await el.screenshot();
+          const lining = await shotWith(el, 'lining-nums tabular-nums');
+          const oldstyle = await shotWith(el, 'oldstyle-nums tabular-nums');
+
+          expect(
+            asRendered.equals(lining),
+            `the price computes font-variant-numeric: ${computed} and does not render the ` +
+              `way it does with lining-nums forced — the figures on the page are not the ` +
+              `lining ones, so the price reads as raised digits (MUSE-14, MUSE-43, MUSE-57)`,
+          ).toBe(true);
+
+          expect(
+            asRendered.equals(oldstyle),
+            `the price renders identically with oldstyle-nums forced, so either the ` +
+              `display face ships no lnum table and the declaration is inert, or this ` +
+              `element is not set in the display face at all`,
+          ).toBe(false);
+        }
+
+        expect([...seen].sort(), 'the prices on the page are the seeded ones').toEqual(
+          [...SEEDED_PRICES[locale]].sort(),
+        );
+      } finally {
+        await close();
+      }
+    }, 120_000);
+  }
 });

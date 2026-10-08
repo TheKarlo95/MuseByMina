@@ -358,9 +358,15 @@ describe('the Studio refuses a route the site does not serve', () => {
   it('refuses a route the site does not serve, however it got there', async () => {
     // `/aboutus` is the ticket's case — a page that is built and not routed. The others
     // are what a paste produces: a full URL, a trailing slash, a locale prefix.
+    //
+    // `/pricing` was in this list and MUSE-59 routed it, so it moved to the positive
+    // control above — which is the list this one is derived against, and the reason that
+    // control exists. A route graduating from "refused" to "accepted" is what shipping a
+    // page looks like from here; the remaining four can never graduate, because three of
+    // them are spellings no `ROUTES` entry may have and `/aboutus` is MUSE-23's
+    // deliberately unrouted component.
     for (const route of [
       '/aboutus',
-      '/pricing',
       'https://example.test/schedule',
       '/schedule/',
       '/en/schedule',

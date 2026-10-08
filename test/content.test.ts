@@ -188,6 +188,38 @@ function supersededEntry(route: string, field: CopyField) {
   return SUPERSEDED.find((entry) => entry.route === route && entry.field === field);
 }
 
+/**
+ * **Pages the site did not have before the migration — the receipt has nothing to say
+ * about them.**
+ *
+ * `PUBLISHED_BEFORE_THE_MIGRATION` is a record of what `main` published at `d99d7f0`, so a
+ * page added since is not a drift from it; there is no frozen string to compare to, and
+ * inventing one would be writing the receipt after the fact. For these routes the
+ * comparison moves to the seed, which is the only honest source — which means the *words*
+ * of a new page are asserted by the suite that ships it, not here.
+ *
+ * It is a list and not a derived set on purpose. „This route is new" is a claim somebody
+ * has to make in a diff, with a ticket beside it; derived from the absence of a frozen
+ * entry it would also swallow a frozen entry somebody deleted, which is the one thing this
+ * file exists to prevent. Both halves are asserted below: every route in `ROUTES` is
+ * either frozen or listed here, and a route listed here must really have no frozen entry.
+ */
+const ADDED_AFTER_THE_MIGRATION: { route: string; ticket: string; because: string }[] = [
+  {
+    route: '/pricing',
+    ticket: 'MUSE-59',
+    because:
+      'The pricing page. MUSE-22 built the component and deliberately did not route it — ' +
+      'no prices had been agreed and `getPricingTiers()` fails the build when the dataset ' +
+      'holds no tier — so `/pricing` arrived with the two periods the studio confirmed, ' +
+      'after this receipt was written. Its copy is asserted in `test/pricing.test.ts`.',
+  },
+];
+
+function addedEntry(route: string) {
+  return ADDED_AFTER_THE_MIGRATION.find((entry) => entry.route === route);
+}
+
 /** The `page` document in the committed seed for one route. */
 function seededPage(route: string): SeedDoc {
   const found = seedDocs().find((doc) => doc._type === 'page' && doc.route === route);
@@ -200,7 +232,7 @@ function seededPage(route: string): SeedDoc {
  * superseded — whatever the CMS now holds.
  */
 function expectedCopy(route: string, field: CopyField, locale: Locale): string {
-  if (supersededEntry(route, field)) {
+  if (addedEntry(route) || supersededEntry(route, field)) {
     return (seededPage(route)[field] as Bilingual)[locale];
   }
   return PUBLISHED_BEFORE_THE_MIGRATION.pages[route]![field][locale];
@@ -417,13 +449,19 @@ describe('the migration is a committed artefact, not a Studio session', () => {
      * documents, four `scheduleSlot` documents, and the two instructors who really teach
      * them. The counts are spelled out rather than loosened to "at least", because this
      * is the one assertion that would notice the invented thirteen coming back.
+     *
+     * MUSE-59 added the fifth `page` document and the **two** `pricingTier` documents —
+     * two, because the studio confirmed two periods and no others. A third one appearing
+     * here is a price nobody agreed to, which is MUSE-36 on the one field where it is also
+     * a commercial claim; `test/pricing.test.ts` holds the amounts themselves.
      */
     const byType = new Map<string, number>();
     for (const doc of seedDocs()) byType.set(doc._type, (byType.get(doc._type) ?? 0) + 1);
     expect([...byType.entries()].sort()).toEqual([
       ['class', 4],
       ['instructor', 2],
-      ['page', 4],
+      ['page', 5],
+      ['pricingTier', 2],
       ['scheduleSlot', 4],
       ['siteSettings', 1],
     ]);
@@ -563,6 +601,41 @@ describe('AC1: every page renders the words `main` published', () => {
    * The other half of a `SUPERSEDED` entry: the old words are *gone*, and the entry is
    * not a stale note about a change that never happened.
    */
+  /**
+   * The anti-narrowing half of `ADDED_AFTER_THE_MIGRATION`: a route is frozen or it is
+   * declared new, and nothing is quietly neither.
+   *
+   * Without this, a page added to `ROUTES` with no frozen entry would make `expectedCopy`
+   * read the seed for it — comparing the build to its own input, which is the exact
+   * failure the header of this file says a reviewer demonstrated.
+   */
+  it('accounts for every route: frozen before the migration, or declared as added since', () => {
+    const unaccounted = ROUTES.map(({ route }) => route).filter(
+      (route) =>
+        PUBLISHED_BEFORE_THE_MIGRATION.pages[route] === undefined && !addedEntry(route),
+    );
+    expect(
+      unaccounted,
+      'these routes have no frozen copy and are not listed in ' +
+        'ADDED_AFTER_THE_MIGRATION, so their words are being compared against the seed ' +
+        'the build just read, which asserts nothing',
+    ).toEqual([]);
+
+    for (const entry of ADDED_AFTER_THE_MIGRATION) {
+      expect(entry.ticket, entry.route).not.toBe('');
+      expect(entry.because.length, `${entry.route} needs a reason`).toBeGreaterThan(40);
+      // A route cannot be both: the frozen entry is the stronger claim, and an "added"
+      // entry beside one would switch it off.
+      expect(
+        PUBLISHED_BEFORE_THE_MIGRATION.pages[entry.route],
+        `${entry.route} is listed as added after the migration and is also frozen`,
+      ).toBeUndefined();
+      expect(ROUTES.map(({ route }) => route), `${entry.route} is not a route`).toContain(
+        entry.route,
+      );
+    }
+  });
+
   it('publishes none of the superseded copy, and claims no change that is not one', () => {
     expect(
       SUPERSEDED.every((entry) => entry.ticket !== '' && entry.because.length > 40),
