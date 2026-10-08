@@ -55,6 +55,17 @@ import { jsonLd, structuredData } from '../lib/structured-data';
  */
 import cormorantLatin from '../assets/fonts/cormorant-garamond-latin.woff2?url';
 import interLatin from '../assets/fonts/inter-400-600-latin.woff2?url';
+/**
+ * The tab icons, as a registry rather than five tags written out below (MUSE-40).
+ *
+ * Every `href` in it is a `?url` import for the same reason the two fonts above are, and
+ * the reasoning for the set — why there are two colour schemes, why the small sizes carry
+ * more stroke weight than the artwork does, and why each scheme names an explicit
+ * `media` — is all in `src/lib/icon.ts`. This module pulls in no CSS, so its position
+ * here cannot move the built `<head>` (MUSE-43); it sits with the other asset imports
+ * anyway, which are the ones already proven safe there.
+ */
+import { ICONS } from '../lib/icon';
 import Header from '../components/Header.astro';
 import Footer from '../components/Footer.astro';
 
@@ -224,6 +235,17 @@ const ldJson = indexable
         literal here. Keep in sync with --plum / --cream in tokens.css. */}
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#420535" />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F7F2EE" />
+
+    {/* The tab icons (MUSE-40), beside the theme colours because they are the same
+        question — what the browser's own chrome shows for this page — answered for the
+        two colour schemes §11 requires. The set, the two variants and the stroke weight
+        the small sizes carry are all `src/lib/icon.ts`; emitting it from the registry is
+        what lets `test/icon.test.ts` assert the page declares that set and no other. */}
+    {
+      ICONS.map((icon) => (
+        <link rel={icon.rel} type="image/png" sizes={icon.sizes} href={icon.href} media={icon.media} />
+      ))
+    }
 
     {/* Both hrefs come from the `?url` imports above — see the note there. Never spell
         one of these out: a hand-written path has to join the deploy base (MUSE-8) and
