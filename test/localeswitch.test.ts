@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { launchChecks, openRedirectProbe } from '../scripts/browser-checks.mjs';
 import type { Locale } from '../src/lib/i18n';
 import { LANG_PARAM, LANG_STORAGE_KEY } from '../src/lib/lang';
+import { settleInteraction, settleNavigation, settleScroll } from './helpers/browser-settle';
 import { pagePath, startPreview, type Preview } from './helpers/preview';
 
 /**
@@ -106,23 +107,6 @@ async function visit(
   await page.evaluate(() => document.fonts.ready);
   await settleScroll(page);
   return { page, context, close };
-}
-
-/**
- * Wait for scrolling to stop, without assuming smooth scrolling is on.
- *
- * The initial pause matters: polling immediately reads the pre-scroll position twice and
- * concludes the page has settled at the top. Same helper shape as `test/lang.test.ts`.
- */
-async function settleScroll(page: Page): Promise<void> {
-  await page.waitForTimeout(150);
-  let last = Number.NaN;
-  for (let i = 0; i < 80; i += 1) {
-    const y = await page.evaluate(() => Math.round(window.scrollY));
-    if (y === last) return;
-    last = y;
-    await page.waitForTimeout(25);
-  }
 }
 
 /**
@@ -573,8 +557,15 @@ async function landing(opts: {
       if (frame === page.mainFrame() && !frame.url().startsWith('about:')) navigations += 1;
     });
     await page.goto(opts.from, { waitUntil: 'load', timeout: 20_000 });
-    // Long enough that a second hop would have started if there were going to be one.
-    await page.waitForTimeout(200);
+    /**
+     * Not "long enough that a second hop would have started" — *proof* that none can
+     * (MUSE-54). `langInitScript` is a blocking inline script in `<head>`, so a hop is
+     * decided before the body parses and therefore before the document it hopped from
+     * could ever fire `load`. A document that reaches `complete` is one that stayed, and
+     * a hop still in flight is waited out instead of raced; the old 200 ms was a bet that
+     * a redirect on a loaded machine is prompt.
+     */
+    await settleNavigation(page, 'the language redirect to settle on one document');
     return {
       url: page.url(),
       htmlLang: await page.getAttribute('html', 'lang'),
@@ -827,8 +818,15 @@ describe('the entry for the locale you are reading is inert (MUSE-39)', () => {
       const depth = await page.evaluate(() => history.length);
 
       await page.locator(entryFor('en')).click();
-      // Long enough that a navigation would have started if there were going to be one.
-      await page.waitForTimeout(500);
+      /**
+       * The browser's own chance to act, measured in frames and in network quiet rather
+       * than in milliseconds (MUSE-54). A negative claim has no state to converge on, so
+       * what it can honestly wait for is: the page produced real frames after the click,
+       * and no document request is still in the air. On a loaded box 500 ms of wall clock
+       * can be *zero* frames, which is no chance at all — and a navigation that began
+       * just after the sleep expired is a pass this assertion has not earned.
+       */
+      await settleInteraction(page, 'the activated locale entry to do whatever it does');
 
       expect(navigations, 'activating the current locale navigated').toBe(0);
       expect(documents, 'activating the current locale re-requested the document').toBe(0);

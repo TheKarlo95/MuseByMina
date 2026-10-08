@@ -21,6 +21,7 @@ import {
   buildDirectoryNames,
   copyPasteTripwire,
   deletions,
+  fixedSleeps,
   frag,
   INERT_EXTENSIONS,
   inspectedFiles,
@@ -49,6 +50,9 @@ import {
  *      before any worker exists — and it only prunes what no run could still be using.
  *   5. Nothing under `test/` starts a child process except through that one helper.
  *   6. A file whose hook died is *reported*, not counted as a deselected skip.
+ *   7. Nothing under `test/` waits on the clock instead of on a condition (MUSE-54).
+ *      That rule reaches the fixed sleep and not the other two shapes MUSE-54 found; what
+ *      it cannot see is written out at `fixedSleeps` and asserted below.
  *
  * (5) is deliberately about *child processes*, not about `astro build`. MUSE-35 needed
  * a real `astro dev` — the bug it fixes is invisible to anything that reads `dist` —
@@ -278,6 +282,18 @@ describe('the rules are enforced on the test tree, not remembered', () => {
     expect(offences(processStarts, [BUILD_HELPER])).toEqual([]);
   });
 
+  it('lets no suite wait on the clock instead of on a condition', () => {
+    // MUSE-54. No exemptions, and there is no file that needs one: every wait these
+    // suites perform now goes through `test/helpers/browser-settle.ts`, which waits on
+    // the page's own frame clock and on load state.
+    //
+    // The instance is cheap and the pattern is what keeps returning — MUSE-33 replaced
+    // the sleep that had just failed and left three behind in the same file, and all
+    // three were still there when two more suites flaked on the same afternoon. So this
+    // is a rule about the class, like every other rule in this describe block.
+    expect(offences(fixedSleeps)).toEqual([]);
+  });
+
   it('keeps the textual tripwire green as well', () => {
     // Crude on purpose, and no longer the only line: it is what catches a deletion
     // through a package nobody has modelled, or an `rm -rf` handed to a shell.
@@ -385,6 +401,87 @@ describe('the guard catches what it claims to, and nothing else', () => {
     const probe = ['const hit = /(a)(b)/.exec(line);', 'const next = hit?.[1];'].join('\n');
 
     expect(processStarts('probe.ts', probe)).toEqual([]);
+  });
+
+  const SLEEP = frag('waitFor', 'Timeout');
+
+  it('catches a fixed sleep however it is called', () => {
+    // MUSE-54's teeth: a method call, a bare call, and a call through a string key —
+    // `page['waitForTimeout'](150)` is the obvious way round a rule that only looked at
+    // property accesses, and `deletions` already models it for `fs['rmSync']`.
+    const asMember = `await page.${SLEEP}(150);`;
+    const asBare = `await ${SLEEP}(25);`;
+    const asKey = `await page['${SLEEP}'](200);`;
+
+    for (const probe of [asMember, asBare, asKey]) {
+      expect(fixedSleeps('probe.ts', probe).length, probe).toBeGreaterThan(0);
+    }
+  });
+
+  it('leaves an alias to the AST rule’s blind spot and the tripwire behind it', () => {
+    // Honest about the seam, and the reason the textual needle was added as well. The
+    // call is `pause(…)`, which no rule over callees can recognise — there is no import
+    // to resolve the alias through, the way `deletions` resolves `rm as tidy`, because
+    // this one is a method on a Playwright object rather than a module export. The
+    // *declaration* still spells the name in code, so the second line catches it.
+    const probe = [`const { ${SLEEP}: pause } = page;`, 'await pause(150);'].join('\n');
+
+    expect(fixedSleeps('probe.ts', probe)).toEqual([]);
+    expect(copyPasteTripwire('probe.ts', probe).length).toBeGreaterThan(0);
+  });
+
+  it('names the file and the line so the failure is actionable', () => {
+    const probe = ['const a = 1;', '', `await page.${SLEEP}(400);`].join('\n');
+    const [offence] = fixedSleeps('test/somewhere.test.ts', probe);
+
+    expect(offence?.file).toBe('test/somewhere.test.ts');
+    expect(offence?.line).toBe(3);
+    expect(listed(fixedSleeps('test/somewhere.test.ts', probe))[0]).toContain(
+      'test/somewhere.test.ts:3',
+    );
+  });
+
+  it('does not fire on a comment that explains why a sleep was removed', () => {
+    // The false positive that matters most for *this* rule. The reasoning for every one
+    // of MUSE-54's replacements is written beside it and names the call it replaced; a
+    // guard that failed on prose would get those sentences deleted, which is how the
+    // knowledge is lost rather than kept. `source-guard.ts`'s own doc comment names it
+    // several times and the suite above is green, which is this claim in the live tree.
+    const prose = [
+      '/**',
+      ` * Not a ${SLEEP}: the condition is the frame clock, because a fixed sleep is a`,
+      ' * bet that the machine is not busy.',
+      ' */',
+      'export const note = 1;',
+      `// Was: await page.${SLEEP}(150), which read the position mid-scroll.`,
+    ].join('\n');
+
+    expect(fixedSleeps('probe.ts', prose)).toEqual([]);
+    expect(copyPasteTripwire('probe.ts', prose)).toEqual([]);
+  });
+
+  it('cannot reach a measurement that simply never waited', () => {
+    // The honesty this ticket asked for, as a test rather than a caveat in prose. This is
+    // `test/contact.test.ts`'s CTA flake in miniature: a click and a geometry read with
+    // nothing in between. There is no call to forbid, so the rule is silent — and saying
+    // so here means the next person to widen the guard can delete this test on purpose
+    // instead of discovering the gap in a flake.
+    const probe = [
+      'await link.click();',
+      'const top = await page.evaluate(() => target.getBoundingClientRect().top);',
+      'expect(top).toBeGreaterThan(headerBottom);',
+    ].join('\n');
+
+    expect(fixedSleeps('probe.ts', probe)).toEqual([]);
+    expect(copyPasteTripwire('probe.ts', probe)).toEqual([]);
+  });
+
+  it('cannot tell a generous timeout from a tight one', () => {
+    // And `test/trialform.test.ts`'s: the right condition on too small a budget. A
+    // timeout is a number, and no rule over syntax has an opinion about numbers.
+    const probe = "await page.waitForSelector('[data-form-status]', { timeout: 15_000 });";
+
+    expect(fixedSleeps('probe.ts', probe)).toEqual([]);
   });
 
   it('still trips the tripwire on a shape no rule models', () => {

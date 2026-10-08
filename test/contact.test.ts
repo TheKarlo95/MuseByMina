@@ -6,6 +6,7 @@ import { launchChecks, openCheckPage } from '../scripts/browser-checks.mjs';
 import { FORM_COPY, FORM_FIELDS, HONEYPOT_FIELD, requiredMessage } from '../src/lib/forms';
 import type { FieldName, FormCopy } from '../src/lib/forms';
 import { LOCALE_HTML_LANG, type Locale } from '../src/lib/i18n';
+import { settleAnimations, settleScroll } from './helpers/browser-settle';
 import { pagePath, startPreview, type Preview } from './helpers/preview';
 
 /**
@@ -106,23 +107,6 @@ async function visit(
   });
   await page.evaluate(() => document.fonts.ready);
   return { page, url: measured.url, close };
-}
-
-/**
- * Wait for smooth scrolling to stop, without assuming it is on.
- *
- * The initial pause matters: polling immediately after the click reads the pre-scroll
- * position twice and concludes the page has settled at the top.
- */
-async function settleScroll(page: Page): Promise<void> {
-  await page.waitForTimeout(150);
-  let last = Number.NaN;
-  for (let i = 0; i < 80; i += 1) {
-    const y = await page.evaluate(() => Math.round(window.scrollY));
-    if (y === last) return;
-    last = y;
-    await page.waitForTimeout(25);
-  }
 }
 
 async function fillForm(
@@ -263,12 +247,23 @@ describe('AC1: every CTA lands on #trial, clear of the fixed header', () => {
           // Clear the fragment as well as the scroll position: clicking a link whose hash
           // is already current is not guaranteed to scroll again, which would make every
           // CTA after the first pass for free.
+          //
+          // `behavior: 'instant'` because the document sets `scroll-behavior: smooth`
+          // (`src/styles/base.css`), so a plain `scrollTo(0, 0)` *animates* — and then the
+          // click starts a second animation while the first is still running. The reset
+          // being instantaneous is what makes "the page is at the top" a precondition
+          // rather than another thing to wait for (MUSE-54).
           await page.evaluate(() => {
             history.replaceState(null, '', location.pathname);
-            window.scrollTo(0, 0);
+            window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
           });
           const link = page.locator(TRIAL_CTA).nth(index);
           await link.click();
+          // The flake MUSE-50's agent hit: the geometry below was measured after a fixed
+          // pause and a 25 ms poll, which on a busy machine reads two equal positions
+          // mid-scroll and calls it settled — so `#trial` was measured halfway up the
+          // viewport, still under the header. This waits on the frame clock that drives
+          // the scroll instead, and fails naming the condition if it never stops.
           await settleScroll(page);
 
           const geom = await page.evaluate(() => {
@@ -787,7 +782,12 @@ describe('§7.2: field styling', () => {
         await page.focus(`${FORM} [name="email"]`);
         // The border *colour* is transitioned (--dur-fast), so reading it straight after
         // focus reads the value it is animating away from, not the one being asserted.
-        await page.waitForTimeout(400);
+        //
+        // Asked of the element rather than slept off (MUSE-54): `getAnimations()` reports
+        // CSS transitions, so "none of them is still running" is the transition actually
+        // having ended. Twice `--dur-fast` was a guess that the browser gets its frames
+        // on time, and it is also a guess that nobody will ever lengthen the token.
+        await settleAnimations(page, `${FORM} [name="email"]`);
         const focused = await page.evaluate(() => {
           const el = document.querySelector<HTMLElement>('[data-trial-form] [name="email"]')!;
           const s = getComputedStyle(el);
