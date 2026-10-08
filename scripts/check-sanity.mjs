@@ -117,7 +117,28 @@ export const SOURCE_GLOBS = SOURCES.map(({ dir, file }) => (dir ? `${dir}/**` : 
  */
 const STAMP_EXCLUDED = new Set([STAMP_JSON]);
 
-/** The document types and fields the read path cannot work without. */
+/**
+ * The document types and fields the read path cannot work without.
+ *
+ * **Every key is checked for completeness against the schema** (`contractProblems`), and
+ * every field list is checked against the real queries by `test/sanity.test.ts`, which
+ * parses them with `groq-js`. Neither half is a convention: MUSE-66 found `studioStory`
+ * had never been a key at all, so the entire body of `/aboutus` — live, and the only thing
+ * on that page — sat outside the one check that can see a renamed field. A hand-written
+ * list beside a schema that enumerates the same types is a second copy of a fact, and this
+ * repository has now paid for that shape three times (MUSE-19's extension allow-list,
+ * MUSE-50's field registry, MUSE-46's route list).
+ *
+ * So the list stays hand-written — the *fields* are the projected subset of each type,
+ * which the schema cannot supply without asserting itself — and it is pinned from both
+ * sides instead: the schema says which keys must exist, the queries say what each list
+ * must contain.
+ *
+ * `order` and `instructor.instagram` joined in MUSE-66 for the second reason. `order` is
+ * projected by nothing and sorted by everything — `| order(coalesce(order, 999) asc)` on
+ * five types — so a rename of it reorders a page with no slot left blank to notice, which
+ * is the failure the note on `sanity/fields.ts` in `SOURCES` already warned about.
+ */
 const READ_CONTRACT = {
   siteSettings: [
     'studioName',
@@ -132,10 +153,21 @@ const READ_CONTRACT = {
   ],
   page: ['route', 'name', 'title', 'description'],
   prosePage: ['route', 'heading', 'lede', 'sections'],
-  class: ['name', 'slug', 'level', 'description', 'durationMin', 'instructors', 'image'],
+  // The whole of `/aboutus`'s body, and absent from this list until MUSE-66.
+  studioStory: ['heading', 'foundedOn', 'story'],
+  class: [
+    'name',
+    'slug',
+    'level',
+    'description',
+    'durationMin',
+    'instructors',
+    'image',
+    'order',
+  ],
   scheduleSlot: ['class', 'day', 'start', 'instructors', 'active'],
-  instructor: ['name', 'slug', 'role', 'bio', 'portrait'],
-  pricingTier: ['name', 'priceEur', 'period', 'features', 'featured'],
+  instructor: ['name', 'slug', 'role', 'bio', 'portrait', 'instagram', 'order'],
+  pricingTier: ['name', 'priceEur', 'period', 'features', 'featured', 'order'],
   event: [
     'title',
     'slug',
@@ -148,9 +180,39 @@ const READ_CONTRACT = {
     'lineup',
     'ticketUrl',
   ],
-  galleryImage: ['image', 'caption', 'takenAt'],
+  galleryImage: ['image', 'caption', 'takenAt', 'order'],
   post: ['title', 'slug', 'publishedAt', 'excerpt', 'coverImage', 'body', 'author'],
-  faq: ['question', 'answer'],
+  faq: ['question', 'answer', 'order'],
+};
+
+/**
+ * Document types the read path deliberately does not read, each carrying the reason.
+ *
+ * The completeness check below has no third answer: a document type in the schema is
+ * either in `READ_CONTRACT` or in here, and silence is a build failure. That is the
+ * `test/contentdrift.test.ts` pattern — an exemption is a decision, so it is written down
+ * with its justification and asserted still necessary, rather than being the absence of
+ * a line nobody notices.
+ *
+ * Both entries are Sanity's own asset records, which exist in every dataset whether or
+ * not this project uploads anything. Nothing here reads them: every image projection in
+ * `queries.ts` takes `asset._ref` and the crop, and the URL is built from the id, so the
+ * asset document itself is never selected on. `test/sanity.test.ts` asserts that against
+ * the real parser, so an exemption that stops being true is red rather than quiet.
+ *
+ * A *project* type arriving in here is the case this list exists to make visible — it
+ * would mean somebody decided a type Mina fills in is read by nothing, which is either a
+ * page that was never built or a field that renders nowhere.
+ */
+const NOT_READ = {
+  'sanity.imageAsset':
+    "Sanity's own upload record. The queries project `asset._ref`, `hotspot` and " +
+    '`crop` off the referring document and build the URL from the id, so no query ' +
+    'selects on the asset document itself.',
+  'sanity.fileAsset':
+    "Sanity's own upload record for non-image files. The site uploads none today, and " +
+    'no query selects on it; it exists in the extracted schema because the Studio ' +
+    'declares the asset types regardless.',
 };
 
 /**
@@ -233,9 +295,24 @@ function problems() {
   }
 
   const schema = JSON.parse(readFileSync(join(ROOT, SCHEMA_JSON), 'utf8'));
+  return contractProblems(schema);
+}
+
+/**
+ * The structural pass, over an extracted schema: does it still say what the read path
+ * assumes, and is every document type in it accounted for?
+ *
+ * Takes the schema as an argument rather than reading it, so `test/sanity.test.ts` can
+ * hand it a schema with one type removed, one field dropped or one type added and assert
+ * that the gate goes red — which is the only way to know a guard can still fail. The
+ * contract and the exemptions are parameters for the same reason and default to the real
+ * ones, which is what the build runs.
+ */
+function contractProblems(schema, contract = READ_CONTRACT, exempt = NOT_READ) {
+  const found = [];
   const byName = new Map(schema.map((type) => [type.name, type]));
 
-  for (const [type, fields] of Object.entries(READ_CONTRACT)) {
+  for (const [type, fields] of Object.entries(contract)) {
     const definition = byName.get(type);
     if (!definition) {
       found.push(
@@ -253,13 +330,50 @@ function problems() {
     const missing = fields.filter((field) => !present.has(field));
     if (missing.length > 0) {
       found.push(
-        `\`${type}\` is missing field(s) the read path projects: ` +
+        `\`${type}\` is missing field(s) the read path names: ` +
           `${missing.map((f) => `\`${f}\``).join(', ')}. ` +
           `GROQ would return null for ${missing.length === 1 ? 'it' : 'them'} rather ` +
-          `than failing, so the page would render with the content missing. Fields the ` +
-          `schema does have: ${[...present].join(', ')}.`,
+          `than failing, so the page would render with the content missing — or, for a ` +
+          `field the queries sort by rather than project, in an order nobody chose. ` +
+          `Fields the schema does have: ${[...present].join(', ')}.`,
       );
     }
+  }
+
+  /**
+   * And the half MUSE-66 is about: the list above is hand-written, so the check that
+   * matters is whether it is *complete*. Every document type the schema declares is
+   * either read — and therefore checked, field by field — or exempt with a reason.
+   * There is no third state, because the third state is what `studioStory` was in from
+   * MUSE-23 until MUSE-66: a live document type whose fields nothing compared with
+   * anything, on a page that is nothing but that type.
+   */
+  for (const type of schema) {
+    if (type.type !== 'document') continue;
+    if (type.name in contract || type.name in exempt) continue;
+    found.push(
+      `\`${type.name}\` is a document type in \`${SCHEMA_JSON}\` that the read ` +
+        `contract does not mention.\n` +
+        `  Add it to \`READ_CONTRACT\` in \`scripts/check-sanity.mjs\` with the ` +
+        `fields its reader projects, or to \`NOT_READ\` with the reason nothing reads ` +
+        `it.\n` +
+        `  A type on neither list is a type whose fields can be renamed with every ` +
+        `check green: GROQ answers null for a field that is not there, so the page ` +
+        `publishes with the content gone. That is MUSE-66 — \`studioStory\` was ` +
+        `absent from this list for its whole life, and it is the entire body of ` +
+        `/aboutus.`,
+    );
+  }
+
+  /** An exemption outliving its subject is an exemption nobody will re-examine. */
+  for (const type of Object.keys(exempt)) {
+    if (byName.has(type)) continue;
+    found.push(
+      `\`${type}\` is exempt from the read contract in \`NOT_READ\` and is no ` +
+        `longer a document type in \`${SCHEMA_JSON}\`. Delete the exemption, or ` +
+        `restore the type — a reason for not reading something that does not exist is ` +
+        `one nobody will question when it starts mattering again.`,
+    );
   }
 
   return found;
@@ -276,4 +390,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   process.exit(1);
 }
 
-export { problems, READ_CONTRACT, SCHEMA_JSON, STAMP_JSON, GENERATED_TYPES };
+export {
+  problems,
+  contractProblems,
+  READ_CONTRACT,
+  NOT_READ,
+  SCHEMA_JSON,
+  STAMP_JSON,
+  GENERATED_TYPES,
+};

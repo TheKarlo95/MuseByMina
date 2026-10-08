@@ -511,11 +511,31 @@ of what cannot reach production.
 | what changed | what stops it |
 |---|---|
 | a schema source edited without regenerating | `sanity:check` — a fingerprint of every file under `sanity/` plus the four app modules the schema is built from |
-| a document type or projected field deleted | `sanity:check` — its read-contract pass over `sanity/schema.json` |
+| a document type or a field the queries name deleted | `sanity:check` — its read-contract pass over `sanity/schema.json` |
+| a **new** document type nobody put on the read contract | `sanity:check` — the contract is asserted complete against the schema, so the type is covered or exempt-with-a-reason or the build stops (MUSE-66) |
 | a field's *type* changed (`localeString` → `string`) | `astro check`, through `src/lib/sanity/shape.ts` |
 | a typo in a GROQ projection | `astro check`, through the regenerated query types |
 | a level added in `schedule.ts` only, or in the schema only | `astro check`, through `shape.ts`'s mutual-assignability assertions |
 | the Studio made unbuildable | CI's `npm run sanity:build` — see below |
+
+The second row is MUSE-66. `READ_CONTRACT` in `scripts/check-sanity.mjs` is hand-written —
+it has to be, because what it holds per type is the *projected subset* of that type's
+fields, which the schema cannot supply without being asserted against itself — so the
+thing that matters is whether it is complete, and until MUSE-66 nothing said. `studioStory`
+had never been on it, which left the entire body of `/aboutus` outside the read-contract
+pass; `instructor.instagram` and the `order` the FAQ, class, gallery, pricing and
+instructor queries sort by were missing the same way. `order` is the one worth
+understanding, because no other layer covers it: it is sorted by and never projected, so
+the generated types do not mention it and `astro check` cannot see it move. Renaming it
+reorders a published page with every check green and no slot left blank to notice.
+
+The list is now pinned from both sides. The gate compares its keys with the document types
+in `sanity/schema.json` and fails on one that is neither covered nor named in `NOT_READ`
+with the reason nothing reads it — the two Sanity asset types are all that is in there, and
+each exemption is asserted to still name a type that exists. `test/sanity.test.ts` holds
+the other side: it parses every query with `groq-js` and asserts the contract is exactly
+the types the queries select on, field for field, including the fields that appear only in
+a filter or an `order()`.
 
 `astro check` is inside the build script for exactly the middle rows: they are invisible
 to the fingerprint, because the schema really was regenerated and the stamp really is
