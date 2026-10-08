@@ -6,11 +6,20 @@ import { describe, expect, it } from 'vitest';
 
 // The build gate itself, so `npm test` asserts properties of the gate rather than
 // restating them. `SOURCE_GLOBS` is the list `.github/workflows/studio.yml` has to match.
-import { fingerprint, SOURCE_GLOBS } from '../scripts/check-sanity.mjs';
+import {
+  contractProblems,
+  fingerprint,
+  NOT_READ,
+  READ_CONTRACT,
+  SOURCE_GLOBS,
+} from '../scripts/check-sanity.mjs';
 import { schemaTypes, SINGLETON_TYPES } from '../sanity/schemaTypes';
 import { SOCIAL_PLATFORMS, SOCIAL_PLATFORM_NAME } from '../sanity/schemaTypes/enums';
 import { LEVELS, LEVEL_NAME, WEEKDAYS, WEEKDAY_NAME } from '../src/lib/schedule';
 import { ROUTES } from '../src/lib/pages';
+// The query text itself, as a module, so the parser cross-check below covers every
+// query there is rather than the ones somebody remembered to list (MUSE-66).
+import * as QUERIES from '../src/lib/sanity/queries';
 import { LOCALES } from '../src/lib/i18n';
 import {
   decodeFaq,
@@ -1302,5 +1311,350 @@ describe('the generated types cannot go stale unnoticed', () => {
 
     // And it stays a devDependency: the live read path must not need it installed.
     expect(pkg.dependencies['groq-js']).toBeUndefined();
+  });
+});
+
+/* --------------------------------- the read contract cannot be incomplete (MUSE-66) */
+
+/**
+ * MUSE-66 — `studioStory` was never a key of the gate's `READ_CONTRACT`, so the whole
+ * body of `/aboutus` was outside the one check that can see a renamed field.
+ *
+ * The miss was not an oversight so much as a property of the list: it is hand-written,
+ * beside a schema that already enumerates the types it is a list of, which is the same
+ * defect as MUSE-19's extension allow-list and MUSE-50's hand-written field registry.
+ * This section is what stops the next type being quietly absent, and it pins the list
+ * from **two independent sides** so that it cannot be incomplete in either direction:
+ *
+ *   - the **extracted schema** says which document types exist, and the gate itself
+ *     fails on one that is neither covered nor exempt-with-a-reason (`contractProblems`,
+ *     asserted below against synthetic schemas so the gate's own behaviour is tested
+ *     rather than its data restated);
+ *   - the **real GROQ parser** says which types the queries select on and which
+ *     attributes they name on each, and those are compared with the contract here, where
+ *     `groq-js` belongs.
+ *
+ * Deriving the contract from the schema instead — the other half of the ticket's choice —
+ * was rejected for one reason: the contract's payload is the *projected subset* of each
+ * type's fields, and the schema holds every field, so a derived list would be the schema
+ * asserted against itself and `studioStory` would have been "covered" while nothing
+ * checked a single projection. The schema pins the keys; the queries pin the contents.
+ */
+describe('the read contract cannot be incomplete (MUSE-66)', () => {
+  /** Index signatures, so a type name computed at runtime can be looked up. */
+  const contract = READ_CONTRACT as Record<string, string[] | undefined>;
+  const exemptions = NOT_READ as Record<string, string | undefined>;
+
+  const documentTypes = extracted
+    .filter((type) => type.type === 'document')
+    .map((type) => type.name)
+    .sort();
+
+  /** The schema with one type's definition replaced, for the gate's own teeth. */
+  function schemaWith(name: string, replacement: Extracted | null): Extracted[] {
+    const edited = extracted.flatMap((type) =>
+      type.name === name ? (replacement === null ? [] : [replacement]) : [type],
+    );
+    expect(edited.length, `\`${name}\` is in the schema to begin with`).toBe(
+      extracted.length + (replacement === null ? -1 : 0),
+    );
+    return edited;
+  }
+
+  it('accounts for every document type in the extracted schema', () => {
+    /**
+     * The assertion `studioStory` would have failed from MUSE-23 onwards, written as an
+     * equality rather than as a membership test: a type the contract does not mention and the exemptions
+     * do not name is a failure, and so is a contract key for a type that no longer
+     * exists. There is no third state in which a type is simply not thought about.
+     */
+    const accountedFor = [...Object.keys(contract), ...Object.keys(exemptions)].sort();
+    expect(accountedFor).toEqual(documentTypes);
+  });
+
+  it('gives every exemption a reason, and every reason a type that still exists', () => {
+    for (const [type, reason] of Object.entries(exemptions)) {
+      expect(reason, `\`${type}\` is exempt with no reason written down`).toBeTruthy();
+      expect(
+        (reason ?? '').length,
+        `\`${type}\`'s exemption needs a sentence, not a word`,
+      ).toBeGreaterThan(40);
+      expect(
+        documentTypes,
+        `\`${type}\` is exempt from a schema that no longer has it`,
+      ).toContain(type);
+    }
+
+    /**
+     * And the set itself is pinned, which is the `test/contentdrift.test.ts` pattern: an
+     * exemption is a decision that nothing is read off a document type, and a decision
+     * belongs in a diff somebody reviewed. Both entries are Sanity's own asset records,
+     * so a *project* type arriving here is exactly the case worth stopping at.
+     */
+    expect(Object.keys(exemptions).sort()).toEqual(['sanity.fileAsset', 'sanity.imageAsset']);
+  });
+
+  it('fails the gate on a document type that is neither covered nor exempt', () => {
+    const problems: string[] = contractProblems([
+      ...extracted,
+      { name: 'throwaway', type: 'document', attributes: { heading: { optional: false } } },
+    ]);
+    const message = problems.join('\n');
+
+    expect(problems.length, 'an unaccounted document type is a build failure').toBe(1);
+    expect(message).toContain('throwaway');
+    expect(message, 'and the message says where the decision goes').toContain('READ_CONTRACT');
+    expect(message).toContain('NOT_READ');
+  });
+
+  it('fails the gate on an exemption that no longer names a type in the schema', () => {
+    const problems: string[] = contractProblems(schemaWith('sanity.fileAsset', null));
+    const message = problems.join('\n');
+
+    expect(problems.length, 'a stale exemption is a build failure').toBe(1);
+    expect(message).toContain('sanity.fileAsset');
+    expect(message, 'an exemption is asserted still necessary, not trusted').toContain(
+      'no longer',
+    );
+  });
+
+  it('fails the gate on a field `studioStory` projects that the schema has lost', () => {
+    /**
+     * The regression this ticket is named for, as a test rather than as a story: before
+     * `studioStory` was a key, this returned no problems at all — the type was simply not
+     * looked at, and `/aboutus` would have published a blank page with every gate green.
+     */
+    const story = extracted.find((type) => type.name === 'studioStory');
+    expect(story?.attributes?.heading, 'the premise').toBeTruthy();
+    const attributes = Object.fromEntries(
+      Object.entries(story?.attributes ?? {}).filter(([field]) => field !== 'heading'),
+    );
+    const problems: string[] = contractProblems(
+      schemaWith('studioStory', { ...(story as Extracted), attributes }),
+    );
+    const message = problems.join('\n');
+
+    expect(message).toContain('`studioStory` is missing field(s)');
+    expect(message).toContain('heading');
+  });
+
+  it('reports nothing for the schema as it stands, so the four above are not noise', () => {
+    expect(contractProblems(extracted)).toEqual([]);
+  });
+
+  /* ------------------------------------------- the queries' half, via the real parser */
+
+  /**
+   * Every query in `queries.ts`, by name, read off the module rather than listed — the
+   * same reason `test/projections.test.ts` does: a number or a list written here is
+   * exactly as current as the last person who remembered to edit it, and MUSE-44's
+   * census was wrong about the count within a ticket.
+   */
+  const allQueries: [string, string][] = Object.entries(QUERIES).flatMap(([name, value]) =>
+    typeof value === 'string' ? [[name, value] satisfies [string, string]] : [],
+  );
+
+  type Node = Record<string, unknown>;
+
+  const isNode = (value: unknown): value is Node =>
+    typeof value === 'object' && value !== null && typeof (value as Node).type === 'string';
+
+  /** Every `_type == "x"` comparison anywhere in a parse tree, in either spelling. */
+  function typesComparedIn(node: unknown): string[] {
+    const found: string[] = [];
+    const walk = (current: unknown): void => {
+      if (Array.isArray(current)) {
+        for (const member of current) walk(member);
+        return;
+      }
+      if (!isNode(current)) return;
+      if (current.type === 'OpCall' && current.op === '==') {
+        const sides = [current.left, current.right].filter(isNode);
+        const attribute = sides.find(
+          (side) => side.type === 'AccessAttribute' && side.name === '_type',
+        );
+        const literal = sides.find(
+          (side) => side.type === 'Value' && typeof side.value === 'string',
+        );
+        if (attribute && literal) found.push(literal.value as string);
+      }
+      for (const value of Object.values(current)) walk(value);
+    };
+    walk(node);
+    return found;
+  }
+
+  /**
+   * The attribute names `node` reaches **in the scope it is written in**, which for a
+   * top-level projection member is the document's own scope.
+   *
+   * `heading{hr, en}` names `heading`; `asset._ref` names `asset`; `class->name` names
+   * `class`, because `name` belongs to the dereferenced class and `CLASSES_QUERY` is
+   * where that one is checked. A projection's or a map's `expr` is a different scope and
+   * is deliberately not descended into — `hr` is not a field of `studioStory`.
+   *
+   * An unrecognised node **throws**, rather than contributing nothing: a shape this
+   * cannot read is the one way the whole cross-check could pass by not understanding the
+   * query, which is MUSE-45's `matchesGlob` reasoning and MUSE-34's reasoning before it.
+   */
+  function scopeAttributes(node: unknown, where: string): string[] {
+    if (node === undefined || node === null) return [];
+    if (!isNode(node)) return [];
+    const base = (): string[] => scopeAttributes(node.base, where);
+    const args = (): string[] =>
+      ((node.args as unknown[]) ?? []).flatMap((argument) => scopeAttributes(argument, where));
+
+    switch (node.type) {
+      case 'AccessAttribute':
+        // `base` absent means it reads the current scope; present means it is the tail of
+        // a chain whose head is what this is after.
+        return node.base === undefined ? [node.name as string] : base();
+      case 'Filter':
+        // `*[active == true]` filters documents, so its condition is in the document's
+        // scope and `active` is a field of the subject — the only field on the whole site
+        // that a projection never names. `sections[…]` filters an array's members, whose
+        // scope is not the document's, so that one is base-only like a map. The two are
+        // told apart by what is being filtered rather than by which looks more likely.
+        return [
+          ...base(),
+          ...(isNode(node.base) && node.base.type === 'Everything'
+            ? scopeAttributes(node.expr, where)
+            : []),
+        ];
+      case 'Deref':
+      case 'ArrayCoerce':
+      case 'Projection':
+      case 'Map':
+      case 'Slice':
+      case 'AccessElement':
+      case 'Group':
+      case 'Not':
+      case 'Asc':
+      case 'Desc':
+        return base();
+      case 'PipeFuncCall':
+        // `| order(coalesce(order, 999) asc)` — the arguments are in the document's
+        // scope, and they are the half with teeth: a page's order depends on a field
+        // nothing projects, so a rename of it is invisible in the markup.
+        return [...base(), ...args()];
+      case 'FuncCall':
+        return args();
+      case 'OpCall':
+      case 'And':
+      case 'Or':
+        return [
+          ...scopeAttributes(node.left, where),
+          ...scopeAttributes(node.right, where),
+        ];
+      case 'Everything':
+      case 'This':
+      case 'Parent':
+      case 'Value':
+      case 'Parameter':
+        return [];
+      default:
+        throw new Error(
+          `Teach \`scopeAttributes\` about a \`${String(node.type)}\` node (in ${where}). ` +
+            `Until it knows the shape, the attributes under it are unchecked.`,
+        );
+    }
+  }
+
+  /** What one query reads: the type it selects, and the fields it names on it. */
+  interface Read {
+    subject: string | null;
+    attributes: string[];
+  }
+
+  async function readOf(name: string, query: string): Promise<Read> {
+    const { parse } = await import('groq-js');
+    const root = parse(query) as unknown as Node;
+
+    // `*[…] | order(…){…}` parses as a Map over the pipe; the two singletons as a
+    // Projection over `[0]`. Either way the document-scope object is one hop in.
+    const projection =
+      root.type === 'Map' ? (root.expr as Node) : root.type === 'Projection' ? root : null;
+    const object = projection ? (projection.expr as Node) : null;
+
+    const chain = root.type === 'Map' ? root.base : projection ? projection.base : undefined;
+    const selected = [...new Set(typesComparedIn(chain))];
+    expect(selected.length, `${name} selects on more than one type`).toBeLessThan(2);
+
+    const members = (object?.attributes as Node[] | undefined) ?? [];
+    const attributes = [
+      // The filter and the ordering are in the document's scope too: `active == true`
+      // and `coalesce(order, 999)` name fields as surely as a projection does.
+      ...scopeAttributes(chain, name),
+      ...members.flatMap((member) => scopeAttributes(member.value, name)),
+    ];
+
+    return {
+      subject: selected[0] ?? null,
+      attributes: [...new Set(attributes)].filter((field) => !field.startsWith('_')).sort(),
+    };
+  }
+
+  it('reads every query in `queries.ts`, so this is not a sample', () => {
+    const source = readFileSync(join(ROOT, 'src/lib/sanity/queries.ts'), 'utf8');
+    const declared = [...source.matchAll(/^export const (\w+) = define/gm)].map(([, n]) => n);
+
+    expect(declared.length).toBeGreaterThan(10);
+    expect(allQueries.map(([name]) => name).sort()).toEqual([...declared].sort());
+  });
+
+  it('is exactly the set of document types the queries select on', async () => {
+    const reads = await Promise.all(allQueries.map(([name, query]) => readOf(name, query)));
+    const everywhere = await Promise.all(
+      allQueries.map(async ([, query]) => typesComparedIn((await import('groq-js')).parse(query))),
+    );
+
+    // Both directions: a type with a reader and no contract entry is this ticket, and a
+    // contract entry no query reads is the same drift pointing the other way.
+    expect([...new Set(everywhere.flat())].sort()).toEqual(Object.keys(contract).sort());
+
+    // And every list query names its subject, so the per-field pass below covers them.
+    const withoutSubject = allQueries
+      .map(([name], index) => [name, reads[index].subject] as const)
+      .filter(([, subject]) => subject === null)
+      .map(([name]) => name);
+    expect(
+      withoutSubject,
+      'only the liveness probe selects nothing — it counts every type at once',
+    ).toEqual(['DOCUMENT_COUNTS_QUERY']);
+  });
+
+  it('exempts only document types no query reads', async () => {
+    const everywhere = await Promise.all(
+      allQueries.map(async ([, query]) => typesComparedIn((await import('groq-js')).parse(query))),
+    );
+    const read = new Set(everywhere.flat());
+    for (const type of Object.keys(exemptions)) {
+      expect([...read], `\`${type}\` is exempt and a query reads it`).not.toContain(type);
+    }
+  });
+
+  it('lists every field the queries name on each type', async () => {
+    /**
+     * The field lists are hand-written as well, and the same argument applies to them:
+     * a projected field absent from the list is a field whose rename the gate cannot
+     * see. MUSE-66 found three such fields beside `studioStory`'s whole type —
+     * `instructor.instagram`, and `order` on the five types sorted by it, which is the
+     * `coalesce(order, 999)` the gate's own comment warns about.
+     */
+    const named = new Map<string, Set<string>>();
+    for (const [name, query] of allQueries) {
+      const { subject, attributes } = await readOf(name, query);
+      if (subject === null) continue;
+      const already = named.get(subject) ?? new Set<string>();
+      for (const field of attributes) already.add(field);
+      named.set(subject, already);
+    }
+
+    expect(named.size, 'every contract type has a query that names fields on it').toBe(
+      Object.keys(contract).length,
+    );
+    for (const [type, fields] of named) {
+      expect([...fields].sort(), `\`${type}\``).toEqual([...(contract[type] ?? [])].sort());
+    }
   });
 });
