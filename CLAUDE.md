@@ -201,14 +201,36 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   **The masthead is the one surface still breaking the rule, and it is measured, not
   forgotten.** 100px wide is 73px tall at 1.372:1, against a 64px mobile band (§7.1); the
   size that fits is 55px, where "DANCE STUDIO" and "BY MINA" stop being words. §12 names
-  the **icon-only mark** as the compact header's variant and that artwork does not exist
-  — MUSE-40. It is the single entry in `REBUILT_FROM_PARTS`, carrying its reason and that
-  ticket, and the entry is **asserted still live**, so fixing the header without deleting
-  the line is also red. Do not shrink the lockup into the band to make the guard green:
-  it would pass, and the logo would be illegible.
+  the **icon-only mark** as the compact header's variant, and **MUSE-40 shipped that
+  artwork**, so the exemption is now fixable rather than blocked — it is still live, and
+  closing it is its own ticket. It is the single entry in `REBUILT_FROM_PARTS`, carrying
+  its reason and that ticket, and the entry is **asserted still live**, so fixing the
+  header without deleting the line is also red. Do not shrink the lockup into the band to
+  make the guard green: it would pass, and the logo would be illegible.
+- **The icon-only mark is a crop of the lockup, and the small sizes are thickened**
+  (MUSE-40). §12 specifies it as dancer + `M`; both were already in
+  `muse-lockup-white-transparent.png`, with a clean 18px run of transparent columns
+  between them and the type, so `src/assets/icon/` is a **crop and nothing else** —
+  `logo/README.md` writes the derivation out so nobody re-derives a similar mark instead
+  of the same one. The one intervention is optical sizing: below ~1 device pixel of
+  stroke there is nothing left to antialias, so the alpha is dilated by `STROKE_GAIN ÷
+  scale` before resampling, and `test/icon.test.ts` measures the committed pixels against
+  what an undilated crop would have given — a regenerated-without-it icon is otherwise
+  the right mark, right size, right colour, and a smudge. **Both schemes, mutually
+  exclusive `media`**: the artwork is white-only, invisible on a light tab strip, and the
+  plum variant is §12's recolour (RGB replaced, alpha preserved) with a test pinning the
+  two alpha channels byte-identical. All five files carry **`?url&no-inline`** — they are
+  under Vite's 4 KB threshold, and inlined they became `data:` URIs, which is 8.3 KB of
+  base64 on every page, all five icons shipped to every visitor, and the icons out of
+  both the budget's `image` line and `test/assets.test.ts`'s reach. There is **no
+  `public/`**: on the Pages sub-path a `public/favicon.ico` publishes under the base
+  prefix while the bare probe goes to the *origin* root, so it would answer nothing and
+  cost MUSE-35's resolution bug. No `og:image` here — `siteSettings.shareImage` is a
+  different asset.
 - `rootPath()`/`rootUrl()` in `src/lib/site.ts` are for files the build publishes at the
-  deploy root — `robots.txt`, `llms.txt`, the sitemap — and for a future `favicon.ico` or
-  `CNAME`. They are **not** the way to reference a bundled asset; see the bullet above.
+  deploy root — `robots.txt`, `llms.txt`, the sitemap — and for a future `CNAME`. They
+  are **not** the way to reference a bundled asset; see the bullet above, and note that
+  the favicon this used to name went the other way (MUSE-40).
   Never interpolate `import.meta.env.BASE_URL` by hand: whether it carries a trailing
   slash depends on `trailingSlash`, so `${BASE_URL}robots.txt` can silently yield
   `/MuseByMinarobots.txt`. An apex build hides this; only the Pages sub-path 404s.
