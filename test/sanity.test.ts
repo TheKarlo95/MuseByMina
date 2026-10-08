@@ -63,6 +63,19 @@ function walkTree(dir: string): string[] {
     .sort();
 }
 
+/**
+ * Does a repo-relative path fall inside one of the two `paths:`-style globs this repo
+ * writes? Only the two shapes actually used are understood — `some/dir/**` and a literal
+ * filename — and anything else throws rather than quietly answering `false`, because a
+ * glob this cannot read would make MUSE-45's exemption check pass by not understanding the
+ * thing it is checking.
+ */
+function matchesGlob(path: string, glob: string): boolean {
+  if (glob.endsWith('/**')) return path.startsWith(glob.slice(0, -2));
+  if (!glob.includes('*')) return path === glob;
+  throw new Error(`Unsupported glob shape \`${glob}\` — teach \`matchesGlob\` about it.`);
+}
+
 /** Document types the ticket requires. Spelled out, so dropping one is a failure. */
 const REQUIRED_DOCUMENT_TYPES = [
   'class',
@@ -1066,6 +1079,89 @@ describe('the generated types cannot go stale unnoticed', () => {
     // And the extensions present are not all `.ts` — if they ever were, this test would
     // be passing for the wrong reason and would stop proving anything.
     expect(new Set(onDisk.map((file) => file.replace(/^.*\./, ''))).size).toBeGreaterThan(1);
+  });
+
+  /**
+   * **The content seed is not a schema source, and the fingerprint must not see it
+   * (MUSE-45).**
+   *
+   * The sweep above is the MUSE-19 rule — every file under `sanity/`, no extension filter
+   * — and its entire value is that it has no exceptions. But the fingerprint it feeds
+   * means one thing, *'the generated artefacts still describe the schema'*, and every
+   * consumer was written for that one meaning: the build gate stops on it, CI's
+   * regenerate-and-diff blames the schema for it, and `studio.yml` spends the project's
+   * only write credential republishing Mina's Studio on it.
+   *
+   * While the seed sat at `sanity/seed/content.ndjson` it was inside that fingerprint, so
+   * rewording one page title forced a types regeneration, redeployed the Studio Mina might
+   * have been editing in, and printed 'The Sanity schema changed' at somebody who had not
+   * been near the schema. The fix is not an exclusion in the walk — that is the MUSE-19
+   * mistake pointed the other way, and it is why the rule is 'every file'. The fix is that
+   * `sanity/` holds schema and nothing else, so the sentence is true rather than nearly
+   * true.
+   *
+   * Stated as a property of *the file the suite is actually reading*, not of a path
+   * literal: `MUSE_CONTENT_FIXTURE` is what this run's builds read and what
+   * `npm run sanity:seed` imports, so moving the seed back under `sanity/` — or adding a
+   * second content file there — fails here however it is spelled.
+   *
+   * Not asserted by editing the seed and re-fingerprinting, which would be the direct
+   * reading of the acceptance criterion: ten builds in parallel workers read that file, so
+   * a suite that rewrites it mid-run breaks the other nine. 'The seed is not a key of the
+   * fingerprint' is the same claim, computed rather than observed.
+   */
+  it('keeps the content seed outside the schema fingerprint (MUSE-45)', () => {
+    const seed = process.env.MUSE_CONTENT_FIXTURE;
+    // Not an `expect` on a maybe-undefined value: if the variable is unset every assertion
+    // below is vacuous, which is the one way this test could pass for no reason.
+    expect(typeof seed, 'MUSE_CONTENT_FIXTURE must be set — see `vitest.config.ts`').toBe(
+      'string',
+    );
+    const seedPath = seed as string;
+    expect(statSync(join(ROOT, seedPath)).isFile(), seedPath).toBe(true);
+
+    // The migration and the fixture are one file (MUSE-20). If they ever stop being one
+    // file, the thing this test exempts is not the thing the gate would have hashed.
+    const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+    expect(pkg.scripts['sanity:seed']).toContain(seedPath);
+
+    // 1. The gate cannot see it, so a content edit cannot invalidate the artefacts.
+    expect(Object.keys(fingerprint())).not.toContain(seedPath);
+
+    // 2. Nor can the stamp, which is the fingerprint as committed — a seed hash in there
+    //    is a content edit waiting to be reported as a stale schema.
+    const stamp = JSON.parse(readFileSync(join(ROOT, 'sanity/schema.stamp.json'), 'utf8'));
+    expect(Object.keys(stamp.sources)).not.toContain(seedPath);
+
+    // 3. And no glob in either list reaches it. The two above are about today's tree; this
+    //    is about the rule, so a `content/` directory moved back under `sanity/**` later is
+    //    caught before anything has been regenerated.
+    const workflow = readFileSync(join(ROOT, '.github/workflows/studio.yml'), 'utf8');
+    const filter = workflow.slice(
+      workflow.indexOf('    paths:'),
+      workflow.indexOf('  workflow_dispatch:'),
+    );
+    const deployGlobs = [...filter.matchAll(/^\s+- '(.+)'$/gm)].map(([, path]) => path);
+    expect(deployGlobs.length).toBeGreaterThan(5);
+
+    // `SOURCE_GLOBS` comes out of a `.mjs` module where `SOURCES`'s `file` key is optional,
+    // so TypeScript types the array `(string | undefined)[]`. Narrowed rather than cast: a
+    // hole in that list would otherwise be read as 'matches nothing'.
+    const sourceGlobs = (SOURCE_GLOBS as (string | undefined)[]).map((glob) => {
+      expect(typeof glob, 'every entry in `SOURCE_GLOBS` is a glob').toBe('string');
+      return glob as string;
+    });
+
+    const lists: Array<[string, string[]]> = [
+      ['scripts/check-sanity.mjs `SOURCE_GLOBS`', sourceGlobs],
+      ['.github/workflows/studio.yml `paths:`', deployGlobs],
+    ];
+    for (const [label, globs] of lists) {
+      for (const glob of globs) {
+        const why = `${seedPath} is matched by ${glob} in ${label}`;
+        expect(matchesGlob(seedPath, glob), why).toBe(false);
+      }
+    }
   });
 
   it('redeploys the Studio when the schema changes', () => {

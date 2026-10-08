@@ -6,7 +6,7 @@ import { claimOutDir } from './scratch';
 
 /**
  * **Structural content for `test/projections.test.ts`. Test-only, and deliberately not
- * `sanity/seed/content.ndjson`.**
+ * `content/seed.ndjson`.**
  *
  * MUSE-44 needs a dataset that holds one of everything — a class, three instructors, a
  * slot with an instructor override and one without, images with hotspots and crops, a
@@ -18,7 +18,7 @@ import { claimOutDir } from './scratch';
  * Two rules govern what is in here, and both have a ticket behind them.
  *
  * **1. It is not the seed, and it must never be merged into the seed.**
- * `sanity/seed/content.ndjson` is the live migration artefact — `npm run sanity:seed`
+ * `content/seed.ndjson` is the live migration artefact — `npm run sanity:seed`
  * imports it into the production dataset, and `scripts/check-sanity.mjs` fingerprints it.
  * Adding rows here to *there* would seed invented classes and invented instructors into
  * the real dataset. So this file is a second, separate thing, and that is correct: the
@@ -198,7 +198,7 @@ export function at(offsetMs: number): string {
  * The singleton, including the three fields the real seed deliberately leaves empty.
  *
  * `phone`, `openingHours` and `shareImage` are optional in the schema and absent from
- * `sanity/seed/content.ndjson` — nothing on the site renders them and no real value
+ * `content/seed.ndjson` — nothing on the site renders them and no real value
  * exists, and inventing one is how MUSE-36 happened. That makes this fixture the only
  * place their projections are ever exercised: a build against the seed cannot tell
  * `shareImage{...}` from `shareImag{...}`, because both answer `undefined`.

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 /**
  * **The committed seed, read as documents — and the weekly timetable joined out of it.**
  *
- * `sanity/seed/content.ndjson` is both the migration artefact `npm run sanity:seed`
+ * `content/seed.ndjson` is both the migration artefact `npm run sanity:seed`
  * imports into the live dataset *and* the fixture every build in this suite reads
  * (`vitest.config.ts` points `MUSE_CONTENT_FIXTURE` at it). So "what the page renders"
  * and "what the studio publishes" are two views of one file, and a test may compare them
@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
  * broken projection shows up as a disagreement between two independent readings.
  */
 
-const SEED = fileURLToPath(new URL('../../sanity/seed/content.ndjson', import.meta.url));
+const SEED = fileURLToPath(new URL('../../content/seed.ndjson', import.meta.url));
 
 export interface SeedDoc {
   _id: string;

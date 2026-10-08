@@ -1,5 +1,5 @@
 /**
- * Does the live dataset still say what `sanity/seed/content.ndjson` says?
+ * Does the live dataset still say what `content/seed.ndjson` says?
  *
  * This is the one thing the MUSE-20 fixture decision cannot prove on its own, and it is
  * worth being honest about. The seed is both the migration artefact and the content the
@@ -25,7 +25,7 @@ import { readFileSync } from 'node:fs';
 const PROJECT_ID = process.env.SANITY_PROJECT_ID ?? 'q6fk9usq';
 const DATASET = process.env.SANITY_DATASET ?? 'production';
 const API_VERSION = process.env.SANITY_API_VERSION ?? '2024-10-01';
-const SEED = new URL('../sanity/seed/content.ndjson', import.meta.url);
+const SEED = new URL('../content/seed.ndjson', import.meta.url);
 
 const seeded = readFileSync(SEED, 'utf8')
   .split('\n')
@@ -122,7 +122,7 @@ console.log(
 if (missing > 0 || drifted > 0) {
   console.error(
     '\nThe dataset and the seed disagree. If the dataset is right — somebody edited in\n' +
-      'the Studio — update `sanity/seed/content.ndjson` so the test fixture is the\n' +
+      'the Studio — update `content/seed.ndjson` so the test fixture is the\n' +
       'content that actually exists. If the seed is right, `npm run sanity:seed`.',
   );
   process.exit(1);

@@ -13,7 +13,6 @@
     "sanity/schemaTypes/index.ts": "cd7ed863e20b7460",
     "sanity/schemaTypes/objects/image.ts": "dd5539802c1ad35e",
     "sanity/schemaTypes/objects/locale.ts": "7fd9bb26b8774d1b",
-    "sanity/seed/content.ndjson": "a4f75de1aa90a2cd",
     "sanity/structure.ts": "77150fcb6ea2ac7e",
     "src/lib/pages.ts": "9d61fe5a48770432",
     "src/lib/sanity/queries.ts": "b9c89c76e90fd1cf",

@@ -32,6 +32,14 @@ on:
       - 'src/lib/schedule.ts'
       - 'src/lib/pages.ts'
       - 'src/lib/sanity/queries.ts'
+      #
+      # `sanity/**` is a schema glob and nothing else, which is why `content/seed.ndjson`
+      # is not under it (MUSE-45). It used to be, so rewording a page title in the seed
+      # landed on `main` and republished Mina's Studio — spending `SANITY_DEPLOY_TOKEN`,
+      # the one write credential here, and replacing the editor she may have had open, for
+      # a change that altered no field and no generated type. Content must not appear in
+      # this filter, under any path.
+      #
       # Studio-only, and not part of the schema fingerprint:
       #   `package.json` / `package-lock.json` decide which `sanity` and which
       #   `styled-components` the bundle is built from, and a *declaration* missing from

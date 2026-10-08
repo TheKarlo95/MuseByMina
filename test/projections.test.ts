@@ -113,7 +113,7 @@ import { queryParameters } from '../src/lib/sanity/params';
  *
  * **The fixtures are not the seed.** `test/helpers/structural-content.ts`, and the long
  * note at the top of it explains why they must not be folded into
- * `sanity/seed/content.ndjson`: that file is imported into the live dataset by
+ * `content/seed.ndjson`: that file is imported into the live dataset by
  * `npm run sanity:seed`, and MUSE-36 is what happens when invented content reaches it.
  * ---------------------------------------------------------------------------------
  */
@@ -173,7 +173,7 @@ beforeAll(() => {
 /**
  * Run a reader against one fixture.
  *
- * `vitest.config.ts` points the whole run at `sanity/seed/content.ndjson`, which holds
+ * `vitest.config.ts` points the whole run at `content/seed.ndjson`, which holds
  * the singleton and the four page documents and nothing else — so every reader below
  * would answer "the dataset holds 0 of these" without this. The variable is read by
  * `fixturePath()` on each call, so swapping it per test needs no module reloading; it is
@@ -686,7 +686,7 @@ describe('SITE_SETTINGS_QUERY: the singleton, including the fields the seed leav
   it('projects every field', async () => {
     /**
      * `phone`, `openingHours` and `shareImage` are optional and **absent from
-     * `sanity/seed/content.ndjson`** — nothing renders them and no real value exists,
+     * `content/seed.ndjson`** — nothing renders them and no real value exists,
      * and inventing one is how MUSE-36 happened. So the builds in `test/content.test.ts`
      * cannot tell `shareImage{…}` from `shareImag{…}`: both answer `undefined`. This
      * fixture fills all three, which makes it the only place those three projections are
