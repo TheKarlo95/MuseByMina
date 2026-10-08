@@ -4,6 +4,21 @@ import { join, relative } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
+  ICON_ASPECT,
+  ICON_CROP,
+  ICON_DIR,
+  ICON_INK,
+  ICON_MIN_WIDTH,
+  ICON_SOURCE,
+  iconClearSpace,
+  MASTHEAD_DILATION_RADIUS,
+  MASTHEAD_MARK_EMITTED,
+  MASTHEAD_MARK_FILE,
+  MASTHEAD_MARK_HEIGHT,
+  MASTHEAD_MEAN_ALPHA,
+  MASTHEAD_MIN_STROKE_RATIO,
+} from '../src/lib/icon';
+import {
   LOCKUP_ASPECT,
   LOCKUP_CAP_HEIGHT_RATIO,
   LOCKUP_EMITTED_WIDTH,
@@ -12,6 +27,7 @@ import {
   lockupHeight,
 } from '../src/lib/lockup';
 import { assetFile, buildSite, PAGES_DEPLOY, type Build } from './helpers/build';
+import { decodeRgba, header, inkColours, meanAlpha } from './helpers/png';
 
 /**
  * **MUSE-64 — the brand is the supplied artwork, not two spans that look like it.**
@@ -27,20 +43,23 @@ import { assetFile, buildSite, PAGES_DEPLOY, type Build } from './helpers/build'
  * the two spans produce perfectly good HTML, and an image produces perfectly good HTML.
  * What distinguishes them is which one the component asked for.
  *
- * ## The exemption, and why there is one
+ * ## The exemption is closed (MUSE-67)
  *
- * The masthead is not fixed and is not going to be fixed by this ticket. The arithmetic
- * is in `Header.astro` and in `headroom the masthead does not have` below, which states
- * it as an assertion so that it is re-decided rather than re-assumed: §12's own minimum
- * reproduction size for the lockup is 100px wide, the artwork is 1.372:1, so the
- * smallest legible lockup is 73px tall and the band is 64px (§7.1). §12 names the
- * **icon-only mark** as this surface's variant and that artwork does not exist (MUSE-40).
+ * MUSE-64 left exactly one entry in `REBUILT_FROM_PARTS`, the masthead, with the
+ * arithmetic beside it and MUSE-40 named as what would unblock it: §12's minimum for the
+ * lockup is 100px wide, the artwork is 1.372:1, so the smallest legible lockup is 73px
+ * tall against a 64px band (§7.1) — and 121px with its clear space, which the 80px
+ * desktop band does not take either. §12 names the **icon-only mark** for this surface
+ * and that artwork did not exist.
  *
- * So `REBUILT_FROM_PARTS` holds exactly one entry, with the reason and the blocking
- * ticket beside it, and **the entry is asserted still live** — the pattern
- * `test/contentdrift.test.ts` uses for the same reason. An exemption nobody re-checks is
- * how a stopgap becomes the design. Fix the masthead and this file goes red telling you
- * to delete the line.
+ * MUSE-40 shipped it, MUSE-67 put it in the band, and the entry is gone. Both halves of
+ * the machine did their job in order and both are still here: the entry was asserted
+ * *still live*, so fixing the masthead turned this file red telling the fixer to delete
+ * the line, and the scan that found the masthead in the first place still runs over every
+ * `.astro` file in the tree. What replaces the exemption is not an empty map and a shrug
+ * — it is `the built masthead presents the mark` below, which states what the band carries
+ * now, so "no component rebuilds the lockup" cannot be satisfied by a masthead with no
+ * brand on it at all.
  */
 
 /* ------------------------------------------------------------ the artwork's geometry */
@@ -57,18 +76,19 @@ import { assetFile, buildSite, PAGES_DEPLOY, type Build } from './helpers/build'
 const LOCKUP_PARTS = ['Muse', 'by Mina', 'MUSE', 'BY MINA'];
 
 /**
- * **The one component still allowed to do it, why, and what unblocks it.**
+ * **The components allowed to do it anyway. There are none, and that is the state to
+ * keep.**
  *
- * Keyed on the path so a second file cannot inherit the exemption by being similar, and
+ * Keyed on the path so a second file cannot inherit an exemption by being similar, and
  * every entry is checked twice: the file must still contain the construction (otherwise
- * the entry is stale and must go), and no file outside this map may contain it.
+ * the entry is stale and must go), and no file outside this map may contain it. MUSE-64
+ * registered the masthead here and MUSE-67 deleted it — see the note at the top of this
+ * file, and `logo/README.md` for the arithmetic that justified both.
+ *
+ * An entry added here needs the measurement that forced it and the ticket that removes
+ * it, in the string, the way that one did.
  */
-const REBUILT_FROM_PARTS: Record<string, string> = {
-  'src/components/Header.astro':
-    'The 64px mobile band cannot hold the lockup at §12’s own 100px minimum, which ' +
-    'is 73px tall. §12 names the icon-only mark as this surface’s variant and that ' +
-    'artwork does not exist — MUSE-40. Delete this entry with that ticket.',
-};
+const REBUILT_FROM_PARTS: Record<string, string> = {};
 
 /** Every `.astro` file under `src/`, as repo-relative paths. */
 function astroSources(): string[] {
@@ -168,6 +188,10 @@ describe('no component rebuilds the lockup from separate parts (§12)', () => {
   });
 
   it('keeps no exemption that has stopped being needed', () => {
+    // Vacuous while the map is empty, and kept for the next entry rather than deleted:
+    // this is the half that caught MUSE-67. A fixed component with its exemption still
+    // registered is a lie that reads as history, and nothing else in the repository can
+    // see it. The census below is what carries the claim today.
     for (const [file, reason] of Object.entries(REBUILT_FROM_PARTS)) {
       expect(
         offenders.has(file),
@@ -178,18 +202,17 @@ describe('no component rebuilds the lockup from separate parts (§12)', () => {
     }
   });
 
-  it('exempts only the masthead, and only while MUSE-40 is open', () => {
-    // Pinned as a census rather than left to the map's length: this ticket shipped with
-    // exactly one surface unfixed, and a second one appearing is a decision somebody
-    // should have to make in a diff rather than by adding a key.
-    expect(Object.keys(REBUILT_FROM_PARTS)).toEqual(['src/components/Header.astro']);
-    expect(REBUILT_FROM_PARTS['src/components/Header.astro']).toContain('MUSE-40');
+  it('exempts nothing at all, which is the state MUSE-67 left', () => {
+    // A census rather than the map's length, and asserted as *empty* rather than merely
+    // "small": the last entry was closed by a ticket, so the next one is a decision
+    // somebody has to make in a diff rather than by adding a key.
+    expect(Object.keys(REBUILT_FROM_PARTS)).toEqual([]);
   });
 });
 
-/* -------------------------------------------- the measurement the exemption rests on */
+/* ------------------------------ the measurement that decides which mark the band gets */
 
-describe('the masthead has no room for the lockup', () => {
+describe('the masthead has no room for the lockup, and room for the mark', () => {
   /**
    * §7.1: *"Height 64px mobile / 80px desktop."* Restated here because this suite's claim
    * is a comparison between two documents' numbers, and a comparison needs both sides
@@ -232,16 +255,78 @@ describe('the masthead has no room for the lockup', () => {
     expect(LOCKUP_CAP_HEIGHT_RATIO).toBeCloseTo(0.33, 2);
     expect(LOCKUP_ASPECT).toBeCloseTo(1.3746, 4);
   });
+
+  /* ---------------------------------------------------------- and the mark, which does */
+
+  /** The mark as the masthead draws it: height, the width that follows, its clear space. */
+  const mark = {
+    height: MASTHEAD_MARK_HEIGHT,
+    width: Math.round(MASTHEAD_MARK_HEIGHT * ICON_ASPECT),
+    clear: iconClearSpace(MASTHEAD_MARK_HEIGHT),
+  };
+
+  it('clears §12’s 24px minimum for the icon-only mark', () => {
+    // The mark is portrait, so width is its small dimension and the floor binds there.
+    expect(mark.width).toBeGreaterThanOrEqual(ICON_MIN_WIDTH);
+  });
+
+  it('fits both bands with its clear space on all four sides', () => {
+    const envelope = mark.height + 2 * mark.clear;
+    expect(envelope).toBeLessThanOrEqual(BAND_HEIGHT_MOBILE);
+    expect(envelope).toBeLessThanOrEqual(BAND_HEIGHT_DESKTOP);
+    // Stated as a gap rather than only as a ≤, because "fits exactly" is the version of
+    // this that a 1px border or a changed padding makes false without anything moving.
+    expect(BAND_HEIGHT_MOBILE - envelope).toBeGreaterThanOrEqual(2);
+  });
+
+  it('takes its clear space from the same cap height the lockup does', () => {
+    // The crop runs the full height of the lockup's ink (256 → 878 is all 622 of it), so
+    // a mark drawn H tall *is* the lockup drawn H tall with the type cropped off, and
+    // §12's "cap height of MUSE" at that scale is the same fraction. One measurement.
+    expect(ICON_CROP.bottom - ICON_CROP.top).toBe(ICON_INK.height);
+    expect(iconClearSpace(100)).toBe(Math.round(100 * LOCKUP_CAP_HEIGHT_RATIO));
+    expect(iconClearSpace(200)).toBe(2 * iconClearSpace(100));
+  });
+
+  it('refuses to draw the mark below §12’s minimum rather than clamping it', () => {
+    // `lockupClearSpace`'s rule, for the same reason: the quiet way to make a logo fit a
+    // band is to shrink it, and a clamp renders that and looks fine in a diff.
+    const tooSmall = Math.floor(ICON_MIN_WIDTH / ICON_ASPECT) - 1;
+    expect(() => iconClearSpace(tooSmall)).toThrow(/§12/);
+    expect(() => iconClearSpace(MASTHEAD_MARK_HEIGHT)).not.toThrow();
+  });
+
+  it('is drawn at the size the header actually sets', () => {
+    const header = readFileSync(
+      new URL('../src/components/Header.astro', import.meta.url),
+      'utf8',
+    );
+    // Matched as the *unevaluated* source text, which is the point: the assertion is
+    // that the header interpolates the constants rather than writing `36px` and `12px`
+    // into its CSS, where the arithmetic above could go on being true while the band
+    // drew something else entirely.
+    expect(header).toContain('--mark-height:${MASTHEAD_MARK_HEIGHT}px');
+    expect(header).toContain('--mark-clear:${markClear}px');
+  });
 });
 
 /* --------------------------------------------------- what the built pages actually do */
 
-describe('the built site presents the white lockup', () => {
-  let build: Build;
-  beforeAll(() => {
-    build = buildSite(PAGES_DEPLOY);
-  });
+/**
+ * **One build for the whole file**, at module scope rather than one per `describe`.
+ *
+ * `buildSite` does not memoise — it is a real `astro build` every call — and `npm test`
+ * already runs ten of them across ten parallel workers. An eleventh is not free to the
+ * suites that share the runner: `test/localeswitch.test.ts`'s middle-click waits on
+ * Chromium opening a background tab, and MUSE-54 measured that class of wait starving
+ * under load. The two describes below ask different questions of the same `dist`.
+ */
+let build: Build;
+beforeAll(() => {
+  build = buildSite(PAGES_DEPLOY);
+}, 240_000);
 
+describe('the built site presents the white lockup', () => {
   /** Every `<img>` tag in `html` whose `src` points at the emitted lockup. */
   function lockupImages(html: string): string[] {
     return [...html.matchAll(/<img\b[^>]*>/g)]
@@ -325,5 +410,204 @@ describe('the built site presents the white lockup', () => {
       .allFiles()
       .filter((f) => /lockup/i.test(f) && !/\.webp$/.test(f));
     expect(strays).toEqual([]);
+  });
+});
+
+/* ------------------------------------------- the mark the masthead carries (MUSE-67) */
+
+describe('the masthead mark is the supplied artwork, thickened for its size', () => {
+  /** Memoised — see `cropInk` for why a decode per assertion is not free here. */
+  let measured: { ink: Uint8Array; alpha: Uint8Array } | undefined;
+
+  /**
+   * The ink mask of the crop, straight off the supplied lockup.
+   *
+   * Re-measured every run rather than quoted, the way `test/icon.test.ts` re-measures
+   * the tab icons: MUSE-36 shipped an invented schedule and MUSE-60 found an invented
+   * founding date, so a claim about brand provenance does not get to be a comment.
+   *
+   * Once per file, though: the supplied lockup is 1254 × 1254, and decoding it per
+   * assertion is a megapixel of CPU three times over inside one of ten parallel vitest
+   * workers. `test/localeswitch.test.ts`'s middle-click is measurably sensitive to what
+   * else is on the runner (MUSE-54, MUSE-61), so a test file's cost is not free.
+   */
+  function cropInk(): { ink: Uint8Array; alpha: Uint8Array } {
+    if (measured !== undefined) return measured;
+    const { header: head, pixels } = decodeRgba(readFileSync(ICON_SOURCE));
+    const { left, top } = ICON_CROP;
+    const ink = new Uint8Array(ICON_INK.width * ICON_INK.height);
+    const alpha = new Uint8Array(ink.length);
+    for (let y = 0; y < ICON_INK.height; y += 1) {
+      for (let x = 0; x < ICON_INK.width; x += 1) {
+        const a = pixels[((top + y) * head.width + (left + x)) * 4 + 3]!;
+        alpha[y * ICON_INK.width + x] = a;
+        ink[y * ICON_INK.width + x] = a > 0 ? 1 : 0;
+      }
+    }
+    measured = { ink, alpha };
+    return measured;
+  }
+
+  /** A binary mask grown by a disc of radius `r` — the dilation, as a set operation. */
+  function dilate(mask: Uint8Array, r: number): Uint8Array {
+    const { width: w, height: h } = ICON_INK;
+    const out = new Uint8Array(mask.length);
+    for (let dy = -r; dy <= r; dy += 1) {
+      const dx = Math.floor(Math.sqrt(r * r - dy * dy));
+      for (let y = Math.max(0, -dy); y < Math.min(h, h - dy); y += 1) {
+        for (let x = 0; x < w; x += 1) {
+          if (mask[(y + dy) * w + x] === 0) continue;
+          for (let k = Math.max(0, x - dx); k <= Math.min(w - 1, x + dx); k += 1) {
+            out[y * w + k] = 1;
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  const artwork = readFileSync(join(ICON_DIR, MASTHEAD_MARK_FILE));
+
+  it('is the crop, at the crop’s own resolution', () => {
+    const head = header(artwork);
+    expect({ width: head.width, height: head.height }).toEqual({
+      width: ICON_INK.width,
+      height: ICON_INK.height,
+    });
+  });
+
+  it('is drawn in one colour, and it is §12’s white', () => {
+    expect([...inkColours(artwork)]).toEqual(['#ffffff']);
+  });
+
+  /**
+   * **Nothing was drawn and nothing was lost — the file is the crop, thickened.**
+   *
+   * Two set comparisons rather than a byte-for-byte reproduction of the dilation. A
+   * byte test would pin this file to one resampler's rounding and go red on a tool
+   * upgrade that changed nothing anybody can see; these two say the thing that actually
+   * matters, which is that the committed mark covers the artwork's ink and extends no
+   * further from it than the stated radius. A redrawn, traced or re-cropped mark fails
+   * one of them, and a mark shipped without the dilation fails the ratio below.
+   */
+  it('covers every pixel of the artwork’s ink', () => {
+    const { ink } = cropInk();
+    const { pixels } = decodeRgba(artwork);
+    let lost = 0;
+    for (let i = 0; i < ink.length; i += 1)
+      if (ink[i] === 1 && pixels[i * 4 + 3] === 0) lost += 1;
+    expect(lost, `${lost} inked pixels of the crop are blank in ${MASTHEAD_MARK_FILE}`).toBe(0);
+  });
+
+  it('adds no ink further from the artwork than the stated radius', () => {
+    const grown = dilate(cropInk().ink, MASTHEAD_DILATION_RADIUS);
+    const { pixels } = decodeRgba(artwork);
+    let invented = 0;
+    for (let i = 0; i < grown.length; i += 1) {
+      if (pixels[i * 4 + 3]! > 0 && grown[i] === 0) invented += 1;
+    }
+    expect(
+      invented,
+      `${invented} pixels of ${MASTHEAD_MARK_FILE} are more than ` +
+        `${MASTHEAD_DILATION_RADIUS}px from any ink in ${ICON_SOURCE}. This mark was ` +
+        `drawn, traced or cropped somewhere else — see logo/README.md.`,
+    ).toBe(0);
+  });
+
+  /**
+   * **The stroke-weight judgement, as a measurement** — `test/icon.test.ts`'s assertion
+   * at this ticket's size. The comparison's other side is computed off the artwork, so
+   * there is no constant in it that could be retyped to match a regression.
+   */
+  it('carries materially more ink than the plain crop would', () => {
+    const { alpha } = cropInk();
+    let total = 0;
+    for (const value of alpha) total += value;
+    const plain = total / alpha.length / 255;
+
+    const actual = meanAlpha(artwork);
+    expect(
+      actual,
+      `${MASTHEAD_MARK_FILE} inks ${(actual * 100).toFixed(1)}% of the crop; the plain ` +
+        `crop inks ${(plain * 100).toFixed(1)}%. This mark was regenerated without the ` +
+        `stroke dilation (MASTHEAD_STROKE_GAIN in src/lib/icon.ts) and is a grey smear ` +
+        `at 36px on a 1× display.`,
+    ).toBeGreaterThan(plain * MASTHEAD_MIN_STROKE_RATIO);
+  });
+
+  it('matches the ink the design decision was made at', () => {
+    // The other end: "legible" cannot drift upward into a blob either. At 0.35 CSS px
+    // of gain the dancer's head and raised arm merge at 2×, which is the detail the
+    // mark exists for.
+    expect(meanAlpha(artwork)).toBeCloseTo(MASTHEAD_MEAN_ALPHA, 2);
+  });
+});
+
+describe('the built masthead presents the mark', () => {
+  /** The masthead home link on one built page. */
+  function logoLink(page: string): string {
+    const link = /<a class="logo"[\s\S]*?<\/a>/.exec(build.read(page))?.[0] ?? '';
+    expect(link, `${page} has no masthead home link`).not.toBe('');
+    return link;
+  }
+
+  /** Every `<img>` in `html` whose `src` points at the emitted mark. */
+  function markImages(html: string): string[] {
+    return [...html.matchAll(/<img\b[^>]*>/g)]
+      .map((m) => m[0])
+      .filter((tag) => /muse-mark-white[^"']*\.webp/.test(tag));
+  }
+
+  it('puts it in the masthead of every page', () => {
+    for (const page of build.htmlFiles()) {
+      expect(markImages(logoLink(page)), `${page} masthead carries no mark`).toHaveLength(1);
+    }
+  });
+
+  it('emits one mark file for the whole site, and serves it', () => {
+    const emitted = build.allFiles().filter((f) => /muse-mark-white.*\.webp$/.test(f));
+    expect(emitted).toHaveLength(1);
+    const src = /src="([^"]+)"/.exec(markImages(logoLink('index.html'))[0]!)?.[1] ?? '';
+    expect(assetFile(build, src), `${src} does not resolve to a file in dist`).not.toBeNull();
+  });
+
+  it('reserves the box it will paint in, so the band does not reflow', () => {
+    const img = markImages(logoLink('index.html'))[0]!;
+    expect(img).toContain(`width="${MASTHEAD_MARK_EMITTED.width}"`);
+    expect(img).toContain(`height="${MASTHEAD_MARK_EMITTED.height}"`);
+  });
+
+  it('leaves the accessible name on the link and not on the image', () => {
+    const link = logoLink('index.html');
+    // The criterion is "exactly once", not "at least once" (MUSE-64): a non-empty `alt`
+    // inside a labelled link is read after the label by some combinations and before it
+    // by others, and either way the brand is announced twice.
+    expect(link).toContain('aria-label=');
+    // Astro emits an empty `alt` as a bare attribute, which is the same thing to a
+    // screen reader and is not the same string, so the claim is stated as "has an alt
+    // and it says nothing" rather than as a spelling.
+    const img = markImages(link)[0]!;
+    expect(img).toMatch(/\balt(=""|(?=[\s>]))/);
+    expect(img).not.toMatch(/\balt="[^"]+"/);
+  });
+
+  it('ships no lockup in the band and no second brand file', () => {
+    const link = logoLink('index.html');
+    // §12's minimum is the reason — see the measurement above. The failure this names is
+    // the quiet one: a lockup scaled into the band renders, passes every other check
+    // here, and is illegible.
+    expect(link).not.toMatch(/muse-lockup/);
+    // And the mark is the mark, not a second PNG that happens to look like it.
+    const brand = build.allFiles().filter((f) => /muse-(mark|lockup)/.test(f));
+    expect(brand.sort()).toHaveLength(2);
+  });
+
+  it('uses one URL in both themes, with no swap and no script', () => {
+    const html = build.read('index.html');
+    // The band is `--surface-deep` in both themes, so the white mark is right on both.
+    // §12's `.logo-white` / `.logo-plum` utilities are for a logo on `--surface`.
+    expect(html).not.toMatch(/muse-mark-plum|mark-plum/);
+    const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    for (const script of scripts) expect(script).not.toContain('muse-mark');
   });
 });

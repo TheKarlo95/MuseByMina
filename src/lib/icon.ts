@@ -49,6 +49,8 @@
  * nobody can account for.
  */
 
+import { LOCKUP_CAP_HEIGHT_RATIO } from './lockup';
+
 import plum16 from '../assets/icon/muse-icon-plum-16.png?url&no-inline';
 import plum32 from '../assets/icon/muse-icon-plum-32.png?url&no-inline';
 import white16 from '../assets/icon/muse-icon-white-16.png?url&no-inline';
@@ -208,3 +210,135 @@ export const ICONS: readonly IconLink[] = [
 
 /** The ink colour each tab icon is drawn in — §12's white mark and its plum derivation. */
 export const ICON_COLOURS = { plum: '#420535', white: '#ffffff' } as const;
+
+/* ------------------------------------------- the mark on a page, not in a tab (MUSE-67) */
+
+/**
+ * **The mark's aspect ratio, width ÷ height.**
+ *
+ * Derived from the crop rather than retyped, because the two numbers above are what the
+ * artwork measures and this is the only thing a layout needs from them.
+ */
+export const ICON_ASPECT = ICON_INK.width / ICON_INK.height;
+
+/** **§12's minimum reproduction size for the icon-only mark: 24px wide.** */
+export const ICON_MIN_WIDTH = 24;
+
+/**
+ * **§12's clear space around the mark, for a mark drawn `height` CSS pixels tall.**
+ *
+ * §12 states one clear-space rule for the logo — *"minimum equal to the cap height of
+ * 'MUSE' on all four sides"* — and the icon is a crop of the lockup, so the rule
+ * transfers exactly rather than by analogy: the crop runs the full height of the
+ * lockup's ink (256 → 878 is the whole of 622), so a mark drawn `height` tall is the
+ * lockup drawn `height` tall with the type cropped off, and "the cap height of 'MUSE'"
+ * at that scale is `LOCKUP_CAP_HEIGHT_RATIO × height`. One measurement, two surfaces,
+ * imported rather than copied.
+ *
+ * The tab icons are the one exemption and they are not this: a favicon is drawn in a box
+ * the browser already pads, which `logo/README.md` writes out. A mark placed *on a page*
+ * — which is what the masthead is — observes the rule.
+ *
+ * Throws below §12's minimum width, for `lockupClearSpace`'s reason: both rules describe
+ * one reproduction, and clear space around an illegible mark is the mistake already made.
+ */
+export function iconClearSpace(height: number): number {
+  const width = Math.round(height * ICON_ASPECT);
+  if (!Number.isFinite(height) || width < ICON_MIN_WIDTH) {
+    throw new Error(
+      `The icon-only mark may not be drawn ${height}px tall — that is ${width}px wide, ` +
+        `and design system §12 sets a minimum of ${ICON_MIN_WIDTH}px for the mark. The ` +
+        `mark is ${ICON_INK.width} × ${ICON_INK.height}, so ${ICON_MIN_WIDTH}px wide is ` +
+        `${Math.ceil(ICON_MIN_WIDTH / ICON_ASPECT)}px tall.`,
+    );
+  }
+  return Math.round(height * LOCKUP_CAP_HEIGHT_RATIO);
+}
+
+/**
+ * **How tall the masthead draws the mark, in CSS pixels — one size in both bands.**
+ *
+ * The arithmetic, which is the whole of why the masthead carries the mark and the footer
+ * carries the lockup (MUSE-64, MUSE-67). `logo/README.md` has it as a table:
+ *
+ * ```
+ * §7.1 band              64px mobile / 80px desktop
+ * lockup, §12 minimum    100px wide → 73px tall, +24px clear space → 121px   ✗ neither band
+ * mark at 36px tall      27px wide (§12 floor is 24) + 12px clear → 60px     ✓ both bands
+ * ```
+ *
+ * **36 rather than the largest that fits.** 38px is the ceiling — its envelope is exactly
+ * 64 — and the four pixels are worth more as slack than as mark: the band is a flex row
+ * whose height is set in one place and a border or a padding change should not make the
+ * clear space quietly false. 36 is also what the typeset wordmark this replaces occupied:
+ * 26px of Cormorant over a 9px label, ~37px of ink in the same band, so the masthead's
+ * optical weight is unchanged by the swap.
+ *
+ * **One size in both bands**, and not because the desktop band could not take more. A
+ * second size is a second dilation radius (see `MASTHEAD_STROKE_GAIN`) and therefore a
+ * second file, and the outgoing wordmark did not change size between the bands either.
+ */
+export const MASTHEAD_MARK_HEIGHT = 36;
+
+/**
+ * **The stroke weight the masthead's copy of the mark is given, in CSS pixels per side.**
+ *
+ * The same intervention as `STROKE_GAIN` above and for the same reason, at a different
+ * size and therefore a different amount. At 36 CSS pixels tall the mark's hairlines fall
+ * near one device pixel on a 1× display and antialias away: rendered from the plain crop
+ * it is a grey smear, against a footer lockup whose copy of the same mark is three times
+ * larger and paints solid white. The two are the same logo twice on one page.
+ *
+ * 0.3 was chosen by rendering 0, 0.25, 0.3, 0.35 and 0.45 at 1×, 2× and 3× on
+ * `--surface-deep` and looking at them. Below 0.3 the 1× mark is still washed; by 0.35
+ * the dancer's head and raised arm begin to merge at 2×, which is the detail the mark is
+ * *for*. Lower than MUSE-40's 0.5 because 36px is twice the tab icon's worst case.
+ *
+ * Note what the number is measured in: **CSS pixels, not device pixels.** One file serves
+ * every display, so a gain expressed in device pixels would be three different amounts of
+ * ink on three phones. Optical sizing is about how large the mark is *drawn*, which is a
+ * CSS-pixel fact.
+ */
+export const MASTHEAD_STROKE_GAIN = 0.3;
+
+/**
+ * The dilation radius that produces that gain, in **source** pixels of the 622px crop.
+ *
+ * `gain ÷ scale`, MUSE-40's parameterisation, with `scale = MASTHEAD_MARK_HEIGHT ÷ 622`.
+ * Written as a derivation rather than as `5` so that changing the drawn size above makes
+ * the file that has to be regenerated say so — `test/lockup.test.ts` measures the
+ * committed PNG against it.
+ */
+export const MASTHEAD_DILATION_RADIUS = Math.round(
+  (MASTHEAD_STROKE_GAIN * ICON_INK.height) / MASTHEAD_MARK_HEIGHT,
+);
+
+/** The ink the committed masthead mark carries, as mean alpha over the crop. */
+export const MASTHEAD_MEAN_ALPHA = 0.172;
+
+/**
+ * How much more ink the masthead mark must carry than the plain crop does.
+ *
+ * The plain crop measures 0.078 and the committed file 0.172 — 2.2×. A floor of 1.6
+ * separates "thickened for the size" from "cropped and shipped" with room on both sides,
+ * and `test/lockup.test.ts` computes the plain figure off the artwork rather than
+ * quoting it, so neither side of the comparison is a number somebody can retype.
+ */
+export const MASTHEAD_MIN_STROKE_RATIO = 1.6;
+
+/** The masthead mark's artwork, inside `ICON_DIR`. */
+export const MASTHEAD_MARK_FILE = 'muse-mark-white.png';
+
+/**
+ * **The one size the build emits for the masthead, in device pixels.**
+ *
+ * 2× the drawn size, as a single file with no `srcset` — `src/lib/lockup.ts` argues that
+ * trade at length and it is the same one: the budget (`scripts/budget.mjs`) measures what
+ * a browser fetches at `deviceScaleFactor: 1`, so a density pair would have the gate
+ * weigh a file almost nobody downloads. **1,658 bytes** of WebP in `dist`; a 3× file is
+ * about 2.8 KB and buys sharpness on phones only.
+ */
+export const MASTHEAD_MARK_EMITTED = {
+  height: 2 * MASTHEAD_MARK_HEIGHT,
+  width: Math.round(2 * MASTHEAD_MARK_HEIGHT * ICON_ASPECT),
+} as const;
