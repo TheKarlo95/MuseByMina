@@ -70,7 +70,8 @@ of one commit fingerprint the same, which `test/origin.test.ts` asserts. For an 
 that is deliberately not this build:
 
 ```bash
-ORIGIN=https://thekarlo95.github.io UNVERIFIED_ORIGIN=1 npm run a11y
+# $SITE is the deploy host; see astro.config.mjs, which is the only place it is written.
+ORIGIN=$SITE UNVERIFIED_ORIGIN=1 npm run a11y
 ```
 
 and the log says out loud that the result is not pinned to a local build.
@@ -178,6 +179,25 @@ expected page list from `src/pages/`, not from the registry. Forgetting the *doc
 a build error, naming the route and where to add it (`src/lib/sanity/index.ts`), because
 a page with no document would publish with an empty `<title>`. Two documents for one route
 is an error too: which title the page got would otherwise depend on query order.
+
+### The deploy host is written once, and the build is what proves it
+
+`astro.config.mjs` holds it, as the overridable `SITE`/`BASE` default. The check that this
+stays true is **against the built output**, not against a list of source directories
+(MUSE-42): the suite builds a second time with `SITE` pointing at a different host, then
+reads every file of that output — pages, `robots.txt`, the sitemap, the stylesheets, the
+woff2s — and fails if the live host or its `/MuseByMina` sub-path appears anywhere. That
+is the real requirement, and it needs no list of places to keep current. The previous check
+walked `src/` and `public/` with a file-count floor underneath; it could not distinguish an
+absent `public/` from an unscanned one, and it never read `sanity/` — so a host string in a
+seed document rendered into all nine pages with the suite green.
+
+A second, faster check names the offending *file*, since `dist/en/index.html` is a true
+answer that is harder to act on. It walks the whole repository and takes its exclusions
+from `.gitignore`, so no directory is named and none can be missed. Three paths may name
+the host, each asserted to still need to: `astro.config.mjs`, `.github/workflows/deploy.yml`
+and `test/`. Everything else fails, **prose included** — a stale host in a README is
+believed rather than noticed, and the argument is written out beside the test.
 
 One caveat worth knowing: on the GitHub Pages project URL these land at
 `/MuseByMina/robots.txt`, not the origin root, so crawlers will not find `robots.txt` until

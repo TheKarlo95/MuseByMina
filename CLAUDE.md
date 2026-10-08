@@ -65,11 +65,30 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   which passes `minimum: 0` to `requireDocuments` deliberately: a count check there reports
   "the dataset holds 3, this page needs 4 … an empty dataset" and shadows the message that
   names the route, in the single most likely case.
-- No file under `src/` or `public/` may name the deploy host; that is the tree
-  `test/seo.test.ts` walks. The host lives in exactly one place, `astro.config.mjs`, as the
-  overridable `SITE`/`BASE` default. `sitemap`, `robots.txt` and `llms.txt` all derive their
-  origin from it, and the suite rebuilds under a second target to prove a domain move is a
-  config change.
+- **The deploy host lives in exactly one file**, `astro.config.mjs`, as the overridable
+  `SITE`/`BASE` default — which is what makes a domain move (MUSE-29) a config change
+  rather than a search-and-replace. `sitemap`, `robots.txt` and `llms.txt` all derive
+  their origin from it.
+
+  **The guarantee is against `dist`, not against a list of directories** (MUSE-42).
+  `test/seo.test.ts` builds under a second `SITE`/`BASE` and asserts the first host — and
+  the first sub-path — appears nowhere in that output, every file of it, fonts included.
+  That is the actual requirement, and it needs no list: it survives a renamed directory, a
+  new top-level folder, a changed `publicDir`, and content arriving from Sanity rather
+  than from a file. It used to be a hardcoded scan of `src/` and `public/` with a
+  file-count floor, which could not tell "`public/` is absent" from "`public/` has four
+  hundred unscanned files" and never read `sanity/` at all — so a host in a seed document
+  rendered into all nine pages with the suite green.
+
+  Alongside it, a **fast source scan** names the offending *file*, which a `dist` failure
+  cannot. It walks the whole repository, taking its exclusions from `.gitignore`, so there
+  is no scan list to keep exhaustive. Three paths may name the host and each is asserted
+  to still need to: `astro.config.mjs`, `.github/workflows/deploy.yml` (where a
+  *different* host is legitimately named — that is how MUSE-29 happens) and `test/`,
+  whose copy is pinned to the config default. **Everything else fails, prose included** —
+  a host in `logo/README.md` reaches no page and is still a failure; the reasoning is
+  written out above that test and the `ORIGIN=` example in `README.md` was changed to
+  `$SITE` rather than exempted.
 - **An asset the site's own code uses goes in `src/assets/` and is imported** — never
   `public/` plus a hand-written path. Vite rewrites a root-absolute CSS `url()` to
   include `base` **only at build time**, so `url('/fonts/x.woff2')` against a file in
