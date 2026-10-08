@@ -6,7 +6,6 @@ import type { Browser } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { launchChecks, openCheckPage } from '../scripts/browser-checks.mjs';
-
 import {
   APEX_DEPLOY,
   basePath,
@@ -265,7 +264,6 @@ describe.each(ENVIRONMENTS.map((name, index) => ({ name, index })))(
         waitUntil: 'load',
       });
       try {
-
         // `document.fonts` only loads a face the page has text for, so a subset
         // covering characters this page happens not to use stays `unloaded` however
         // healthy it is. Asking for each one explicitly makes "all six" a claim about
