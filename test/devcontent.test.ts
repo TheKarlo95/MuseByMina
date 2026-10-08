@@ -9,7 +9,7 @@ import { INERT_ROUTE_WARNING, ROUTES } from '../src/lib/pages';
 import { getSiteSettings } from '../src/lib/sanity';
 import { inDevServer } from '../src/lib/sanity/dev';
 import { FIXTURE_ENV } from '../src/lib/sanity/fixture';
-import { buildFailure, buildSite, PAGES_DEPLOY, type Build } from './helpers/build';
+import { buildFailure, buildSite, canonicalOf, PAGES_DEPLOY, type Build } from './helpers/build';
 import { astroDev, claimOutDir, type DevServer } from './helpers/scratch';
 import { seedDocs, type SeedDoc } from './helpers/seed';
 
@@ -85,18 +85,27 @@ const UNREACHABLE = { SANITY_PROJECT_ID: 'muse47nosuchproject', SANITY_DATASET: 
  */
 const SUITE_FIXTURE = process.env[FIXTURE_ENV];
 
-/** The route path a dev server serves a page at, with no base: `en/schedule/`. */
-function routePath(route: string, locale: Locale): string {
-  // `localeUrl` is the only place the trailing slash and the locale prefix are decided
-  // (MUSE-9), so the path comes from it rather than from a second rule written here. Its
-  // answer carries the *test run's* base, which is not the dev server's — `DevServer.url`
-  // supplies that — so the prefix is taken back off.
-  const base = import.meta.env.BASE_URL.replace(/\/+$/, '');
-  return localeUrl(route, locale).slice(base.length).replace(/^\/+/, '');
-}
-
 /** Every page the site serves, both locales. */
-const PAGES = LOCALES.flatMap((locale) => ROUTES.map(({ route }) => routePath(route, locale)));
+const PAGES = LOCALES.flatMap((locale) => ROUTES.map(({ route }) => ({ route, locale })));
+
+/**
+ * The URL a route lives at on a running dev server.
+ *
+ * Two facts, from the two places that own them, and **nothing in this file recomputes
+ * either**. `localeUrl` decides the locale prefix and the trailing slash (MUSE-9);
+ * `DevServer.url` decides the base, which it now takes from `astro.config.mjs` rather
+ * than from the server's greeting — MUSE-47's CI failure was the greeting being parsed
+ * for it.
+ *
+ * The join works because **`import.meta.env.BASE_URL` is `/` inside a vitest run**, so
+ * `localeUrl` here answers a base-*relative* path: `/en/schedule/`, not
+ * `/MuseByMina/en/schedule/`. That is worth knowing before writing anything that joins
+ * these two together — the first version of this file assumed the opposite, sliced a base
+ * off `localeUrl`'s answer, and only worked because the slice was a no-op.
+ */
+function pageUrl(server: DevServer, route: string, locale: Locale): string {
+  return server.url(localeUrl(route, locale));
+}
 
 /** Two documents for routes the site does not serve, one after the other. */
 const GHOST_A = 'page-devcontent-ghost-a';
@@ -156,13 +165,13 @@ beforeAll(async () => {
   // was rendered from a file in the repository.
   offline = await astroDev({ ...UNREACHABLE, [FIXTURE_ENV]: mutable }, 'devcontent-offline');
 
-  before = await text(offline, routePath('/schedule', 'hr'));
+  before = await text(offline, '/schedule', 'hr');
   writeFileSync(mutable, ndjson(edited(seedDocs())));
-  after = await text(offline, routePath('/schedule', 'hr'));
+  after = await text(offline, '/schedule', 'hr');
 
   // The live arm, with nothing to answer it: what `npm run dev` does on a train today.
   unreachable = await astroDev({ ...UNREACHABLE, [FIXTURE_ENV]: '' }, 'devcontent-live');
-  const failed = await fetch(unreachable.url(routePath('/schedule', 'hr')));
+  const failed = await fetch(pageUrl(unreachable, '/schedule', 'hr'));
   expect(failed.status).toBe(500);
 
   // A build that takes the same live arm and fails on it. Its log is the only place the
@@ -201,10 +210,10 @@ beforeAll(async () => {
     'devcontent-inert',
   );
   inertReloads = 3;
-  for (let i = 0; i < inertReloads; i += 1) await text(inertDev, routePath('/schedule', 'hr'));
+  for (let i = 0; i < inertReloads; i += 1) await text(inertDev, '/schedule', 'hr');
 
   writeFileSync(inertFixture, ndjson([...seedDocs(), ghostOf(GHOST_B, '/alsonosuchroute')]));
-  for (let i = 0; i < inertReloads; i += 1) await text(inertDev, routePath('/schedule', 'hr'));
+  for (let i = 0; i < inertReloads; i += 1) await text(inertDev, '/schedule', 'hr');
 }, 300_000);
 
 afterAll(async () => {
@@ -217,10 +226,39 @@ function occurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
 }
 
-async function text(server: DevServer, route: string): Promise<string> {
-  const response = await fetch(server.url(route));
-  expect(response.status, `${route}\n--- astro dev output ---\n${server.output()}`).toBe(200);
-  return response.text();
+/**
+ * Fetch one page from a dev server, and prove it is the page that was asked for.
+ *
+ * The status check is the obvious half. The canonical check is the half MUSE-48 is about,
+ * and this file needed it: `renders every page from the committed seed` asserts that each
+ * of eight URLs contains „Muse by Mina", which **every** page of this site contains — so a
+ * URL builder that quietly answered with the homepage eight times would have gone green.
+ * One assertion per fetch, derived from the page's own markup rather than from the URL the
+ * helper was asked for, is the only thing that can tell those two apart.
+ *
+ * `<link rel="canonical">` is the right needle because it comes from `localeUrl` and
+ * `Astro.site` inside the page itself (MUSE-9), so it names where the page believes it
+ * lives, independently of how it was reached.
+ */
+async function text(server: DevServer, route: string, locale: Locale): Promise<string> {
+  const requested = pageUrl(server, route, locale);
+  const where = `${requested}\n--- astro dev output ---\n${server.output()}`;
+  const response = await fetch(requested);
+  expect(response.status, where).toBe(200);
+  const html = await response.text();
+
+  /**
+   * Compared against the path that was *requested*, not against `localeUrl`'s answer: the
+   * canonical is built inside the page from the real deploy base, and the test process's
+   * base is `/`. Requested-vs-declared is also the comparison that means something here —
+   * it is the page saying which page it is.
+   */
+  const canonical = canonicalOf(html);
+  expect(canonical, `no canonical on ${where}`).toBeDefined();
+  expect(new URL(canonical!).pathname, `served a different page than ${requested}`).toBe(
+    new URL(requested).pathname,
+  );
+  return html;
 }
 
 /* ------------------------------------------------- 1. a dev server re-reads content */
@@ -325,10 +363,30 @@ describe('the site can be developed with no network', () => {
     // from a file. Every route the site serves, both locales — read off `ROUTES` so a
     // page added tomorrow is covered the day it lands.
     expect(PAGES.length).toBe(ROUTES.length * LOCALES.length);
-    for (const page of PAGES) {
-      const html = await text(offline, page);
-      expect(html, page).toContain('Muse by Mina');
+    for (const { route, locale } of PAGES) {
+      // `text` is what makes this an assertion about eight *different* pages rather than
+      // about eight URLs — it checks each one's canonical against the route asked for.
+      const html = await text(offline, route, locale);
+      expect(html, `${locale} ${route}`).toContain('Muse by Mina');
     }
+  });
+
+  it('builds its URLs under the base the server is serving, with one slash', () => {
+    /**
+     * The plumbing MUSE-47's CI failure went through, pinned. `DevServer.base` used to be
+     * `new URL(greeting).pathname`, and the greeting is written for a human: the
+     * character after the URL is a colour reset, which a class excluding whitespace,
+     * quotes and backslashes happily ate. The base came out `/MuseByMina/%1B[31m/`, every
+     * page 404ed, and the dev server's own 404 line re-coloured the terminal as it printed
+     * the path — so the symptom read as `//schedule/`.
+     *
+     * Two properties, either of which the old helper could violate: the path is exactly
+     * the base plus the route, and it contains no doubled separator however it was joined.
+     */
+    const url = new URL(pageUrl(offline, '/schedule', 'hr'));
+    expect(url.pathname).toBe(`${offline.base}schedule/`);
+    expect(url.pathname).not.toContain('//');
+    expect(offline.base.endsWith('/')).toBe(true);
   });
 
   it('announces the fixture as loudly as a build does', () => {

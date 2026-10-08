@@ -262,16 +262,67 @@ export interface DevServer {
 }
 
 /**
- * The dev server's own greeting: `┃ Local    http://localhost:4321/MuseByMina/`.
+ * The **origin** in the dev server's greeting: `┃ Local    http://localhost:4321/…`.
  *
- * The path stops at a quote or a backslash as well as at whitespace, because Astro 7
- * switches to JSON log lines when it detects an agentic environment
- * (`astro/dist/cli/agent.js`) and the greeting then arrives as one JSON string with the
- * line break *escaped* — `…/MuseByMina/\n┃ Network…`. A plain `\S*` reads that literal
- * `\n┃` as part of the URL and yields a base of `/MuseByMina//n%E2%94%83/`, which 404s
- * every page and makes this suite look like it found no fonts rather than no server.
+ * Origin only — scheme, host and the port it really bound to. That is the one fact about
+ * a dev server that only the server knows, because the port is negotiated (see
+ * `astroDev`), and it is therefore the only fact worth reading out of a log line.
+ *
+ * **The base used to be read from here too, and that was MUSE-47's CI failure.** The
+ * greeting is written for a human, so what follows the URL is a colour reset, and a
+ * character class that excludes whitespace, quotes and backslashes does not exclude
+ * `ESC`:
+ *
+ *     ┃ Local    \x1b[36mhttp://localhost:59102/MuseByMina/\x1b[31m
+ *
+ * The old pattern matched through that escape, `new URL` percent-encoded it, and the base
+ * came out `/MuseByMina/%1B[31m/` — so every page 404ed, and the dev server's own 404 log
+ * line re-coloured the terminal while printing it, which is why the path read as
+ * `//schedule/` rather than as anything recognisable.
+ *
+ * It survived two years of local runs because Astro 7 switches to **JSON** log lines when
+ * it detects an agentic environment (`astro/dist/cli/agent.js`), and in that form the next
+ * character after the URL is a literal backslash — which the exclusion set already had,
+ * for the unrelated reason MUSE-35 put it there. The plain ANSI banner is only produced
+ * where nobody was looking: a CI runner.
+ *
+ * The lesson is not "add `\x1b` to the class". It is that the base is **configuration**,
+ * not something to discover from a server: `astroDev` takes it from `astro.config.mjs`,
+ * and cross-checks the greeting against it rather than parsing the greeting for it.
+ *
+ * The trailing `/` is required but not captured, and that is load-bearing: stdout is a
+ * pipe, so a chunk boundary can fall between two digits of the port. Without an anchor
+ * after `\d+` the pattern happily matches `http://localhost:591` and the suite then talks
+ * confidently to the wrong port.
  */
-const DEV_URL = /(https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\d+\/[^\s"'\\]*)/;
+const DEV_ORIGIN = /(https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\d+)\//;
+
+/** Colour codes and the like, for comparing a greeting written for a human. */
+const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g;
+
+/**
+ * The `base` the site is served under, as `astro.config.mjs` resolves it.
+ *
+ * Imported rather than pinned. `test/` is allowed a copy of the deploy target
+ * (`test/helpers/preview.ts` has one, and `test/seo.test.ts` asserts it still matches),
+ * but a copy *here* would be a second model of the one thing this helper got wrong, which
+ * is how MUSE-9 happens twice. The config reads `process.env.BASE` at import, so this is
+ * the default only — a caller that passes `BASE` is answered from its own value.
+ *
+ * Dynamically imported, inside the one async function that needs it, so the `globalSetup`
+ * that imports `SCRATCH` from this module does not evaluate the Astro config and its
+ * integrations on its way to pruning a directory.
+ */
+async function configuredBase(): Promise<string> {
+  const loaded = (await import('../../astro.config.mjs')) as { default: { base?: string } };
+  return loaded.default.base ?? '/';
+}
+
+/** `/MuseByMina` → `/MuseByMina/`; `/` and `''` → `/`. Exactly one slash at each end. */
+function asBase(raw: string): string {
+  const trimmed = raw.replace(/^\/+|\/+$/g, '');
+  return trimmed === '' ? '/' : `/${trimmed}/`;
+}
 
 /** Give up waiting for the greeting. Generous: a cold Vite optimise is not instant. */
 const DEV_READY_TIMEOUT_MS = 120_000;
@@ -387,7 +438,7 @@ export async function astroDev(
     });
   };
 
-  const greeting = await new Promise<string>((resolve, reject) => {
+  const origin = await new Promise<string>((resolve, reject) => {
     const fail = (why: string): void => {
       void stop();
       reject(new Error(`${why}\n--- astro dev output ---\n${log}`));
@@ -405,7 +456,7 @@ export async function astroDev(
     };
 
     const watch = (): void => {
-      const match = DEV_URL.exec(log);
+      const match = DEV_ORIGIN.exec(log.replace(ANSI, ''));
       if (match) settle(() => resolve(match[1]!));
     };
     child.stdout?.on('data', watch);
@@ -415,13 +466,41 @@ export async function astroDev(
     watch();
   });
 
-  const address = new URL(greeting);
-  const base = address.pathname.endsWith('/') ? address.pathname : `${address.pathname}/`;
+  /**
+   * The base comes from the configuration the child was given, never from its output.
+   *
+   * `env.BASE` if the caller asked for one, else whatever this process already had — the
+   * child inherits it — else the config's own default. That is the same three-step answer
+   * the child itself computes, so the two cannot disagree by construction.
+   */
+  const base = asBase(env.BASE ?? childEnv.BASE ?? (await configuredBase()));
+
+  /**
+   * …and then the greeting is *checked* against it, rather than parsed for it.
+   *
+   * If the server is serving a different prefix from the one this helper is about to
+   * build URLs under, every page 404s. That used to be the symptom of the bug above and
+   * it took a CI run and a coloured log line to recognise; as one error naming both
+   * strings it takes a glance. The comparison is on an ANSI-stripped copy because the
+   * greeting is written for a human.
+   */
+  const announced = `${origin}${base}`;
+  if (!log.replace(ANSI, '').includes(announced)) {
+    await stop();
+    throw new Error(
+      `astro dev is not serving ${announced}. The base came from ` +
+        `${env.BASE !== undefined ? '`env.BASE`' : childEnv.BASE !== undefined ? 'the inherited `BASE`' : '`astro.config.mjs`'}` +
+        `, and the server's greeting does not contain that prefix — so every URL this ` +
+        `helper builds would 404.\n--- astro dev output ---\n${log}`,
+    );
+  }
 
   return {
-    origin: address.origin,
+    origin,
     base,
-    url: (route) => `${address.origin}${base}${route.replace(/^\/+/, '')}`,
+    // `base` ends in exactly one slash and the route is stripped of its leading ones, so
+    // this cannot emit `//` however it is called.
+    url: (route) => `${origin}${base}${route.replace(/^\/+/, '')}`,
     output: () => log,
     stop,
   };
