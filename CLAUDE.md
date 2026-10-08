@@ -397,10 +397,35 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
 - **A missing or malformed document fails the build naming itself** — `_id`, type and
   field path — through `src/lib/sanity/decode.ts`. "Unreachable", "empty" and "malformed"
   are three different error types on purpose: much of the dataset is still empty, so
-  "nothing on the page" has to be readable as which of the three it was. `textList` is the
-  one to know about for the schedule: `instructors[]->name` answers `null` for an absent
-  field, `[]` for an empty array and `[null, 'Mina']` for a deleted reference, and a page
-  joining the names would publish „ i Mina" for the third — so the error names the index.
+  "nothing on the page" has to be readable as which of the three it was.
+  `referencedTextList` is the one to know about for the schedule: `instructors[]->name`
+  answers `null` for an absent field, `[]` for an empty array and `[null, 'Mina']` for a
+  deleted reference, and a page joining the names would publish „ i Mina" for the third —
+  so the error names the index.
+- **Every dereference in `queries.ts` is projected beside its `_ref`** — `author->name`
+  next to `"authorRef": author._ref` — and that pair is the whole of MUSE-49. Sanity does
+  not clear a reference when its target is deleted, and GROQ answers a broken one with
+  `null`, so for an **optional** reference a deleted target and a field nobody filled in
+  arrive as the same `undefined` — and an optional field is *allowed* to be empty. A
+  deleted author therefore published the post **unsigned**, with nothing said. The `_ref`
+  is the missing evidence: **present with a `null` value is dangling, both absent is an
+  empty optional field.** A dangling one fails the build naming the document, the field
+  path and the deleted `_ref`; see the paragraph on `failDangling` in `decode.ts` for why
+  it is fatal rather than a warning, and note that the message says *clearing the field* is
+  a valid fix, because for an optional reference it is.
+
+  Three things not to undo. **The pair must stay a pair** — delete a `*Ref` line and
+  `decode.ts` fails every row saying the query is broken, while `RefProjected` in
+  `shape.ts` stops compiling; either half alone has stopped saying which case it is.
+  **Arrays are read positionally and the two lengths are compared**, because a *compacted*
+  list is the one failure here with nothing blank to notice: dropping a deleted teacher
+  rather than blanking her publishes „Mina" for a class she and Antonio teach — true,
+  incomplete, and indistinguishable from a class she teaches alone. And **`instructors`
+  being an array is load-bearing beyond two teachers**: `instructors[]->name` over a
+  deleted reference is `[null]`, a *non-null* array, so the slot's `coalesce` keeps the
+  override instead of falling through to the class's regular teachers. Revert the field to
+  a single reference and `/schedule` is back to publishing a real name that is the wrong
+  name — which is what `AssertScheduleInstructorsAreAList` guards.
 - **The Studio is hosted by Sanity**, at `musebymina.sanity.studio`, never mounted at
   `/studio` here. `.github/workflows/studio.yml` redeploys it when a schema file lands on
   `main`. `SANITY_PROJECT_ID` and `SANITY_DATASET` are repository *variables*; there is

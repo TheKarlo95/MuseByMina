@@ -736,6 +736,22 @@ export const FULL_COUNTS: Record<string, number> = {
   faq: 2,
 };
 
+/* ---------------------------------------------------- references to nothing */
+
+/**
+ * **The two `_id`s nothing in the dataset has**, and the strings every dangling-reference
+ * assertion looks for in the error message.
+ *
+ * Exported and shared rather than written at each use site, because the point of MUSE-49
+ * is that the error **names the target**. A test that only asserted "it throws" would stay
+ * green with the fix deleted for three of the five cases — the decoder already refused
+ * `null` where a name belongs, it just could not say *why*. So the assertions are on these
+ * strings appearing in the message, and a literal retyped per fixture is a literal that can
+ * drift out of the one place the test compares against.
+ */
+export const DELETED_CLASS_ID = 'class-that-was-deleted';
+export const DELETED_INSTRUCTOR_ID = 'instructor-that-was-deleted';
+
 /**
  * A slot whose `class` reference points at a document that is not in the dataset.
  *
@@ -746,7 +762,7 @@ export const FULL_COUNTS: Record<string, number> = {
 export const SLOT_DANGLING_CLASS: FixtureDoc = {
   _id: 'slot-dangling-class',
   _type: 'scheduleSlot',
-  class: reference('class-that-was-deleted'),
+  class: reference(DELETED_CLASS_ID),
   day: 'fri',
   start: '19:00',
   active: true,
@@ -758,7 +774,7 @@ export const SLOT_DANGLING_CLASS: FixtureDoc = {
  * The array makes this worse than it was, which is why it is modelled as a *partial*
  * loss (MUSE-36): `instructors[]->name` over `[deleted, A]` answers `[null, 'Instructor
  * A']`, so the list is still non-empty and a page that joined it would publish „ i
- * Instructor A" — a real teacher next to a blank. `textList` in
+ * Instructor A" — a real teacher next to a blank. `referencedTextList` in
  * `src/lib/sanity/decode.ts` names the index instead.
  */
 export const CLASS_DANGLING_INSTRUCTOR: FixtureDoc = {
@@ -769,7 +785,7 @@ export const CLASS_DANGLING_INSTRUCTOR: FixtureDoc = {
   level: 'improver',
   description: localeText('class three'),
   durationMin: 75,
-  instructors: [reference('instructor-that-was-deleted'), reference('instructor-a')],
+  instructors: [reference(DELETED_INSTRUCTOR_ID), reference('instructor-a')],
   image: imageOf('ClassThree', [0.65, 0.66, 0.67, 0.68], [0.09, 0.1, 0.11, 0.12]),
 };
 
@@ -779,6 +795,98 @@ export const SLOT_WITH_DANGLING_TEACHER: FixtureDoc = {
   class: reference('class-dangling-instructor'),
   day: 'sat',
   start: '11:00',
+  active: true,
+};
+
+/* ------------------------------------------- dangling *optional* refs (MUSE-49) */
+
+/**
+ * **A post whose author has been deleted. The silent blank MUSE-49 is named after.**
+ *
+ * This is the one case that was *entirely* quiet before the fix. `author` is an optional
+ * single reference, so `author->name` over a deleted instructor answers `null`, `read()`
+ * in `src/lib/sanity/decode.ts` collapses `null` and absent into `undefined`, and
+ * `optionalText` accepts `undefined` because an optional field is allowed to be empty.
+ * The post then publishes **unsigned**, the build exits 0, and nothing — not the log, not
+ * the Studio, not `npm run sanity:read` — says a byline went missing.
+ *
+ * Every other field is filled in, so the row is valid in every respect but this one: a
+ * failure here cannot be a side effect of something else being absent.
+ */
+export const POST_DANGLING_AUTHOR: FixtureDoc = {
+  _id: 'post-dangling-author',
+  _type: 'post',
+  title: localeString('post dangling author'),
+  slug: slug('post-dangling-author'),
+  publishedAt: at(-24 * HOUR),
+  excerpt: localeText('post dangling author'),
+  author: reference(DELETED_INSTRUCTOR_ID),
+  coverImage: imageOf('PostDangling', [0.94, 0.95, 0.96, 0.97], [0.34, 0.35, 0.36, 0.37]),
+  body: richText('post dangling author'),
+};
+
+/**
+ * **A slot whose instructor override points at a deleted instructor — and whose class
+ * still has two perfectly good teachers of its own.**
+ *
+ * The class matters as much as the slot. `CLASS_TWO` is taught by `Instructor B` and
+ * `Instructor A`, both live, so `coalesce(instructors[]->name, class->instructors[]->name)`
+ * has a *real* second branch to fall through to. That is what makes this a test of the
+ * failure rather than of an accident: if the override is ever treated as absent, the row
+ * publishes „Instructor B i Instructor A" — two real names, neither of whom teaches this
+ * slot — and it looks entirely correct on the page.
+ *
+ * Note what MUSE-36 changed here, because the ticket predates it. With a single
+ * `instructor` reference the fallback really did happen: `instructor->name` over a deleted
+ * document is `null`, and `coalesce` takes the next branch. With an **array**,
+ * `instructors[]->name` answers `[null]` — a non-null array — so `coalesce` keeps the
+ * override and `referencedTextList` already refused it. The remaining defect was therefore a
+ * *misdiagnosis*, not a silent blank: the build failed saying `instructors[0]` "should be
+ * a non-empty string, got null (the field is absent, or was never filled in)", which sends
+ * Mina to look at an instructor's name field rather than at the deleted reference on this
+ * slot. The compile-time guard against the array reverting to a single reference — and the
+ * silent fallback coming back with it — is `AssertScheduleInstructorsAreAList` in
+ * `src/lib/sanity/shape.ts`.
+ */
+export const SLOT_DANGLING_OVERRIDE: FixtureDoc = {
+  _id: 'slot-dangling-override',
+  _type: 'scheduleSlot',
+  class: reference('class-two'),
+  day: 'mon',
+  start: '19:30',
+  instructors: [reference(DELETED_INSTRUCTOR_ID)],
+  active: true,
+};
+
+/**
+ * **One dangling member among several — the array's own failure mode, and the worst of
+ * the five.**
+ *
+ * The override lists two people and one of them has been deleted, so the field is neither
+ * absent nor empty nor wholly broken: `instructors[]->name` answers
+ * `[null, 'Instructor C']`. A projection or decoder that compacted the list — dropped the
+ * `null` rather than keeping its position — would publish „Instructor C" alone, which is
+ * **a true statement that is not the whole truth** and is indistinguishable on the page
+ * from a slot that was only ever taught by one person. Nothing would be blank. Nothing
+ * would look wrong.
+ *
+ * It is modelled with the dangling member **first** so a positional decoder has to name
+ * index 0 while the surviving name sits at index 1; a decoder that reported the last index
+ * it looked at, or that stopped at the first truthy entry, answers differently.
+ *
+ * `groq-js` keeps the position (verified, not assumed — `[null, 'Instructor C']`), and so
+ * does the API. But "keeps the position" is exactly the kind of engine detail that is
+ * cheap to depend on and expensive to discover has changed, which is why the decoder
+ * compares the length of the names against the length of the projected `_ref`s rather
+ * than trusting them to line up.
+ */
+export const SLOT_PARTIAL_DANGLING_OVERRIDE: FixtureDoc = {
+  _id: 'slot-partial-dangling-override',
+  _type: 'scheduleSlot',
+  class: reference('class-two'),
+  day: 'thu',
+  start: '21:00',
+  instructors: [reference(DELETED_INSTRUCTOR_ID), reference('instructor-c')],
   active: true,
 };
 

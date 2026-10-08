@@ -512,12 +512,13 @@ export type PAGES_QUERY_RESULT = Array<{
 
 // Source: src/lib/sanity/queries.ts
 // Variable: SCHEDULE_QUERY
-// Query: *[_type == "scheduleSlot" && active == true] | order(start asc){    _id,    day,    start,    "classId": class->_id,    "name": class->name{ hr, en },    "level": class->level,    "durationMin": class->durationMin,    "instructors": coalesce(instructors[]->name, class->instructors[]->name)  }
+// Query: *[_type == "scheduleSlot" && active == true] | order(start asc){    _id,    day,    start,    "classId": class->_id,    "classRef": class._ref,    "name": class->name{ hr, en },    "level": class->level,    "durationMin": class->durationMin,    "instructors": coalesce(instructors[]->name, class->instructors[]->name),    "instructorRefs": coalesce(instructors[]._ref, class->instructors[]._ref)  }
 export type SCHEDULE_QUERY_RESULT = Array<{
   _id: string;
   day: "fri" | "mon" | "sat" | "sun" | "thu" | "tue" | "wed";
   start: string;
   classId: string;
+  classRef: string;
   name: {
     hr: string;
     en: string;
@@ -525,11 +526,12 @@ export type SCHEDULE_QUERY_RESULT = Array<{
   level: "advanced" | "beginner" | "improver" | "intermediate";
   durationMin: number;
   instructors: Array<string>;
+  instructorRefs: Array<string>;
 }>;
 
 // Source: src/lib/sanity/queries.ts
 // Variable: CLASSES_QUERY
-// Query: *[_type == "class"] | order(coalesce(order, 999) asc, name.hr asc){    _id,    "slug": slug.current,    name{ hr, en },    level,    description{ hr, en },    durationMin,    "instructors": instructors[]->name,    image{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop }  }
+// Query: *[_type == "class"] | order(coalesce(order, 999) asc, name.hr asc){    _id,    "slug": slug.current,    name{ hr, en },    level,    description{ hr, en },    durationMin,    "instructors": instructors[]->name,    "instructorRefs": instructors[]._ref,    image{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop }  }
 export type CLASSES_QUERY_RESULT = Array<{
   _id: string;
   slug: string;
@@ -544,6 +546,7 @@ export type CLASSES_QUERY_RESULT = Array<{
   } | null;
   durationMin: number;
   instructors: Array<string>;
+  instructorRefs: Array<string>;
   image: {
     assetId: string | null;
     alt: {
@@ -670,7 +673,7 @@ export type GALLERY_QUERY_RESULT = Array<{
 
 // Source: src/lib/sanity/queries.ts
 // Variable: POSTS_QUERY
-// Query: *[_type == "post" && publishedAt <= $now] | order(publishedAt desc){    _id,    "slug": slug.current,    title{ hr, en },    publishedAt,    excerpt{ hr, en },    "author": author->name,    coverImage{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop },    body{ hr, en }  }
+// Query: *[_type == "post" && publishedAt <= $now] | order(publishedAt desc){    _id,    "slug": slug.current,    title{ hr, en },    publishedAt,    excerpt{ hr, en },    "author": author->name,    "authorRef": author._ref,    coverImage{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop },    body{ hr, en }  }
 export type POSTS_QUERY_RESULT = Array<{
   _id: string;
   slug: string;
@@ -684,6 +687,7 @@ export type POSTS_QUERY_RESULT = Array<{
     en: string;
   };
   author: string | null;
+  authorRef: string | null;
   coverImage: {
     assetId: string | null;
     alt: {

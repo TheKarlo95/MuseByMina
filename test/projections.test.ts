@@ -2,6 +2,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
   CLASS_DANGLING_INSTRUCTOR,
+  DELETED_CLASS_ID,
+  DELETED_INSTRUCTOR_ID,
   DRAFTS,
   CLASS_ONE,
   CLASS_TWO,
@@ -14,13 +16,17 @@ import {
   GALLERY_TWO,
   INSTRUCTOR_A,
   INSTRUCTOR_B,
+  INSTRUCTOR_C,
   NOW,
+  POST_DANGLING_AUTHOR,
   POST_EARLIER,
   POST_FUTURE,
   POST_NOW,
   PAGE_DOCS,
   SITE_SETTINGS_DOC,
   SLOT_DANGLING_CLASS,
+  SLOT_DANGLING_OVERRIDE,
+  SLOT_PARTIAL_DANGLING_OVERRIDE,
   SLOT_WITH_DANGLING_TEACHER,
   expectedImage,
   fixtureOf,
@@ -103,6 +109,10 @@ import { FIXTURE_ENV, runFixtureQuery } from '../src/lib/sanity/fixture';
 let full: string;
 let danglingClass: string;
 let danglingTeacher: string;
+let danglingAuthor: string;
+let noAuthor: string;
+let danglingOverride: string;
+let partialDanglingOverride: string;
 
 beforeAll(() => {
   full = fixtureOf(FULL, 'projections-full');
@@ -110,6 +120,28 @@ beforeAll(() => {
   danglingTeacher = fixtureOf(
     [SLOT_WITH_DANGLING_TEACHER, CLASS_DANGLING_INSTRUCTOR],
     'projections-dangling-teacher',
+  );
+
+  /**
+   * MUSE-49's four datasets. Each holds the *minimum* that makes its case reachable and
+   * every other field filled in, so a failure cannot be a side effect of some other
+   * absence — and each dangling dataset has a live counterpart it could wrongly resolve to.
+   */
+  danglingAuthor = fixtureOf([POST_DANGLING_AUTHOR], 'projections-dangling-author');
+  // The control for it: the same query, the same decoder, a post with no `author` at all.
+  // Separate datasets because one unusable row fails the whole read, so the two cases
+  // cannot be asserted against one fixture — and they are the two that must never be
+  // conflated in either direction.
+  noAuthor = fixtureOf([POST_NOW], 'projections-no-author');
+  // `CLASS_TWO` and its two live teachers are in both, so `coalesce`'s second branch is
+  // real: a fallback would publish „Instructor B i Instructor A" rather than a blank.
+  danglingOverride = fixtureOf(
+    [SLOT_DANGLING_OVERRIDE, CLASS_TWO, INSTRUCTOR_A, INSTRUCTOR_B],
+    'projections-dangling-override',
+  );
+  partialDanglingOverride = fixtureOf(
+    [SLOT_PARTIAL_DANGLING_OVERRIDE, CLASS_TWO, INSTRUCTOR_A, INSTRUCTOR_B, INSTRUCTOR_C],
+    'projections-partial-dangling-override',
   );
 });
 
@@ -553,12 +585,18 @@ describe('POSTS_QUERY: published posts, newest first', () => {
     expect(earlier?.body.en).toHaveLength(1);
   });
 
-  it('projects `author`, which is optional and so fails silently', async () => {
+  it('projects `author` and `authorRef`, the pair a typo cannot hide behind', async () => {
     /**
-     * `author->nam` returns `undefined`, `optionalText` accepts it, and every post is
-     * published unsigned. Nothing in the build, the types or the read check objects.
-     * `post-earlier` carries an author and `post-now` does not, so both answers are
-     * pinned and neither can be the default.
+     * `author` is optional, which is what makes it the weakest projection in the file: a
+     * misspelled `author->nam` answers `undefined`, `optionalText` accepts it, and every
+     * post publishes unsigned with nothing in the build, the types or the read check
+     * objecting. `post-earlier` carries an author and `post-now` does not, so both answers
+     * are pinned here and neither can be the default.
+     *
+     * `authorRef` is the second half (MUSE-49), and it closes the typo on *both* sides:
+     * misspell the dereference and the `_ref` is still there, which the decoder reads as a
+     * deleted instructor and fails on; misspell the `_ref` and `author` resolves while the
+     * pair disagrees. The dangling case itself is in the MUSE-49 block below.
      */
     const posts = await from(full, () => getPosts({ now: NOW }));
     expect(posts.find((post) => post.id === 'post-earlier')?.author).toBe('Instructor A');
@@ -815,6 +853,194 @@ describe('a dangling reference fails naming the document, not as a blank', () =>
     await expect(run).rejects.toThrow(SanityContentError);
     await expect(run).rejects.toThrow(/slot-dangling-teacher/);
     await expect(run).rejects.toThrow(/instructors\[0\]/);
+  });
+
+  it('names the deleted class, not just the field that came back empty', async () => {
+    /**
+     * MUSE-49's "the error must name the missing target", applied to the **required**
+     * reference MUSE-44 already covered. The test above asserts the slot and the field;
+     * this asserts the third thing, which the projection could not supply before:
+     * *which* document is gone.
+     *
+     * Before the `_ref` was projected alongside the dereference, the message could only
+     * say `classId` "should be a non-empty string, got null (the field is absent, or was
+     * never filled in)" — three different causes, one sentence, and the one it names is
+     * the wrong one. `class-that-was-deleted` is the id Mina needs in order to tell
+     * "somebody deleted the class" from "the projection is misspelled".
+     */
+    const run = from(danglingClass, () => getSchedule());
+    await expect(run).rejects.toThrow(new RegExp(DELETED_CLASS_ID));
+  });
+});
+
+/* ------------------------------------------- a dangling *optional* reference (MUSE-49) */
+
+describe('a dangling optional reference is a failure, not a blank', () => {
+  /**
+   * MUSE-49. The sibling of the block above, and the harder half.
+   *
+   * A **required** reference that dangles is caught because the decoder demands a value
+   * and `null` is not one. An **optional** reference that dangles arrives as exactly the
+   * same `undefined` as a field nobody filled in — and an optional field is *allowed* to
+   * be empty, so the decoder accepted it and the page published a hole.
+   *
+   * The information needed to tell the two apart exists in the dataset but not in the
+   * answer: the projection returned the dereferenced *value* and discarded whether there
+   * was a `_ref` at all. So each query now projects the reference beside the value, and
+   * the decoder applies the one rule that separates them:
+   *
+   *   `_ref` present, value `null`   →  the target has been deleted. Fail.
+   *   both absent                    →  an empty optional field. Fine.
+   *
+   * **Every assertion here is on the message naming the deleted `_id`.** That is
+   * deliberate and it is what makes this suite watch the fix rather than the shape: for
+   * the two array cases the decoder *already* threw before MUSE-49 — it refused `null`
+   * where a name belongs — so `rejects.toThrow()` alone stays green with the fix deleted.
+   * What was missing was the diagnosis, and the diagnosis is the only thing that tells
+   * Mina which document to open.
+   */
+
+  it('fails on a post whose author has been deleted, rather than publishing it unsigned', async () => {
+    /**
+     * AC1, and the case that was completely silent. `author` is optional, so
+     * `author->name` answering `null` for a deleted instructor was indistinguishable from
+     * a post the studio signs itself — `optionalText` returned `undefined` and the build
+     * exited 0 with the byline gone.
+     */
+    const run = from(danglingAuthor, () => getPosts({ now: NOW }));
+
+    await expect(run).rejects.toThrow(SanityContentError);
+    await expect(run).rejects.toThrow(/post-dangling-author/);
+    await expect(run).rejects.toThrow(/author/);
+    await expect(run).rejects.toThrow(new RegExp(DELETED_INSTRUCTOR_ID));
+  });
+
+  it('calls that content, not an unreachable API', async () => {
+    // The three outcomes `decode.ts` keeps apart. A deleted reference is an answered query
+    // with broken content; reporting it as unavailable would send whoever reads the log
+    // looking at the dataset name and the network.
+    const error = await from(danglingAuthor, () => getPosts({ now: NOW })).catch((e) => e);
+    expect(error).toBeInstanceOf(SanityContentError);
+    expect(error).not.toBeInstanceOf(SanityUnavailableError);
+  });
+
+  it('still publishes a post that simply has no author', async () => {
+    /**
+     * AC2 — **the case that must keep working**, and the reason the fix cannot be "fail
+     * whenever the byline is empty". Most posts will be signed by the studio rather than
+     * by a person; `post.author`'s own Studio description says so ("Ostavi prazno i objava
+     * je potpisana studijem"). Conflating the two in *this* direction would make an
+     * ordinary editorial choice a build failure.
+     *
+     * `POST_NOW` carries no `author` key at all, so both the value and the `_ref` are
+     * absent — the "empty optional field" half of the rule.
+     */
+    const posts = await from(noAuthor, () => getPosts({ now: NOW }));
+
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.id).toBe('post-now');
+    expect(posts[0]?.author).toBeUndefined();
+  });
+
+  it("fails on a slot's dangling override instead of falling back to the class", async () => {
+    /**
+     * AC3, and the one where the old behaviour was worse than a blank.
+     *
+     * `SLOT_DANGLING_OVERRIDE` points at `CLASS_TWO`, which is taught by `Instructor B`
+     * and `Instructor A` — both live, both in this dataset. So `coalesce` has a real
+     * second branch, and if the dangling override is ever treated as absent the row
+     * publishes two real names, neither of whom teaches this slot, on the most-visited
+     * page on the site. A wrong instructor name is a claim about a named person; it is
+     * strictly worse than no name, because nobody will notice it.
+     *
+     * The last assertion is the one that pins "no fallback": the message must not contain
+     * the fallback teacher's name. An implementation that resolved the override to the
+     * class's list and *then* failed for some other reason would satisfy every other line
+     * here.
+     */
+    const run = from(danglingOverride, () => getSchedule());
+
+    await expect(run).rejects.toThrow(SanityContentError);
+    await expect(run).rejects.toThrow(/slot-dangling-override/);
+    await expect(run).rejects.toThrow(/instructors\[0\]/);
+    await expect(run).rejects.toThrow(new RegExp(DELETED_INSTRUCTOR_ID));
+    await expect(run).rejects.not.toThrow(/Instructor B/);
+  });
+
+  it("still resolves a slot with no override to the class's regular teachers", async () => {
+    /**
+     * AC4 — the other case that must keep working, and the `coalesce`'s whole purpose.
+     * An absent override is the normal state of almost every slot: Mina fills it in only
+     * when somebody stands in. `SLOT_ONE` has no `instructors` key, so the field and its
+     * `_ref`s are both absent and the second branch is taken, exactly as designed.
+     *
+     * Asserted against `full`, where `SLOT_TWO` overrides *successfully* in the same read
+     * — so this cannot pass by the override path being broken in general.
+     */
+    const byId = new Map(
+      (await from(full, () => getSchedule())).map((entry) => [entry.id, entry.instructors]),
+    );
+
+    expect(byId.get('slot-one'), 'no override: the class’s teacher').toEqual(['Instructor A']);
+    expect(byId.get('slot-two'), 'a live override: the slot’s teacher').toEqual([
+      'Instructor C',
+    ]);
+  });
+
+  it('does not silently drop one dangling member of an instructors array', async () => {
+    /**
+     * AC5 — the failure mode the ticket could not name, because `instructors` was a single
+     * reference when it was written (MUSE-36 made it an array).
+     *
+     * The override lists two people and one has been deleted, so the field is neither
+     * absent nor empty nor wholly broken: `instructors[]->name` answers
+     * `[null, 'Instructor C']`. **The list is still non-empty and every name in it is
+     * real.** A projection or decoder that compacted it would publish „Instructor C"
+     * alone — a true statement that is not the whole truth, indistinguishable on the page
+     * from a slot that was only ever taught by one person, and with nothing blank to
+     * notice.
+     *
+     * So: it must fail, it must name index 0 rather than the field as a whole, and it must
+     * name the deleted instructor. The surviving teacher being decodable is what makes the
+     * drop possible in the first place, which is why the assertion is not merely "throws".
+     */
+    const run = from(partialDanglingOverride, () => getSchedule());
+
+    await expect(run).rejects.toThrow(SanityContentError);
+    await expect(run).rejects.toThrow(/slot-partial-dangling-override/);
+    await expect(run).rejects.toThrow(/instructors\[0\]/);
+    await expect(run).rejects.toThrow(new RegExp(DELETED_INSTRUCTOR_ID));
+  });
+
+  it('names the deleted teacher of a class, not an empty name field', async () => {
+    /**
+     * The same array case one level down, on `CLASSES_QUERY` — which has no `coalesce` and
+     * no override, so it isolates the array handling from the fallback.
+     *
+     * `CLASS_DANGLING_INSTRUCTOR` keeps `Instructor A` and loses the other one. Before the
+     * `_ref`s were projected, the message said `instructors[0]` "should be a non-empty
+     * string, got null (the field is absent, or was never filled in)" — which describes an
+     * instructor document whose `name` is blank. That document does not exist; the
+     * reference does, and it points at nothing. Two different Studio fixes, one sentence.
+     */
+    const run = from(danglingTeacher, () => getClasses());
+
+    await expect(run).rejects.toThrow(SanityContentError);
+    await expect(run).rejects.toThrow(/class-dangling-instructor/);
+    await expect(run).rejects.toThrow(/instructors\[0\]/);
+    await expect(run).rejects.toThrow(new RegExp(DELETED_INSTRUCTOR_ID));
+  });
+
+  it('resolves a live optional reference, so the rule is not "always fail"', async () => {
+    /**
+     * The control the four failures need. Everything above asserts that a dangling
+     * reference stops the build; a decoder that simply refused every `author` would pass
+     * all of it. `POST_EARLIER`'s author is `instructor-a`, who is in the dataset, and the
+     * byline must come out as the instructor's name.
+     */
+    const posts = await from(full, () => getPosts({ now: NOW }));
+    expect(posts.find((post) => post.id === 'post-earlier')?.author).toBe('Instructor A');
+    expect(posts.find((post) => post.id === 'post-now')?.author).toBeUndefined();
   });
 });
 

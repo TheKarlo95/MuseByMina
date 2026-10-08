@@ -101,26 +101,181 @@ export function optionalText(doc: unknown, path: string, where: Where): string |
   return value;
 }
 
+/* ---------------------------------------------------------------- references */
+
 /**
- * A non-empty list of non-empty strings — what a dereferenced array of names arrives as.
+ * **A reference that points at nothing — MUSE-49's whole subject.**
+ *
+ * Sanity does not enforce referential integrity on delete. Remove an instructor and every
+ * `_ref` naming her survives, now pointing at a document that is not there; GROQ
+ * dereferences it to `null` and answers HTTP 200. So this is not a transport fault and not
+ * a malformed field — it is content that *was* right and is now a dangling pointer, and
+ * there is no correct way to render it. A blank byline and the class's regular teachers are
+ * both wrong, and the second one is wrong in the dangerous direction: a real name that is
+ * not this slot's teacher is a claim about a named person which nobody will notice.
+ *
+ * Hence the build stops, and hence what the message has to carry. Three things, because
+ * each one answers a question Mina would otherwise have to guess at:
+ *
+ *   - **the document** — its `_id` and type, which is how it is found in the Studio;
+ *   - **the field path** — `instructors[0]`, so a list with one bad member is not reported
+ *     as a list that is broken;
+ *   - **the target** — the `_ref` itself. Without it the message is indistinguishable from
+ *     "this instructor's name is blank", which is a different document and a different fix.
+ *
+ * `optional` only changes the advice, never the outcome: where the field may legitimately
+ * be empty, *clearing* it is a valid fix and the message says so, which turns a build
+ * failure into a ten-second Studio edit rather than an emergency.
+ */
+function failDangling(where: Where, ref: string, optional: boolean): never {
+  throw new SanityContentError(
+    `Sanity document "${where.id}" (type \`${where.type}\`) is unusable: field ` +
+      `\`${where.path}\` dereferences a reference that points at nothing. The reference ` +
+      `names \`${ref}\`, and there is no such document in the dataset — so it has been ` +
+      `deleted, or was never published. Sanity does not clear a reference when its target ` +
+      `goes, and GROQ answers a broken one with \`null\` rather than an error, which is ` +
+      `why this is a build failure and not a blank on the page. ` +
+      (optional
+        ? `This field is optional, so **clearing it** in the Studio is a valid fix, as is ` +
+          `pointing it at a document that exists. Leaving it is the one thing that is not: ` +
+          `the page would publish as though the field had never been filled in.`
+        : `Point it at a document that exists, or delete this document.`),
+  );
+}
+
+/**
+ * The pair has come apart: one half of a `value`/`_ref` projection resolved and the other
+ * did not. That cannot happen in GROQ, so it is a query bug, and it says so.
+ *
+ * It exists because a projection with nothing watching it is a projection that can be
+ * deleted for free. Drop `"authorRef": author._ref` from `./queries.ts` and every rule
+ * above silently reverts to the old behaviour — a dangling author becomes an unsigned post
+ * again — with no test failing unless something checks that the `_ref` is still arriving.
+ * This is that check, on every row, at build time.
+ */
+function failUnpairedReference(where: Where, refPath: string, got: unknown): never {
+  throw new SanityContentError(
+    `Sanity document "${where.id}" (type \`${where.type}\`) cannot be read: field ` +
+      `\`${where.path}\` resolved, but the \`${refPath}\` projection beside it did not ` +
+      `(got ${render(got)}). GROQ cannot dereference a reference it does not have, so the ` +
+      `two cannot disagree about real content — this is a bug in ` +
+      `\`src/lib/sanity/queries.ts\`, not something to fix in the Studio. Every ` +
+      `dereference there is projected next to its \`_ref\` so that a deleted target can be ` +
+      `told apart from an empty optional field (MUSE-49); restore the missing half.`,
+  );
+}
+
+/** The `_ref` a reference projection carried, or `undefined` if there was none. */
+function refOf(doc: unknown, refPath: string): string | undefined {
+  const ref = read(doc, refPath);
+  return typeof ref === 'string' && ref.trim() !== '' ? ref : undefined;
+}
+
+/**
+ * A **required** dereferenced value, which a dangling target now names.
+ *
+ * `scheduleSlot.class` is the one of these. A required reference already failed the build —
+ * `null` is not a non-empty string — so what changes here is only the diagnosis, and the
+ * diagnosis was the problem: `classId` "should be a non-empty string, got nothing (the
+ * field is absent, or GROQ returned null)" lists three causes and names the least likely
+ * one, while the `_ref` sitting in the answer says exactly which class was deleted.
+ */
+export function referencedText(
+  doc: unknown,
+  path: string,
+  refPath: string,
+  where: Where,
+): string {
+  const value = read(doc, path);
+  const ref = refOf(doc, refPath);
+  if (value === undefined && ref !== undefined) failDangling(at(where, path), ref, false);
+  const resolved = text(doc, path, where);
+  if (ref === undefined) failUnpairedReference(at(where, path), refPath, read(doc, refPath));
+  return resolved;
+}
+
+/**
+ * An **optional** dereferenced value: the case `optionalText` could not express.
+ *
+ * `post.author` is the one of these, and the reason MUSE-49 exists. `optionalText` sees
+ * `undefined` whether the reference was never set or its target has been deleted, and both
+ * are legitimate for an optional field — that is precisely why it is optional, and why no
+ * amount of care in the decoder could have separated them. The `_ref` is the evidence that
+ * was missing from the answer, and with it the rule is a single line of code:
+ *
+ *     a `_ref` with no value  →  deleted. Fail, naming it.
+ *     no `_ref` at all        →  empty. Fine.
+ *
+ * The two must not be conflated **in either direction**. Failing on an absent author would
+ * make "signed by the studio" — the Studio field's own documented default — a build
+ * failure.
+ */
+export function optionalReferencedText(
+  doc: unknown,
+  path: string,
+  refPath: string,
+  where: Where,
+): string | undefined {
+  const value = read(doc, path);
+  const ref = refOf(doc, refPath);
+  if (value === undefined) {
+    if (ref !== undefined) failDangling(at(where, path), ref, true);
+    return undefined;
+  }
+  if (ref === undefined) failUnpairedReference(at(where, path), refPath, read(doc, refPath));
+  return optionalText(doc, path, where);
+}
+
+/**
+ * A non-empty list of names dereferenced from a list of references.
  *
  * The failure it exists to name is specific to MUSE-36's instructor array. GROQ projects
  * `instructors[]->name` as `null` when the field is absent, as `[]` when the array is
  * empty, and as `[null]` when a member points at a document that has been deleted — three
  * different shapes that a template rendering `instructors.join(' i ')` turns into the same
- * thing: a class with nobody teaching it. Each of them fails here instead, naming the
- * document and the index.
+ * thing: a class with nobody teaching it. Each of them fails here, naming the document and
+ * the index.
+ *
+ * **The `_ref`s are read positionally alongside the names** (MUSE-49), which gives the
+ * index-level message the one fact it was missing: `instructors[0]` "should be a non-empty
+ * string, got null" describes an instructor whose *name* field is blank, and sends whoever
+ * reads it to a document that is fine. The reference is what is broken.
+ *
+ * The length comparison is the part worth not deleting. A dangling member keeps its
+ * position in both `groq-js` and the API — `[null, 'Mina']`, not `['Mina']` — and that is
+ * verified rather than assumed, because a **compacted** list is the one failure in this
+ * whole area with nothing blank to notice: it publishes „Mina" for a class Mina and Antonio
+ * teach together, which is true, incomplete, and indistinguishable from a class she teaches
+ * alone. If an engine ever starts compacting, the two lengths stop matching and that is a
+ * named build failure instead of a quietly shorter list.
  */
-export function textList(doc: unknown, path: string, where: Where): string[] {
+export function referencedTextList(
+  doc: unknown,
+  path: string,
+  refPath: string,
+  where: Where,
+): string[] {
   const value = read(doc, path);
   if (!Array.isArray(value) || value.length === 0) {
     fail(at(where, path), 'a list with at least one entry', value);
   }
+
+  const refs = read(doc, refPath);
+  if (!Array.isArray(refs) || refs.length !== value.length) {
+    failUnpairedReference(at(where, path), refPath, refs);
+  }
+
   return value.map((entry, index) => {
-    if (typeof entry !== 'string' || entry.trim() === '') {
-      fail(at(where, `${path}[${index}]`), 'a non-empty string', entry);
+    if (typeof entry === 'string' && entry.trim() !== '') return entry;
+    const here = at(where, `${path}[${index}]`);
+    const ref = refs[index];
+    if (typeof ref === 'string' && ref.trim() !== '') {
+      // The list itself is required, but a *member* of it is something Mina can remove, so
+      // the advice is the optional one: drop the person who is gone, or point the entry at
+      // somebody who exists.
+      failDangling(here, ref, true);
     }
-    return entry;
+    fail(here, 'a non-empty string', entry);
   });
 }
 
@@ -452,13 +607,13 @@ export function decodeScheduleEntry(row: unknown): ScheduleEntry {
   }
   return {
     id: where.id,
-    classId: text(row, 'classId', where),
+    classId: referencedText(row, 'classId', 'classRef', where),
     name: localised(row, 'name', where),
     day: oneOf(row, 'day', where, WEEKDAYS),
     start,
     durationMin: integer(row, 'durationMin', where),
     level: oneOf(row, 'level', where, LEVELS),
-    instructors: textList(row, 'instructors', where),
+    instructors: referencedTextList(row, 'instructors', 'instructorRefs', where),
   };
 }
 
@@ -484,7 +639,7 @@ export function decodeClass(row: unknown): DanceClass {
     level: oneOf(row, 'level', where, LEVELS),
     description: optionalLocalised(row, 'description', where),
     durationMin: integer(row, 'durationMin', where),
-    instructors: textList(row, 'instructors', where),
+    instructors: referencedTextList(row, 'instructors', 'instructorRefs', where),
     image: optionalImage(row, 'image', where),
   };
 }
@@ -678,6 +833,17 @@ export interface Post {
   title: Record<Locale, string>;
   publishedAt: string;
   excerpt: Record<Locale, string>;
+  /**
+   * The instructor who wrote it, if a person did.
+   *
+   * Optional, and it stays optional: the Studio field reads „Ostavi prazno i objava je
+   * potpisana studijem", so a post with no author is signed by the studio and renders
+   * without a byline. **`undefined` here therefore means exactly one thing** — nobody was
+   * named. It used to mean two, the second being "the instructor who wrote it has been
+   * deleted", which published the post unsigned and said nothing (MUSE-49). That case is
+   * now a build failure naming the post, the field and the deleted instructor; see
+   * `optionalReferencedText`.
+   */
   author?: string;
   coverImage: ImageRef;
   /** Portable Text, per locale. Rendered by whatever the blog ticket picks; opaque here. */
@@ -703,7 +869,7 @@ export function decodePost(row: unknown): Post {
     title: localised(row, 'title', where),
     publishedAt: text(row, 'publishedAt', where),
     excerpt: localised(row, 'excerpt', where),
-    author: optionalText(row, 'author', where),
+    author: optionalReferencedText(row, 'author', 'authorRef', where),
     coverImage: image(row, 'coverImage', where),
     body: { hr: hr as unknown[], en: en as unknown[] },
   };

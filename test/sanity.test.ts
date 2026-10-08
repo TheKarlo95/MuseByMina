@@ -729,12 +729,14 @@ describe('a missing or malformed document fails the build, naming itself', () =>
     const slot = {
       _id: 'slot-mon-1930',
       classId: 'class-a',
+      classRef: 'class-a',
       name: { hr: 'HR class', en: 'EN class' },
       day: 'mon',
       start: '19:30',
       durationMin: 90,
       level: 'beginner',
       instructors: ['Instructor A', 'Instructor B'],
+      instructorRefs: ['instructor-a', 'instructor-b'],
     };
     // A half-hour start, which is what the real timetable turned out to be (MUSE-36) and
     // what nothing had ever handed the decoder before.
@@ -756,12 +758,14 @@ describe('a missing or malformed document fails the build, naming itself', () =>
     const slot = {
       _id: 'slot-no-teacher',
       classId: 'class-a',
+      classRef: 'class-a',
       name: { hr: 'HR class', en: 'EN class' },
       day: 'mon',
       start: '19:30',
       durationMin: 90,
       level: 'beginner',
       instructors: ['Instructor A'],
+      instructorRefs: ['instructor-a'],
     };
     expect(decodeScheduleEntry(slot).instructors).toEqual(['Instructor A']);
 
@@ -771,9 +775,17 @@ describe('a missing or malformed document fails the build, naming itself', () =>
     );
     // The array is there and empty — a slot saved mid-edit.
     expect(() => decodeScheduleEntry({ ...slot, instructors: [] })).toThrow(/instructors/);
-    // A member points at an instructor document that has been deleted.
+    // A member points at an instructor document that has been deleted. The `_ref` is
+    // still there — Sanity does not clear it — so the message names *which* instructor,
+    // rather than describing an instructor whose `name` field is blank (MUSE-49).
     expect(() => decodeScheduleEntry({ ...slot, instructors: [null] })).toThrow(
       /instructors\[0\]/,
+    );
+    expect(() => decodeScheduleEntry({ ...slot, instructors: [null] })).toThrow(
+      /points at nothing/,
+    );
+    expect(() => decodeScheduleEntry({ ...slot, instructors: [null] })).toThrow(
+      /instructor-a/,
     );
     // And a single name where a list belongs — the shape before MUSE-36.
     expect(() => decodeScheduleEntry({ ...slot, instructors: 'Instructor A' })).toThrow(
@@ -781,16 +793,72 @@ describe('a missing or malformed document fails the build, naming itself', () =>
     );
   });
 
+  it('reads a dereference and its `_ref` as a pair, or says the query is broken', () => {
+    /**
+     * MUSE-49's runtime half, and the reason the fix cannot be deleted for free.
+     *
+     * `src/lib/sanity/queries.ts` projects every `x->field` beside `x._ref`, because that
+     * pair is the only thing that distinguishes "the target was deleted" from "this
+     * optional field is empty". A projection with nothing watching it is a projection that
+     * can be dropped silently — and dropping *this* one restores the original defect
+     * rather than producing a visible error. `./shape.ts` asserts it at compile time, but
+     * only once the types have been regenerated, so the decoder also checks every row.
+     *
+     * Three ways the pair can come apart, all of them impossible in GROQ — which is why
+     * each is reported as a bug in the query rather than something to fix in the Studio.
+     */
+    const slot = {
+      _id: 'slot-unpaired',
+      classId: 'class-a',
+      classRef: 'class-a',
+      name: { hr: 'HR class', en: 'EN class' },
+      day: 'mon',
+      start: '19:30',
+      durationMin: 90,
+      level: 'beginner',
+      instructors: ['Instructor A'],
+      instructorRefs: ['instructor-a'],
+    };
+    expect(decodeScheduleEntry(slot).classId).toBe('class-a');
+
+    // The scalar `_ref` is gone: `classId` resolved out of thin air.
+    const noClassRef = { ...slot, classRef: null };
+    expect(() => decodeScheduleEntry(noClassRef)).toThrow(SanityContentError);
+    expect(() => decodeScheduleEntry(noClassRef)).toThrow(/slot-unpaired/);
+    expect(() => decodeScheduleEntry(noClassRef)).toThrow(/classRef/);
+    expect(() => decodeScheduleEntry(noClassRef)).toThrow(/queries\.ts/);
+
+    // The list's `_ref`s are gone entirely.
+    expect(() => decodeScheduleEntry({ ...slot, instructorRefs: null })).toThrow(
+      /instructorRefs/,
+    );
+
+    /**
+     * And the one that matters most: the lists are both there and **disagree in length**.
+     *
+     * A dangling member keeps its position in `groq-js` and in the API, so the names and
+     * the `_ref`s line up member for member. This is the guard against that ceasing to be
+     * true — a *compacted* list drops the teacher who is gone rather than blanking her,
+     * which publishes „Instructor A" for a class two people teach: true, incomplete, and
+     * indistinguishable on the page from a class she teaches alone. Nothing would be blank
+     * and nothing would look wrong, which is why it is checked rather than reasoned about.
+     */
+    const compacted = { ...slot, instructorRefs: ['instructor-a', 'instructor-b'] };
+    expect(() => decodeScheduleEntry(compacted)).toThrow(/instructorRefs/);
+  });
+
   it('rejects a level outside the closed set', () => {
     const slot = {
       _id: 'slot-bad-level',
       classId: 'c1',
+      classRef: 'c1',
       name: { hr: 'x', en: 'x' },
       day: 'mon',
       start: '19:00',
       durationMin: 90,
       level: 'Beginer',
       instructors: ['Instructor A'],
+      instructorRefs: ['instructor-a'],
     };
     expect(() => decodeScheduleEntry(slot)).toThrow(/slot-bad-level/);
     expect(() => decodeScheduleEntry(slot)).toThrow(/`beginner`/);
@@ -907,11 +975,33 @@ describe('the generated types cannot go stale unnoticed', () => {
       'faq',
       'instructor',
       'page',
+      // `post` joined the list in MUSE-49. `POSTS_QUERY` had no compile-time assertions at
+      // all, which is part of why a dangling `author` went unnoticed: nothing in the type
+      // layer was looking at the one optional *dereference* on the site.
+      'post',
       'pricingTier',
       'scheduleSlot',
       'siteSettings',
       'studioStory',
     ]);
+  });
+
+  it('asserts every dereference is still projected beside its `_ref`', () => {
+    /**
+     * MUSE-49's compile-time half. `OptionalIn` (below) catches an optional field losing
+     * its projection; it cannot catch the *second* projection — the `_ref` — disappearing,
+     * because nothing in the generated type says the two belong together.
+     *
+     * `RefProjected` in `src/lib/sanity/shape.ts` does: deleting `"authorRef":
+     * author._ref` from the query makes the key vanish and the `keyof` constraint fail,
+     * and changing its shape fails with a message naming the field. Without it, dropping
+     * one line of GROQ silently reverts `post.author` to publishing unsigned.
+     */
+    expect(SCHEMA_ASSERTIONS.postAuthorRef).toBe(true);
+    expect(SCHEMA_ASSERTIONS.postAuthorOptional).toBe(true);
+    expect(SCHEMA_ASSERTIONS.slotClassRef).toBe(true);
+    expect(SCHEMA_ASSERTIONS.slotInstructorRefs).toBe(true);
+    expect(SCHEMA_ASSERTIONS.classInstructorRefs).toBe(true);
   });
 
   it('watches the optional fields too, which no `Guaranteed` line can', () => {
