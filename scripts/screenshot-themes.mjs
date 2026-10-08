@@ -1,13 +1,9 @@
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 
-const ORIGIN = process.env.ORIGIN ?? 'http://localhost:4321';
-const BASE = process.env.BASE ?? '/MuseByMina';
-const OUT = process.env.OUT ?? '/tmp/muse-shots';
+import { openSiteOrExit } from './dist-origin.mjs';
 
-/** Page URLs carry a trailing slash (`trailingSlash: 'always'`, MUSE-9). */
-const pageUrl = (route) =>
-  `${ORIGIN}${BASE.replace(/\/+$/, '')}${route === '/' ? '' : route}/`;
+const OUT = process.env.OUT ?? '/tmp/muse-shots';
 
 /**
  * Which page to shoot. The theme states and the 390px overflow check are the same
@@ -17,6 +13,21 @@ const pageUrl = (route) =>
  */
 const ROUTE = process.env.ROUTE ?? '/';
 const EN_ROUTE = ROUTE === '/' ? '/en' : `/en${ROUTE}`;
+
+/**
+ * The server these are screenshots **of**, resolved the same way `scripts/a11y.mjs`
+ * resolves it: an in-process host over `dist` on an ephemeral port unless `ORIGIN` says
+ * otherwise, and a byte-for-byte comparison against the local build when it does
+ * (MUSE-52).
+ *
+ * This script had the same exposure as the audit and not even the status check — a shot
+ * of a different worktree's build is a PNG that looks exactly like a shot of yours, and
+ * the h-overflow number beside it is about their CSS.
+ *
+ * Page URLs carry a trailing slash (`trailingSlash: 'always'`, MUSE-9); `site.url` adds it.
+ */
+const site = await openSiteOrExit({ routes: [ROUTE, EN_ROUTE] });
+const pageUrl = (route) => site.url(route);
 
 mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch();
@@ -76,3 +87,4 @@ await shot('06-mobile-light', {
 await shot('07-en-dark', { route: EN_ROUTE, colorScheme: 'dark' });
 
 await browser.close();
+await site.close();

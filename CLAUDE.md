@@ -27,9 +27,10 @@ Header and footer sit on a band that is plum-ink in *both* themes, so they use t
 ```bash
 npm run dev        # localhost:4321/MuseByMina/
 npm run build
+npm run preview    # dist, served the way Pages serves it — not `astro preview` (MUSE-52)
 npm run typecheck  # astro check
 npm test           # vitest — builds the site and asserts on dist
-npm run a11y       # axe, every page, both themes — needs a server running
+npm run a11y       # axe, every page, both themes — serves dist itself
 npm run ds         # design-system compliance
 npm run shots      # screenshots of all theme states to /tmp/muse-shots
 
@@ -113,6 +114,29 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   200, so it cannot see this class of bug.
 - The theme is stamped pre-paint by an inline script (`src/lib/theme.ts`). Never move that
   into a component — it exists to prevent a flash.
+- **A browser check never takes a server it did not start** (MUSE-52). `npm run a11y`,
+  `npm run shots` and `npm run ux:schedule` get their origin from `openSite()` in
+  `scripts/dist-origin.mjs`: with nothing in the environment it serves `dist` from an
+  in-process `node:http` host on an **ephemeral** port, the same shape
+  `test/helpers/preview.ts` has always used — which is why the vitest suite was never
+  exposed to this and the scripts were. `astro preview` daemonises here and **silently
+  reuses a daemon on another port**, so `npm run a11y` audited a different agent's
+  worktree and reported every route clean in both themes. **`npm run preview` is that same
+  in-process host now, not `astro preview`** — the stale daemons were started by hand, so
+  retiring it only inside the gates would have left the supply intact — and it 301s the
+  unslashed spelling the way Pages does, which `astro preview` never did. Do not put the
+  daemon back; the CI step starts none either and `test/origin.test.ts` fails if one
+  reappears in the job, in an npm script, or if any browser script reads `ORIGIN` or names
+  a port. `ORIGIN` is still how you point a
+  check at a real server, and it is now **verified**: every URL the run will measure is
+  compared byte for byte against the local `dist` and a difference fails naming both
+  digests. `UNVERIFIED_ORIGIN=1` is the opt-out for the deployed site and the log says so.
+  Identity is a hash the reader computes over the output tree — **never a stamp in the
+  build**, because MUSE-20's byte-identical criterion is live; the suite fingerprints two
+  independent builds of the commit and demands they agree. Note the direction of the one
+  import that looks backwards: the GitHub Pages resolver lives in `scripts/dist-origin.mjs`
+  and `test/helpers/serve.ts` re-exports it, because a `.mjs` script cannot import a `.ts`
+  helper and two models of the host would drift (MUSE-9).
 - **A test never chooses where it builds.** `npm test` runs ten real `astro build`s in
   parallel workers; `test/helpers/scratch.ts` mints a directory per build with `mkdtemp`
   and passes each one its own cache root, so two suites cannot share an output tree and

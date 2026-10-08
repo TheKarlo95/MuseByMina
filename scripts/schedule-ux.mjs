@@ -1,5 +1,7 @@
 import { chromium } from 'playwright';
 
+import { openSiteOrExit } from './dist-origin.mjs';
+
 /**
  * MUSE-6 — the acceptance criteria that need a layout engine and an input device.
  *
@@ -10,15 +12,14 @@ import { chromium } from 'playwright';
  *   AC4        the empty state only appears once a filter has been clicked
  *   AC6        "operable by keyboard alone" means real Tab and Enter presses
  *
- * Same shape and conventions as `scripts/a11y.mjs`: needs a server running, takes
- * ORIGIN / BASE from the environment, prints one line per check and exits
- * non-zero on the first failure count above zero.
+ * Same shape and conventions as `scripts/a11y.mjs`: prints one line per check and
+ * exits non-zero on the first failure count above zero, and gets its server from
+ * `dist-origin.mjs` — which serves `dist` itself rather than attaching to whatever happens
+ * to be listening (MUSE-52).
  *
- *   npx astro preview --port 4321 &
+ *   npm run build
  *   node scripts/schedule-ux.mjs
  */
-const ORIGIN = process.env.ORIGIN ?? 'http://localhost:4321';
-const BASE = process.env.BASE ?? '/MuseByMina';
 
 /** The schedule in both locales, with the copy each one must show. */
 const PAGES = [
@@ -53,6 +54,13 @@ function check(label, ok, detail) {
   report(label, Boolean(ok), detail);
 }
 
+/**
+ * The build these checks are about. An in-process host over `dist` on an ephemeral port
+ * unless `ORIGIN` names one, in which case it is proved byte-identical to the local
+ * build first; the two lines it logs say which build was measured (MUSE-52).
+ */
+const site = await openSiteOrExit({ routes: PAGES.map((page) => page.route) });
+
 const browser = await chromium.launch();
 
 async function open(route, { viewport, colorScheme = 'dark' }) {
@@ -64,7 +72,8 @@ async function open(route, { viewport, colorScheme = 'dark' }) {
   // Page URLs carry a trailing slash (`trailingSlash: 'always'`, MUSE-9). The
   // unslashed spelling 404s on the dev server, and a 404 body paints no schedule
   // at all — which reads as "every layout check failed" rather than "wrong URL".
-  const url = `${ORIGIN}${BASE.replace(/\/+$/, '')}${route}/`;
+  // `site.url` is the one place that slash is added.
+  const url = site.url(route);
   const response = await page.goto(url, { waitUntil: 'networkidle' });
 
   const status = response?.status() ?? 0;
@@ -338,6 +347,7 @@ for (const { locale, route, empty, one } of PAGES) {
 }
 
 await browser.close();
+await site.close();
 
 if (failures) {
   console.log(`\n${failures} failure(s)`);

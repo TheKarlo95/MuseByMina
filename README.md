@@ -26,12 +26,13 @@ Astro inlines them.
 ```bash
 npm run dev        # http://localhost:4321/MuseByMina/
 npm run build
+npm run preview    # dist, served the way GitHub Pages serves it — not `astro preview`
 npm run typecheck  # astro check
 npm test           # vitest — asserts on real build output
 npm run ds         # design-system compliance
-npm run a11y       # axe on every page, both themes (needs a server running)
+npm run a11y       # axe on every page, both themes (serves dist itself)
 npm run shots      # screenshots of all theme states → /tmp/muse-shots
-npm run ux:schedule  # /schedule: responsive shift, keyboard, filters (needs a server)
+npm run ux:schedule  # /schedule: responsive shift, keyboard, filters
 
 npm run sanity:types   # re-extract the schema + regenerate types — commit the result
 npm run sanity:check   # the fast staleness gate that `npm run build` runs first
@@ -41,13 +42,46 @@ npm run sanity:build   # bundle the Studio into .sanity/studio — what CI runs
 npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
 ```
 
-All three browser gates take `ORIGIN`/`BASE` from the environment. `a11y` also takes
-`ROUTES` and `shots` takes `ROUTE`/`OUT`, so either can be pointed at one page:
+**None of the three browser gates needs a server, and none of them will attach to one.**
+Run `npm run build`, then run the gate: it serves `dist` from an in-process host on a port
+the kernel picks, and prints the fingerprint of the build it measured before the first
+result. `a11y` takes `ROUTES` and `shots` takes `ROUTE`/`OUT`, so either can be pointed at
+one page:
 
 ```bash
 ROUTES=/,/en,/schedule,/en/schedule npm run a11y
 ROUTE=/schedule OUT=/tmp/muse-shots/schedule npm run shots   # reports h-overflow at 390px
 ```
+
+That is MUSE-52, and it is not a convenience. `astro preview` daemonises under this
+environment and **silently reuses a daemon on another port**; with several worktrees live
+at once, `npm run a11y` bound to a preview belonging to a different agent's worktree and
+reported every route clean in both themes about somebody else's build. The script had
+already been hardened twice for that class — a status check and a redirect check — and
+neither could see it, because both confirm *something* answered rather than **which
+build** answered. So there is no longer a port to be handed one.
+
+`ORIGIN`/`BASE` still work, for a server you started yourself or for the deployed site.
+When `ORIGIN` is set, every URL the run is about to measure is fetched and compared byte
+for byte against the local `dist`, and a difference is a hard failure naming the URL and
+both digests. Identity is a hash the *reader* computes over the output tree, so nothing
+is stamped into `dist` and MUSE-20's byte-identical criterion is untouched — two builds
+of one commit fingerprint the same, which `test/origin.test.ts` asserts. For an origin
+that is deliberately not this build:
+
+```bash
+ORIGIN=https://thekarlo95.github.io UNVERIFIED_ORIGIN=1 npm run a11y
+```
+
+and the log says out loud that the result is not pinned to a local build.
+
+`npm run preview` is the same in-process host, kept running — **not `astro preview`**,
+which is what produced the stale daemons in the first place (MUSE-35's review found three
+still listening from manual invocations, outliving the sessions that started them) and
+which is not a model of the host anyway: it answers both `/MuseByMina` and `/MuseByMina/`
+with 200 and never redirects, so a trailing-slash regression is invisible to anyone
+checking a page by hand. The replacement 301s the unslashed spelling, exactly as Pages
+does, and dies with Ctrl-C.
 
 ## The design system
 
