@@ -212,6 +212,38 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   deliberate opt-out that asserts nothing, for `test/lang.test.ts` and
   `test/localeswitch.test.ts`, whose subject *is* the redirect — it must be handed a
   browser language rather than defaulted one, and `scripts/` may not use it.
+- **"Should a crawler index this" and "may this page route by language" are two props**
+  (MUSE-38). `BaseLayout.astro` takes `indexable` and `localeTwin`, and neither is derived
+  from the other — `const localeRouting = indexable;` is the regression, it reads as a
+  tidy-up, and `test/nav.test.ts` pins its absence against the source as well as the
+  behaviour. `indexable` governs canonical, hreflang, `og:url`, JSON-LD and the sitemap.
+  `localeTwin` governs exactly two things: whether the switcher renders, and whether
+  `langInitScript` is handed a URL to navigate to. **`langInitScript` ships on every page**;
+  `urlFor` answers `string | null` *per locale*, so "there is nowhere to send them" is a
+  fact about each URL rather than a flag, and the one `go()` funnel enforces it. The error
+  page is the only `localeTwin={false}` page there is, and it reads `?lang=`, folds it and
+  persists it like everywhere else — it just does not move anybody, because `/en/404/` is
+  itself a 404.
+
+  **`404.astro` is bilingual, not client-side-selected.** One document serves both
+  languages, and a bilingual body needs no mechanism, survives JavaScript being off and
+  `localStorage` being blocked, has no flash of the wrong language, and gives each locale an
+  exit link that resolves 200. A second way of deciding which language to show — separate
+  from the redirect, living on one page — is how MUSE-38 happened in the first place: two
+  individually-correct mechanisms answering one question between them.
+
+  The **footer** marks the current route with `aria-current="page"`, because `/privacy/` is
+  reachable only from there (the nav omits it on purpose, MUSE-7) and nothing else on the
+  site can mark it. It stays an `<a>`: MUSE-39's rule is that whatever carries
+  `aria-current` must either not be a link **or be a link to exactly where we already
+  are**, and a footer entry for the current route is the second. It is also `/privacy/`'s
+  only self-reference, which `test/nav.test.ts`'s orphan rule is calibrated against.
+- **The host model serves the error page's *body* on a 404** (MUSE-38). `resolveRequest`
+  returns `404.html` as the `file` on a 404 inside the deploy's prefix, the way GitHub Pages
+  does; outside the prefix it returns no body, because that URL space is not ours (MUSE-8).
+  It used to answer the status and invent the body, so no browser suite in the repo could
+  reach the error page at all and an all-Croatian 404 was only reproducible against the
+  deployed site. Drive it with `test/helpers/preview.ts` and an unknown path.
 - **A test never chooses where it builds.** `npm test` runs ten real `astro build`s in
   parallel workers; `test/helpers/scratch.ts` mints a directory per build with `mkdtemp`
   and passes each one its own cache root, so two suites cannot share an output tree and

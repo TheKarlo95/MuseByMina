@@ -1,6 +1,6 @@
 ---
 import { MORE_NAV, PRIMARY_NAV, STUDIO } from '../lib/nav';
-import { localeUrl, type Locale } from '../lib/i18n';
+import { localeUrl, routeKey, type Locale } from '../lib/i18n';
 import { addressLines, getSiteSettings, socialUrl } from '../lib/sanity';
 
 interface Props {
@@ -36,6 +36,30 @@ const t = {
  */
 const quick = [...PRIMARY_NAV, ...MORE_NAV.slice(0, 4)];
 const year = 2026;
+
+/** The privacy notice's route, named once because two places below have to agree on it. */
+const PRIVACY = '/privacy';
+
+/**
+ * Which route the visitor is on — so the footer can say so (MUSE-38).
+ *
+ * The footer carried no `aria-current` at all, and `/privacy/` is reachable *only* from
+ * here: the nav omits it on purpose (MUSE-7), so on the one page the primary nav cannot
+ * mark, nothing did. `routeKey` strips the deploy base and the locale prefix, the same way
+ * `Header.astro` gets the value it compares — the two lists are the same routes and must
+ * not disagree about where you are.
+ *
+ * The marked entry stays an `<a>`. MUSE-39 made the locale switcher's own-locale entry an
+ * inert `<span aria-current="page">`, and that suite states the rule behaviourally:
+ * whatever carries `aria-current` must either not be a link, or be a link to exactly where
+ * we already are. The switcher's href failed that — MUSE-33 had stamped `?lang=` onto it,
+ * so it pointed at an address the visitor was not at. A footer entry for the current route
+ * points at exactly the current URL, which satisfies the rule as a link, and keeping it one
+ * matches the nav, keeps a reload available, and leaves `/privacy/` with the self-reference
+ * `test/nav.test.ts`'s orphan rule is calibrated against. `page` rather than `true`, for
+ * the reason spelled out in `LocaleSwitch.astro`: this is one page out of a set of pages.
+ */
+const here = routeKey(Astro.url.pathname);
 
 /**
  * The studio's own details come from Sanity (MUSE-20), the address included.
@@ -74,7 +98,12 @@ const address = addressLines(settings);
         {
           quick.map((i) => (
             <li>
-              <a href={localeUrl(i.route, locale)}>{i.label[locale]}</a>
+              <a
+                href={localeUrl(i.route, locale)}
+                aria-current={here === i.route ? 'page' : undefined}
+              >
+                {i.label[locale]}
+              </a>
             </li>
           ))
         }
@@ -106,11 +135,19 @@ const address = addressLines(settings);
 
   {/*
     The privacy notice lives here and nowhere else. The nav omits it on purpose (MUSE-7):
-    it is the footnote the trial form links to, not a destination anyone sets out for.
+    it is the footnote the trial form links to, not a destination anyone sets out for —
+    which is exactly why this link has to carry `aria-current` on the privacy page itself.
+    No other chrome on the site can mark it (MUSE-38).
   */}
   <div class="bottom">
     <span>© {year} {settings.studioName}</span>
-    <a class="bottomLink" href={localeUrl('/privacy', locale)}>{t.privacy}</a>
+    <a
+      class="bottomLink"
+      href={localeUrl(PRIVACY, locale)}
+      aria-current={here === PRIVACY ? 'page' : undefined}
+    >
+      {t.privacy}
+    </a>
   </div>
 </footer>
 
@@ -189,6 +226,14 @@ const address = addressLines(settings);
     color: var(--band-accent);
     text-decoration: underline;
     text-underline-offset: 4px;
+  }
+  /* The entry for the page you are on, styled the same way the nav styles its own
+     (MUSE-38). Colour alone is enough here because the state is in the markup rather
+     than in the paint: `aria-current` is what carries it, and §11.1's rule is about a
+     link being distinguishable from text, which every link in this list already is by
+     position in a labelled list. */
+  a[aria-current='page'] {
+    color: var(--band-accent);
   }
 
   address {

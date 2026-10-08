@@ -1,21 +1,87 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
-import { localeUrl } from '../lib/i18n';
+import { LOCALES, localeUrl, type Locale } from '../lib/i18n';
+
+/**
+ * **The one page with no locale twin, so it is written in both languages.**
+ *
+ * GitHub Pages serves this body for every unknown path, which makes it the page a visitor
+ * following a stale link actually meets — and it has no URL of its own, so there is no
+ * `/en/404/` to switch to and no switcher to offer (MUSE-13). Until MUSE-38 it was also
+ * the one page that shipped no `langInitScript`, because `BaseLayout` derived that from
+ * `indexable`: an `en-US` visitor got a page entirely in Croatian, no way to change it,
+ * and the `?lang=en` they may have been handed thrown away rather than persisted.
+ *
+ * There is one document for both languages, so the honest choices were a bilingual body or
+ * selecting one language client-side from the same signals the redirect reads. **Bilingual,
+ * for four reasons:**
+ *
+ *   1. **It needs no mechanism.** Client-side selection would be a *second* way the site
+ *      decides which language to show, separate from the redirect, living on one page.
+ *      MUSE-38 exists because two correct mechanisms answered one question between them;
+ *      adding a third is the same bet again.
+ *   2. **It cannot fail quietly.** The page is legible with JavaScript off, with
+ *      `localStorage` blocked, and on the first paint — no flash of the wrong language,
+ *      nothing to hide and then reveal. Making readability depend on a script is a strange
+ *      thing to do on the page you are shown *because* something was broken.
+ *   3. **The exits are real links.** Each half links its own locale's homepage, which
+ *      resolves 200 — so "leave in your language" is a click rather than a redirect, and
+ *      no URL that cannot exist is named anywhere.
+ *   4. **It is what static hosts do**, and the cost is four lines of copy on a page nobody
+ *      should be reading for long.
+ *
+ * `?lang=` is still read and still persisted here — that is what the layout's split buys —
+ * so the preference reaches wherever the visitor goes next. It just does not move them,
+ * because there is nowhere to move them to.
+ *
+ * The copy is keyed by `Locale` and rendered by walking `LOCALES`, so a third locale is a
+ * type error here rather than a half-translated error page.
+ */
+const EXITS: Record<Locale, { heading: string; lede: string; cta: string }> = {
+  hr: {
+    heading: 'Ova stranica još ne postoji.',
+    lede: 'Vrati se na početnu i pronađi što tražiš.',
+    cta: 'Početna',
+  },
+  en: {
+    heading: 'This page doesn’t exist yet.',
+    lede: 'Head back to the homepage and find what you’re looking for.',
+    cta: 'Home',
+  },
+};
 ---
 
 {/* Not indexable: the host serves this body for any unknown path, so it has no URL of
-    its own to declare a canonical for. See BaseLayout's `indexable` prop. */}
+    its own to declare a canonical for. `localeTwin={false}` is the separate fact that
+    there is no `/en/404/` — see both props on BaseLayout (MUSE-38). */}
 <BaseLayout
   locale="hr"
-  title="Stranica nije pronađena"
-  description="Tražena stranica ne postoji."
+  title="Stranica nije pronađena · Page not found"
+  description="Tražena stranica ne postoji. · The page you asked for does not exist."
   indexable={false}
+  localeTwin={false}
 >
   <section class="wrap">
     <p class="eyebrow">404</p>
-    <h1 class="display">Ova stranica još ne postoji.</h1>
-    <p class="lede">Vrati se na početnu i pronađi što tražiš.</p>
-    <a class="btn" href={localeUrl('/', 'hr')}>Početna</a>
+    <div class="halves">
+      {
+        LOCALES.map((l) => (
+          <div class="half" lang={l}>
+            {/*
+              An `<h1>` per language, not one heading and a subordinate. Neither sentence
+              is a section of the other — they are the same message to two audiences — and
+              a screen reader announcing two top-level headings, each with its own `lang`
+              so it is pronounced in that language, is exactly what this page is.
+            */}
+            <h1 class="display">{EXITS[l].heading}</h1>
+            <p class="lede">{EXITS[l].lede}</p>
+            <a class="btn" href={localeUrl('/', l)}>
+              {EXITS[l].cta}
+            </a>
+          </div>
+        ))
+      }
+    </div>
   </section>
 </BaseLayout>
 
@@ -40,14 +106,45 @@ import { localeUrl } from '../lib/i18n';
     color: var(--accent);
     margin: 0;
   }
+
+  /* Two halves, stacked on a phone and side by side once there is room. A hairline
+     between them, never a shadow — depth here is surface value plus rules (§8). */
+  .halves {
+    display: grid;
+    gap: var(--space-7);
+    margin-top: var(--space-4);
+  }
+  @media (min-width: 900px) {
+    .halves {
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-8);
+    }
+    .half + .half {
+      padding-left: var(--space-8);
+      border-left: 1px solid var(--line);
+    }
+  }
+  .half + .half {
+    padding-top: var(--space-7);
+    border-top: 1px solid var(--line);
+  }
+  @media (min-width: 900px) {
+    .half + .half {
+      padding-top: 0;
+      border-top: 0;
+    }
+  }
+
+  /* Smaller than a single-headline 404 would be, because there are two of them — and
+     still far above the 26px floor below which Cormorant drops the `đ` crossbar. */
   .display {
     font-family: var(--font-display);
     font-weight: 400;
-    font-size: clamp(2.75rem, 8vw, 5.5rem);
-    line-height: 0.96;
+    font-size: clamp(2.25rem, 5vw, 3.75rem);
+    line-height: 1;
     letter-spacing: -0.02em;
     text-wrap: balance;
-    margin: var(--space-4) 0 0;
+    margin: 0;
   }
   .lede {
     font-size: 1.125rem;
@@ -58,7 +155,7 @@ import { localeUrl } from '../lib/i18n';
     display: inline-flex;
     align-items: center;
     min-height: 48px;
-    margin-top: var(--space-7);
+    margin-top: var(--space-6);
     padding-inline: var(--space-6);
     border-radius: var(--radius-full);
     background: var(--btn-bg);

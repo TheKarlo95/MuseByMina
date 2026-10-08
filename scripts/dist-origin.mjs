@@ -62,9 +62,24 @@ const DEFAULT_DIST = 'dist';
 const DEFAULT_BASE = '/MuseByMina';
 
 /**
+ * What the deploy's own `404.html` is called in the output tree.
+ *
+ * One file for the whole site, served for every unknown path — which is why the page has
+ * no URL of its own and no locale twin (MUSE-13, MUSE-38).
+ */
+const ERROR_PAGE = '404.html';
+
+/**
  * What the host answers for a request.
  *
- * @typedef {{ status: 200, file: string } | { status: 301, location: string } | { status: 404 }} Served
+ * A 404 carries a `file` when the build has an error page to serve for it, because that
+ * is what GitHub Pages does: the status is 404 and the body is `404.html`. The model used
+ * to answer the status and invent the body, which left the one page a lost visitor
+ * actually meets unreachable to every browser suite in the repo — MUSE-38's all-Croatian
+ * 404 could only be reproduced against the deployed site. A request outside the deploy's
+ * own prefix gets no body, because that URL space is not ours to answer for (MUSE-8).
+ *
+ * @typedef {{ status: 200, file: string } | { status: 301, location: string } | { status: 404, file?: string }} Served
  */
 
 /**
@@ -177,6 +192,9 @@ function isFile(outDir, relPath) {
  *   /MuseByMina/404/  404                     …but not as a directory
  *   /MuseByMina/nope  404
  *
+ * The two 404s above are served *with the error page's body*, which is the `file` on the
+ * `Served` shape — see the note there.
+ *
  * `base` carries its trailing slash (`/MuseByMina/`, or `/` on an apex domain), because
  * that prefix is the whole URL space the deploy owns.
  *
@@ -214,7 +232,10 @@ export function resolveRequest(outDir, base, requestPath) {
     return { status: 200, file: `${rel}.html` };
   }
 
-  return { status: 404 };
+  // Inside our prefix and nothing matched: the deploy's own error page, body and all.
+  return isFile(outDir, ERROR_PAGE)
+    ? { status: 404, file: ERROR_PAGE }
+    : { status: 404 };
 }
 
 /**
@@ -313,8 +334,14 @@ export async function serveDist(outDir, base) {
       return;
     }
     if (served.status === 404) {
+      // The build's own error page where there is one, so a browser driven at an unknown
+      // path meets the page the deploy would actually serve it (MUSE-38).
       res.writeHead(404, { 'content-type': MIME['.html'] });
-      res.end('<!doctype html><title>404</title>not found');
+      res.end(
+        served.file === undefined
+          ? '<!doctype html><title>404</title>not found'
+          : readFileSync(join(outDir, served.file)),
+      );
       return;
     }
     res.writeHead(200, {

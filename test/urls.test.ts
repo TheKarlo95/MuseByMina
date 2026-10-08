@@ -109,6 +109,25 @@ describe('the host model matches GitHub Pages', () => {
     }
   });
 
+  it('answers an unknown path with the error page body, not a stub (MUSE-38)', () => {
+    // GitHub Pages serves `404.html`'s *body* for every unknown path, with a 404 status.
+    // The model used to answer the status and invent the body, which made the one page a
+    // lost visitor actually meets unreachable to every browser suite in the repo — so the
+    // all-Croatian 404 in MUSE-38 could only be reproduced against the deployed site.
+    const base = basePath(pages);
+    expect(resolveRequest(pages.outDir, base, `${base}nope`)).toEqual({
+      status: 404,
+      file: '404.html',
+    });
+    // `/404/` is a 404 as a *directory* and gets the same body, same as the live host.
+    expect(resolveRequest(pages.outDir, base, `${base}404/`)).toEqual({
+      status: 404,
+      file: '404.html',
+    });
+    // Outside the deploy's prefix is not the deploy's to answer for (MUSE-8).
+    expect(resolveRequest(pages.outDir, base, '/elsewhere/nope')).toEqual({ status: 404 });
+  });
+
   it('serves a directory only at its slashed URL, and redirects the other spelling', () => {
     const base = basePath(pages);
     expect(resolveRequest(pages.outDir, base, `${base}en/`)).toEqual({
