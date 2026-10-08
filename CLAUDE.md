@@ -39,6 +39,7 @@ npm run preview    # dist, served the way Pages serves it — not `astro preview
 npm run typecheck  # astro check
 npm test           # vitest — builds the site and asserts on dist
 npm run a11y       # axe, every page, both themes — serves dist itself
+npm run budget     # the performance budget, per page: budget / actual / headroom
 npm run ds         # design-system compliance
 npm run format:check   # the formatting convention — fast, names file:line
 npm run format -- <file>   # apply it to **one file**; never to the tree (MUSE-58)
@@ -153,6 +154,35 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   stripped** and recording what the CSS engine then asks for — the only way to measure
   it, since a preload is itself a request and so "was it requested" is true by
   construction.
+- **There is a performance budget, it is `scripts/budget.mjs`, and it is deliberately
+  not Lighthouse** (MUSE-63). The original plan listed `lighthouse` among the blocking
+  checks; it was never built, and the only size guard was a `du -sm dist` step watching
+  the GitHub Pages **1 GB site** limit — which would not notice one page going from 60 KB
+  to 2 MB. What is budgeted is what is deterministic about the output: bytes per page per
+  resource kind, the request count, how many requests are render-blocking, and **how many
+  font faces the host actually serves the page**. **No timing and no composite score**: a
+  gate that goes red because the runner was busy is a gate people learn to re-run, and
+  then it protects nothing. The one timing collected is `advisory` — printed, and
+  `checkBudget` structurally cannot see it, which is a test rather than a comment.
+
+  **One budget for every page, with no per-route entries**, because the page set is read
+  off the build: a route that lands tomorrow is budgeted the day it builds and there is no
+  list to extend. Each number carries a sentence saying what it was measured at, and
+  `test/budget.test.ts` reads the source's own JSDoc so raising one without saying
+  anything is a red test. Images are budgeted at **0** — no page has one, and the first
+  ticket that adds one raises that line on purpose. That is the whole argument for having
+  done this now: today every number passes at 1.2–1.6×, and after the gallery and the
+  portraits land the same numbers are a negotiation about which page to exempt.
+
+  The **font count has a floor, and the floor is the half that finds things.** It is
+  MUSE-35: all six faces 404ed under `astro dev` for the life of the project, so
+  reproduced against a build that is six requests and **zero faces served** — which is why
+  the count is of faces the host *served*, not of requests made, and why a ceiling alone
+  reads zero as the leanest page it has ever seen. Measured with the preload tags stripped
+  out of the document first, `test/fonts.test.ts`'s technique and for its reason. Two
+  entry points, one set of numbers: `test/budget.test.ts` is the gate and builds both
+  deploy targets, `npm run budget` prints the table over `dist` and runs inside the
+  existing `a11y` job (MUSE-58's precedent — not a sixth check).
 - `rootPath()`/`rootUrl()` in `src/lib/site.ts` are for files the build publishes at the
   deploy root — `robots.txt`, `llms.txt`, the sitemap — and for a future `favicon.ico` or
   `CNAME`. They are **not** the way to reference a bundled asset; see the bullet above.
