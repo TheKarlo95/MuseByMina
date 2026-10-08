@@ -377,6 +377,26 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   deleted the first one's builds mid-flight, which is MUSE-17's flake wearing a different
   hat. An hour is fifteen times the longest a build can live, needs no lock and no pid
   file, and cannot reach anything a live run could still be using.
+
+  **A build stages where it outputs, which is why `outDir` may not leave the project
+  root** (MUSE-41). The staging area is the *third* directory a build writes, after the
+  output and the caches, and it is the one nothing chose: Astro puts it in
+  `<outDir>/.prerender/` only while `outDir` starts with `process.cwd()`, and otherwise
+  in `<cwd>/.astro/`, renaming every emitted asset out of there. So an `outDir` outside
+  the root is either a cross-device `fs.rename` — `EXDEV`, not retryable, an Astro stack
+  that never names `outDir` — or, between two concurrent builds, **one shared staging
+  directory with content-hashed filenames**, which collides deterministically: both
+  builds exit 0 and print `Complete!`, and the second ships nine pages linking a
+  stylesheet and six fonts that are not there. Astro exposes no setting for it, so
+  `astro.config.mjs` refuses such a build in `astro:config:setup`, naming `outDir`, the
+  root and the staging path; satisfy it and the staging directory is inside an output
+  `mkdtemp` already made unique, so it is per-build and on the output's own filesystem by
+  construction. `test/isolation.test.ts` holds it three ways — the model pinned to Astro's
+  own `getPrerenderOutputDirectory`, two claimed output directories yielding two staging
+  directories, and a witness file in the shared path that a real build must not delete.
+  **`SCRATCH` being inside the repository is therefore a requirement, not a preference**:
+  moving it to `os.tmpdir()` was harmless before MUSE-35 emitted any assets, and now puts
+  all ten builds back on one staging path.
 - **A browser suite waits for a condition, never for the clock** (MUSE-54), and
   `test/helpers/browser-settle.ts` is the only place it waits. Three suites flaked in one
   afternoon with no code in common and one defect in common: a measurement taken at a
