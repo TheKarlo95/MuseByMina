@@ -16,6 +16,12 @@
 // has the same exposure and tolerates the import *nowhere* (three placements tried, three
 // identical diffs), which is why it takes the address as a prop instead. If you add an
 // import to a component that renders `TrialForm`, build and `diff -r`.
+//
+// What *is* now a guard rather than a comment: `test/cascade.test.ts` (MUSE-43) pins the
+// global layer to the front of every page's `<head>` and names the component whose
+// imports moved. It does not pin two scoped sheets against each other — they cannot tie,
+// so swapping them changes bytes and nothing else — so the paragraph above is still the
+// only thing watching that, and it is still only a comment.
 import { getSiteSettings, socialUrl } from '../lib/sanity';
 import TrialForm from './TrialForm.astro';
 import { localeUrl, type Locale } from '../lib/i18n';

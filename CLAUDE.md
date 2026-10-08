@@ -112,6 +112,23 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   the hreflang cluster dropped (MUSE-9). `test/urls.test.ts` serves `dist` from a model of
   GitHub Pages and fetches every declared URL; `astro preview` answers both spellings with
   200, so it cannot see this class of bug.
+- **The position of an `import` in a component's frontmatter decides CSS cascade order.**
+  Astro orders the stylesheets it emits by import-crawl order — `cssOrder` sorts on the
+  *sum of the import indices* from a CSS module up to the page — so adding or moving an
+  import silently reorders the built `<head>`. It happened twice in one afternoon on
+  unrelated tickets (MUSE-35 added a `?url` font import to `BaseLayout.astro`; MUSE-20 put
+  a read-path import below `TrialForm` in `Contact.astro`) and one of the two shipped.
+  There is **no config for it**: stylesheet order is not configurable in Astro, the import
+  position is the only lever. So `import '../styles/globals.css'` is the **first** import
+  in `BaseLayout.astro`, and `BaseLayout` is the first import in every page wrapper —
+  Astro's own documented advice, and the order the design system needs, since
+  `globals.css` is `@font-face`, the `:root` tokens and the element defaults that
+  components override at equal specificity. `test/cascade.test.ts` asserts the resulting
+  order against `dist` under both deploy targets, keyed on each stylesheet's **role**
+  (global layer vs component-scoped) rather than its content-hashed filename, and the
+  failure names the component whose imports moved. It also checks the order *inside* the
+  shared chunk, because `BaseLayout.*.css` carries the globals and the header's and
+  footer's scoped styles together and reordering those two leaves the head untouched.
 - The theme is stamped pre-paint by an inline script (`src/lib/theme.ts`). Never move that
   into a component — it exists to prevent a flash.
 - **A browser check never takes a server it did not start** (MUSE-52). `npm run a11y`,
