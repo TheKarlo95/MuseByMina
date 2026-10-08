@@ -313,6 +313,9 @@ describe('AC2: every emitted block parses', () => {
     it(`parses every block as JSON, with a schema.org context (${name})`, () => {
       const broken: string[] = [];
       for (const { file, html } of indexablePages(build())) {
+        // Not vacuous: "every block parses" is trivially true of no blocks, and that is
+        // the reading under which a suite stays green with the feature removed.
+        expect(jsonLdBlocks(html), `${file}: blocks to parse`).toHaveLength(1);
         for (const raw of jsonLdBlocks(html)) {
           try {
             const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -332,6 +335,7 @@ describe('AC2: every emitted block parses', () => {
      */
     it(`emits no raw "<" inside the script element (${name})`, () => {
       for (const { file, html } of indexablePages(build())) {
+        expect(jsonLdBlocks(html), `${file}: blocks to check`).toHaveLength(1);
         for (const raw of jsonLdBlocks(html)) {
           expect(raw, `${file}: JSON-LD payload`).not.toContain('<');
         }
