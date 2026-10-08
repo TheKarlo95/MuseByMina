@@ -522,8 +522,9 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   the file `npm run sanity:seed` imports — and checks all four surfaces: `fingerprint()`,
   the committed stamp, `SOURCE_GLOBS` and `studio.yml`'s `paths:`.
 - **The seed is both the migration and the test fixture.** `content/seed.ndjson`
-  holds the five documents that exist — the `siteSettings` singleton and four `page`
-  documents — and `npm run sanity:seed` imports it, replacing by `_id`, so the migration is
+  holds every document that exists — the `siteSettings` singleton, the `page` documents,
+  the timetable (MUSE-36) and the two `pricingTier` documents (MUSE-59) —
+  and `npm run sanity:seed` imports it, replacing by `_id`, so the migration is
   reviewable and re-runnable. `vitest.config.ts` points every test build at that same file
   (`MUSE_CONTENT_FIXTURE`) and `src/lib/sanity/fixture.ts` evaluates the *real* queries
   against it with `groq-js`. **The suite never touches the network**, and there is no second
@@ -619,6 +620,27 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   cannot see them, and unset the variable injects nothing. **Delete the entry with the
   ticket that routes the page**; an entry that outlives its ticket is a page nobody
   shipped.
+- **Routing a page is two pull-request-shaped halves, and the dataset goes first**
+  (MUSE-59, the ticket `/aboutus` is still waiting for). The build fetches live, so the
+  route and the documents cannot land in the same push: the moment `/pricing` was in
+  `ROUTES`, every build without a `page` document and two `pricingTier` documents in the
+  **live dataset** failed — each PR, the deploy, the scheduled rebuild. So the branch
+  prepares `content/seed.ndjson` *and* the route together, says in the PR body that it
+  must not be merged yet, and somebody runs `npm run sanity:seed` between review and
+  merge. **An agent does not run that command**: it writes to Mina's content, replacing by
+  `_id`. `test/pricing.test.ts` keeps the trap as a test — the route with the documents
+  removed must fail naming `pricingTier`, and must not carry `TRANSIENT_BUILD_FAILURE`,
+  because MUSE-21's retry would otherwise spend three attempts on a dataset that will not
+  seed itself.
+- **`/pricing` publishes two periods: 55 € for one month, 100 € for two** — confirmed by
+  the studio, and the whole of it. No drop-in rate, no student discount, no third package;
+  `test/pricing.test.ts`'s `CONFIRMED_TIERS` is the receipt and a third document in the
+  seed is a red test. 100 € is a real discount on 2 × 55 €, and the two-month tier's one
+  `features` line says so, because a reader should not have to multiply. Neither tier is
+  `featured`: nobody has asked Mina which to single out, and `resolveFeatured` treats zero
+  as a complete page. `features` is `required().min(1)`, so „an empty optional field is a
+  decision" could not be taken here — the two lines that exist describe the *period*
+  rather than claiming what a month of classes contains.
 - **An optional field is a decision, not laziness.** `instructor.portrait`,
   `instructor.instagram`, `instructor.bio`, `class.description`, `class.image`,
   `siteSettings.phone` and `openingHours` are optional because no real value exists for
