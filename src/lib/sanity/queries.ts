@@ -28,6 +28,37 @@ import { defineQuery } from 'groq';
  * Images carry the asset id plus `hotspot`/`crop` rather than a resolved URL, because
  * the crop is the point: one upload serves 16:9, 4:5, 3:4 and 1:1 (design system §9),
  * and the ratio is the page's decision, not the query's.
+ *
+ * ---
+ *
+ * **Every dereference is projected beside its `_ref` (MUSE-49).** `author->name` sits next
+ * to `"authorRef": author._ref`; `instructors[]->name` next to `instructors[]._ref`. It
+ * looks redundant and it is the whole fix.
+ *
+ * Sanity does not enforce referential integrity on delete: remove an instructor and the
+ * `_ref` on every document pointing at her stays, now naming nothing. GROQ dereferences it
+ * to `null` and answers HTTP 200. For a **required** field the decoder catches that, because
+ * `null` is not a value and it demands one. For an **optional** field it cannot: `null` and
+ * "nobody filled this in" arrive as the same `undefined`, and an optional field is allowed
+ * to be empty — so `post.author` published unsigned and said nothing.
+ *
+ * The `_ref` is the missing bit of evidence, and it yields one rule the decoder can apply
+ * without guessing:
+ *
+ *     a `_ref` present with a `null` value  →  the target has been deleted
+ *     both absent                           →  an empty optional field
+ *
+ * Two consequences worth knowing before editing any projection below:
+ *
+ *   - **The pair must stay a pair.** `src/lib/sanity/decode.ts` fails the build if a value
+ *     resolves while its `_ref` does not, and vice versa, because either half alone is a
+ *     projection that has stopped saying which case it is. Deleting a `*Ref` line is
+ *     therefore a loud failure on every row rather than a quietly worse error message.
+ *   - **For an array, the two are read positionally**, so they are traversals of the same
+ *     source array and `groq-js` and the API both keep a dangling member's position
+ *     (`[null, 'Mina']`, not `['Mina']`). The decoder compares the two lengths rather than
+ *     trusting that, because a compacted list is the one failure here with nothing blank to
+ *     notice: it publishes a true statement that is not the whole truth.
  */
 
 export const SITE_SETTINGS_QUERY = defineQuery(`
@@ -67,6 +98,25 @@ export const PAGES_QUERY = defineQuery(`
  * reference published half of each row. `instructors[]->name` on an absent field is
  * `null`, which is what makes the `coalesce` work; on an array that is present it is the
  * names in the order they were listed, and the order is what the page renders.
+ *
+ * **`classRef` and `instructorRefs` are the MUSE-49 half**, and the `coalesce` is the
+ * reason this query needed it most. A slot's override pointing at a deleted instructor used
+ * to be worse than a blank: `coalesce` fell through to the class's regular teachers, so
+ * `/schedule` published **a real name that was the wrong name** — a claim about a named
+ * person, on the most-visited page on the site, that looks entirely correct.
+ *
+ * MUSE-36 incidentally closed the fallback itself, which is worth knowing because the
+ * array is now load-bearing for a reason beyond two teachers: `instructors[]->name` over a
+ * deleted reference answers `[null]`, a *non-null* array, so `coalesce` keeps the override
+ * and the decoder refuses it. Revert the field to a single reference and the silent
+ * fallback comes straight back, since `instructor->name` really is `null`. That is what
+ * `AssertScheduleInstructorsAreAList` in `./shape.ts` is guarding, and it is a compile-time
+ * guard rather than a comment for exactly this reason.
+ *
+ * `instructorRefs` repeats the `coalesce` rather than sharing it. Both spellings select on
+ * the same thing — whether the slot's `instructors` attribute exists at all, since a
+ * present array makes both halves non-null — so the two always take the same branch, and
+ * the decoder's length check turns that from an argument into something checked.
  */
 export const SCHEDULE_QUERY = defineQuery(`
   *[_type == "scheduleSlot" && active == true] | order(start asc){
@@ -74,10 +124,12 @@ export const SCHEDULE_QUERY = defineQuery(`
     day,
     start,
     "classId": class->_id,
+    "classRef": class._ref,
     "name": class->name{ hr, en },
     "level": class->level,
     "durationMin": class->durationMin,
-    "instructors": coalesce(instructors[]->name, class->instructors[]->name)
+    "instructors": coalesce(instructors[]->name, class->instructors[]->name),
+    "instructorRefs": coalesce(instructors[]._ref, class->instructors[]._ref)
   }
 `);
 
@@ -99,6 +151,7 @@ export const CLASSES_QUERY = defineQuery(`
     description{ hr, en },
     durationMin,
     "instructors": instructors[]->name,
+    "instructorRefs": instructors[]._ref,
     image{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop }
   }
 `);
@@ -196,6 +249,19 @@ export const GALLERY_QUERY = defineQuery(`
   }
 `);
 
+/**
+ * Posts, newest first, future-dated ones dropped.
+ *
+ * **`author` is the field MUSE-49 is named after**, and the only one on the site that was
+ * entirely silent. It is optional on purpose — the Studio field says "Ostavi prazno i
+ * objava je potpisana studijem", so a post signed by the studio rather than by a person is
+ * an ordinary editorial choice and must keep building. That is exactly what made a deleted
+ * author invisible: `author->name` answered `null`, the decoder read it as the empty
+ * optional it is allowed to be, and the post published **unsigned** with nothing said.
+ *
+ * `authorRef` is what separates the two. A `_ref` with no value is a deleted instructor;
+ * no `_ref` at all is a post the studio signs. See the note at the top of this file.
+ */
 export const POSTS_QUERY = defineQuery(`
   *[_type == "post" && publishedAt <= $now] | order(publishedAt desc){
     _id,
@@ -204,6 +270,7 @@ export const POSTS_QUERY = defineQuery(`
     publishedAt,
     excerpt{ hr, en },
     "author": author->name,
+    "authorRef": author._ref,
     coverImage{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop },
     body{ hr, en }
   }

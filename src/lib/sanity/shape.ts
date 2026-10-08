@@ -6,6 +6,7 @@ import type {
   FAQS_QUERY_RESULT,
   INSTRUCTORS_QUERY_RESULT,
   PAGES_QUERY_RESULT,
+  POSTS_QUERY_RESULT,
   PRICING_QUERY_RESULT,
   SCHEDULE_QUERY_RESULT,
   SITE_SETTINGS_QUERY_RESULT,
@@ -98,6 +99,57 @@ const _days: AssertScheduleDays = true;
 export type AssertScheduleInstructorsAreAList = Same<SlotRow['instructors'], string[]>;
 const _instructors: AssertScheduleInstructorsAreAList = true;
 
+/* ------------------------------------------------------------------------- */
+/* Every dereference is projected beside its `_ref`, and that is checked here. */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Compiles only if the `_ref` half of a dereference projection is still there, and still
+ * the shape the decoder reads.
+ *
+ * `Same<…>` alone would catch it, but the error a reader gets from `Same` says "B is
+ * wider" and nothing about why the key had to exist. This carries the reason, because the
+ * reason is the entire mechanism: without the `_ref`, `src/lib/sanity/decode.ts` is back to
+ * seeing one `undefined` for two different situations — a reference whose target was
+ * deleted, and an optional field nobody filled in — and an optional field is *allowed* to
+ * be empty, so the dangling one publishes a silent blank (MUSE-49).
+ *
+ * Deleting the projection fails on the `keyof` constraint; changing its shape fails with
+ * the message below. Note the decoder enforces the pair at **runtime** as well, on every
+ * row, since these assertions only fire once the types have been regenerated.
+ */
+type RefProjected<T, K extends keyof T, Shape> = Same<T[K], Shape> extends true
+  ? true
+  : {
+      ERROR: 'The `_ref` half of a dereference projection in src/lib/sanity/queries.ts is missing, renamed, or no longer the shape the decoder reads. Every `x->field` there is projected beside `x._ref` so a deleted target can be told apart from an empty optional field — without it, a dangling optional reference publishes a blank byline or a wrong instructor name and the build exits 0 (MUSE-49). Restore the projection; do not delete this assertion.';
+      field: K;
+      expected: Shape;
+      got: T[K];
+    };
+
+/**
+ * `classRef` is non-nullable because `scheduleSlot.class` is `required()` — the slot's
+ * `_ref` is always there, even when the class it names has been deleted. That is the
+ * asymmetry the whole mechanism rests on: the `_ref` survives the target.
+ */
+export type AssertSlotProjectsClassRef = RefProjected<SlotRow, 'classRef', string>;
+
+/**
+ * The array pair, and the one with a length to compare. `instructorRefs` repeats
+ * `instructors`' `coalesce`, so it takes the same branch and lines up member for member;
+ * the decoder checks the two lengths rather than trusting that, because a *compacted* list
+ * — one dangling teacher dropped rather than blanked — publishes a true statement that is
+ * not the whole truth, with nothing on the page to notice.
+ */
+export type AssertSlotProjectsInstructorRefs = RefProjected<
+  SlotRow,
+  'instructorRefs',
+  string[]
+>;
+
+const _classRef: AssertSlotProjectsClassRef = true;
+const _instructorRefs: AssertSlotProjectsInstructorRefs = true;
+
 /**
  * A decoded schedule row still *is* a `ClassEntry`.
  *
@@ -152,6 +204,18 @@ const _classDescriptionOptional: AssertClassDescriptionOptional = true;
 const _classImageOptional: AssertClassImageOptional = true;
 
 /**
+ * `CLASSES_QUERY` has no `coalesce` and no override, so this is the array pair at its
+ * simplest — and the one that proves the mechanism is not specific to the schedule's
+ * fallback. A class whose teacher has been deleted names *which* teacher.
+ */
+export type AssertClassProjectsInstructorRefs = RefProjected<
+  ClassRow,
+  'instructorRefs',
+  string[]
+>;
+const _classInstructorRefs: AssertClassProjectsInstructorRefs = true;
+
+/**
  * `bio`, `portrait` and `instagram` are deliberately **not** on this list (MUSE-23 for the
  * last two, MUSE-36 for the first), the same way `phone` and `openingHours` came off the
  * `siteSettings` list in MUSE-20 — and for the same reason, which is this assertion working
@@ -186,7 +250,7 @@ const _instructorFields: [
 type OptionalIn<T, K extends keyof T> = [null] extends [T[K]]
   ? true
   : {
-      ERROR: 'This field is projected as non-nullable, which means the Sanity schema now requires it. It is optional on purpose: no photography of this studio exists (MUSE-23), an instructor may have no public Instagram (MUSE-23), nobody has written a bio for a real instructor (MUSE-36), and no class has copy or a photograph now that the invented style cards are gone (MUSE-36). A required field with no value can only be filled in with fiction, which is how the invented schedule reached production. If the real content now exists, say so in the schema AND move this to the Guaranteed list above — do not delete the assertion.';
+      ERROR: 'This field is projected as non-nullable, which means the Sanity schema now requires it. It is optional on purpose: no photography of this studio exists (MUSE-23), an instructor may have no public Instagram (MUSE-23), nobody has written a bio for a real instructor (MUSE-36), no class has copy or a photograph now that the invented style cards are gone (MUSE-36), and a post signed by the studio rather than by a person has no author (MUSE-49 — that is the field’s own documented default). A required field with no value can only be filled in with fiction, which is how the invented schedule reached production. If the real content now exists, say so in the schema AND move this to the Guaranteed list above — do not delete the assertion.';
       field: K;
     };
 
@@ -197,6 +261,39 @@ export type AssertInstructorInstagramOptional = OptionalIn<InstructorRow, 'insta
 const _bioOptional: AssertInstructorBioOptional = true;
 const _portraitOptional: AssertInstructorPortraitOptional = true;
 const _instagramOptional: AssertInstructorInstagramOptional = true;
+
+/**
+ * **`post.author` — the optional reference MUSE-49 is named after.**
+ *
+ * `POSTS_QUERY` had no assertions here at all, which is part of why this went unnoticed:
+ * `author` is the only *optional dereference* on the site, and an optional field is exactly
+ * the one a `Guaranteed` line cannot be written for. So the pair is asserted instead, in
+ * both halves, and they fail for opposite mistakes:
+ *
+ *   - `author` becoming non-nullable would mean the schema had made it `required()` —
+ *     which would turn "signed by the studio", the field's own documented default, into a
+ *     build failure. `OptionalIn` catches that.
+ *   - `authorRef` disappearing or going non-nullable means the evidence the decoder reads
+ *     is gone, and a deleted author silently publishes an unsigned post again.
+ *
+ * Both are nullable: an absent reference projects `null` on each half, which *is* the
+ * "nobody filled this in" case the decoder must keep accepting.
+ */
+type PostRow = POSTS_QUERY_RESULT[number];
+const _postFields: [
+  Guaranteed<PostRow, '_id'>,
+  Guaranteed<PostRow, 'slug'>,
+  Guaranteed<PostRow, 'title'>,
+  Guaranteed<PostRow, 'publishedAt'>,
+  Guaranteed<PostRow, 'excerpt'>,
+  Guaranteed<PostRow, 'body'>,
+] = [true, true, true, true, true, true];
+
+export type AssertPostAuthorOptional = OptionalIn<PostRow, 'author'>;
+export type AssertPostProjectsAuthorRef = RefProjected<PostRow, 'authorRef', string | null>;
+
+const _postAuthorOptional: AssertPostAuthorOptional = true;
+const _postAuthorRef: AssertPostProjectsAuthorRef = true;
 
 /**
  * The origin story's fields, all three of which `/aboutus` cannot render without.
@@ -308,10 +405,18 @@ export const SCHEMA_ASSERTIONS = Object.freeze({
   portraitOptional: _portraitOptional,
   instagramOptional: _instagramOptional,
   storyParagraphs: _storyParagraphs,
+  // Every dereference is projected beside its `_ref` (MUSE-49). Without the `_ref` the
+  // decoder cannot tell a deleted target from an empty optional field.
+  slotClassRef: _classRef,
+  slotInstructorRefs: _instructorRefs,
+  classInstructorRefs: _classInstructorRefs,
+  postAuthorOptional: _postAuthorOptional,
+  postAuthorRef: _postAuthorRef,
   fields: Object.freeze({
     scheduleSlot: _slotFields,
     class: _classFields,
     instructor: _instructorFields,
+    post: _postFields,
     pricingTier: _tierFields,
     faq: _faqFields,
     page: _pageFields,

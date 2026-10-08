@@ -16,7 +16,7 @@
     "sanity/seed/content.ndjson": "a4f75de1aa90a2cd",
     "sanity/structure.ts": "77150fcb6ea2ac7e",
     "src/lib/pages.ts": "9d61fe5a48770432",
-    "src/lib/sanity/queries.ts": "3e8eeaee793234ca",
+    "src/lib/sanity/queries.ts": "b9c89c76e90fd1cf",
     "src/lib/schedule.ts": "a86a72df00f188d3"
   }
 }
