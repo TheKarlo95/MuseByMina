@@ -1,6 +1,7 @@
-import { chromium, type Browser, type Page } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { launchChecks, openRedirectProbe } from '../scripts/browser-checks.mjs';
 import { LANG_STORAGE_KEY } from '../src/lib/lang';
 import { pagePath, startPreview, type Preview } from './helpers/preview';
 
@@ -39,7 +40,7 @@ let preview: Preview;
 let host: string;
 
 beforeAll(async () => {
-  [preview, browser] = await Promise.all([startPreview('lang'), chromium.launch()]);
+  [preview, browser] = await Promise.all([startPreview('lang'), launchChecks()]);
   host = new URL(preview.origin).origin;
 }, 240_000);
 
@@ -61,37 +62,30 @@ interface Visit {
 /**
  * Open `url` in a browser reporting `locale`, optionally with a language already stored.
  *
- * `storedLang` is seeded with an init script so it is in `localStorage` *before* the
- * blocking inline script in `<head>` reads it — the same trick `scripts/a11y.mjs` uses
- * to stop the redirect auditing the wrong page.
+ * Through `openRedirectProbe` — the one door in `scripts/browser-checks.mjs` that pins no
+ * locale and asserts no landing (MUSE-48), because here *where the browser ends up is the
+ * thing under test*. Every other suite and every check uses `openCheckPage`, which would
+ * pin this suite's subject out of existence. The browser language has to be named rather
+ * than defaulted, which is the point: a default is what MUSE-48 is about.
  *
- * The seed only writes when the key is absent. An init script runs again on every
- * navigation, including the one the redirect performs, so an unconditional write would
- * reinstate the old value on the destination page and hide the fact that the page we came
- * from had just replaced it.
+ * `storedLang` is seeded there with an init script, so it is in `localStorage` *before*
+ * the blocking inline script in `<head>` reads it, and only when the key is absent — see
+ * the note at the probe for why an unconditional write would hide MUSE-33's regression.
  */
 async function visit(
   url: string,
   opts: { locale: string; storedLang?: string } = { locale: FOREIGN_LOCALE },
 ): Promise<Visit> {
-  const ctx = await browser.newContext({
-    locale: opts.locale,
+  const { page, close } = await openRedirectProbe(browser, {
+    navigatorLocale: opts.locale,
+    storedLang: opts.storedLang,
     // Same viewport as the a11y gate, so an "in view" claim here means the same thing there.
-    viewport: { width: 1280, height: 900 },
+    context: { viewport: { width: 1280, height: 900 } },
   });
-  if (opts.storedLang !== undefined) {
-    await ctx.addInitScript(
-      ([key, value]) => {
-        if (localStorage.getItem(key!) === null) localStorage.setItem(key!, value!);
-      },
-      [LANG_STORAGE_KEY, opts.storedLang] as const,
-    );
-  }
-  const page = await ctx.newPage();
   await page.goto(url, { waitUntil: 'networkidle' });
   await page.evaluate(() => document.fonts.ready);
   await settleScroll(page);
-  return { page, close: () => ctx.close() };
+  return { page, close };
 }
 
 /**
@@ -133,17 +127,16 @@ interface Session {
  * they follow a shared link today and open the site again tomorrow.
  */
 async function session(locale: string): Promise<Session> {
-  const ctx = await browser.newContext({
-    locale,
-    viewport: { width: 1280, height: 900 },
+  const { page, close } = await openRedirectProbe(browser, {
+    navigatorLocale: locale,
+    context: { viewport: { width: 1280, height: 900 } },
   });
-  const page = await ctx.newPage();
   const open = async (url: string): Promise<void> => {
     await page.goto(url, { waitUntil: 'networkidle' });
     await page.evaluate(() => document.fonts.ready);
     await settleScroll(page);
   };
-  return { page, open, close: () => ctx.close() };
+  return { page, open, close };
 }
 
 interface Geometry {

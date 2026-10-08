@@ -1,6 +1,6 @@
-import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 
+import { describeMeasured, launchChecks, openCheckPage } from './browser-checks.mjs';
 import { openSiteOrExit } from './dist-origin.mjs';
 
 const OUT = process.env.OUT ?? '/tmp/muse-shots';
@@ -27,30 +27,36 @@ const EN_ROUTE = ROUTE === '/' ? '/en' : `/en${ROUTE}`;
  * Page URLs carry a trailing slash (`trailingSlash: 'always'`, MUSE-9); `site.url` adds it.
  */
 const site = await openSiteOrExit({ routes: [ROUTE, EN_ROUTE] });
-const pageUrl = (route) => site.url(route);
 
 mkdirSync(OUT, { recursive: true });
-const browser = await chromium.launch();
+
+/**
+ * Every shot is opened by `scripts/browser-checks.mjs`, which pins the locale the route
+ * names and asserts the page it landed on (MUSE-48).
+ *
+ * This script is the reason the ticket was written as a mechanism rather than a note. It
+ * carried the same hand-written language-pin line as the audit but **no landing
+ * assertion**, so a redirect would have produced seven PNGs of a page that looks exactly
+ * like the one asked for, with an `h-overflow` number beside it that was about the other
+ * language's copy. There is no way to notice that in a screenshot.
+ */
+const browser = await launchChecks();
 
 async function shot(name, { route = ROUTE, colorScheme, stored, viewport, mobile }) {
-  const ctx = await browser.newContext({
-    colorScheme,
-    viewport: viewport ?? { width: 1280, height: 900 },
-    deviceScaleFactor: mobile ? 3 : 2,
-    isMobile: !!mobile,
-    hasTouch: !!mobile,
+  const { page, measured, close } = await openCheckPage(browser, site, route, {
+    // The theme a returning visitor chose, which is the whole point of shots 03 and 04.
+    // Seeded through the door so that nothing here touches `addInitScript` — one place
+    // writes storage before a page loads, and the language pin cannot be left out of it.
+    storage: stored ? { 'muse-theme': stored } : {},
+    context: {
+      colorScheme,
+      viewport: viewport ?? { width: 1280, height: 900 },
+      deviceScaleFactor: mobile ? 3 : 2,
+      isMobile: !!mobile,
+      hasTouch: !!mobile,
+    },
   });
-  if (stored) {
-    await ctx.addInitScript(
-      ([k, v]) => localStorage.setItem(k, v),
-      ['muse-theme', stored],
-    );
-  }
-  // Keep the homepage language redirect out of the screenshots.
-  await ctx.addInitScript(() => localStorage.setItem('muse-lang', 'hr'));
 
-  const page = await ctx.newPage();
-  await page.goto(pageUrl(route), { waitUntil: 'networkidle' });
   await page.evaluate(() => document.fonts.ready);
 
   const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
@@ -64,10 +70,14 @@ async function shot(name, { route = ROUTE, colorScheme, stored, viewport, mobile
   console.log(
     `${name.padEnd(26)} data-theme=${String(attr).padEnd(7)} bg=${bg.padEnd(20)} h-overflow=${overflow}px`,
   );
+  // The page this PNG is of, in the log beside it (MUSE-48). A shot is the one output
+  // format that cannot say which language it is: both homepages look the same at a
+  // glance, and every earlier run of this script labelled them by the route it asked for.
+  console.log(`${' '.repeat(26)} ${describeMeasured(measured)}`);
   if (overflow > 0) process.exitCode = 1;
 
   await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: true });
-  await ctx.close();
+  await close();
 }
 
 await shot('01-os-dark', { colorScheme: 'dark' });

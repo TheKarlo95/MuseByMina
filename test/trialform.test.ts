@@ -1,6 +1,7 @@
-import { chromium, type Browser, type Page } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { launchChecks, openCheckPage } from '../scripts/browser-checks.mjs';
 import { FORM_COPY, type FormCopy } from '../src/lib/forms';
 import type { Locale } from '../src/lib/i18n';
 import { startPreview, type Preview, type StubReply } from './helpers/preview';
@@ -61,7 +62,7 @@ beforeAll(async () => {
   [configured, unconfigured, browser] = await Promise.all([
     startPreview('trialform'),
     startPreview('trialform-noendpoint', { endpoint: '' }),
-    chromium.launch(),
+    launchChecks(),
   ]);
 }, 240_000);
 
@@ -81,35 +82,46 @@ interface Visit {
   close(): Promise<void>;
 }
 
+/**
+ * Open `route` on `preview`, as a visitor of that route's language.
+ *
+ * Through `scripts/browser-checks.mjs` (MUSE-48), which derives the locale from the route
+ * and asserts the landing URL. This suite used to pick the browser language itself, with
+ * a comment saying that without it every assertion about `/` is one about `/en` — true,
+ * and one of four hand-written copies of the same rule.
+ *
+ * The listeners are installed through `prepare`, which runs before the first navigation:
+ * `navigations` has to see the *first* document's status, not just the ones after it.
+ */
 async function visit(
   preview: Preview,
   route: string,
   opts: { javaScript?: boolean } = {},
 ): Promise<Visit> {
-  const ctx = await browser.newContext({
-    colorScheme: 'dark',
-    viewport: { width: 1280, height: 900 },
-    // `src/lib/lang.ts` redirects a browser that is clearly not Croatian away from `/`.
-    // Without pinning the language, every assertion about `/` is one about `/en`.
-    locale: route.startsWith('/en') ? 'en-GB' : 'hr-HR',
-    javaScriptEnabled: opts.javaScript ?? true,
-  });
-  const page = await ctx.newPage();
   const logged: { type: string; text: string }[] = [];
-  page.on('console', (msg) => logged.push({ type: msg.type(), text: msg.text() }));
   const navigations: number[] = [];
-  page.on('response', (response) => {
-    if (response.request().isNavigationRequest()) navigations.push(response.status());
+
+  const { page, context, measured, close } = await openCheckPage(browser, preview, route, {
+    context: {
+      colorScheme: 'dark',
+      viewport: { width: 1280, height: 900 },
+      javaScriptEnabled: opts.javaScript ?? true,
+    },
+    prepare: (opened) => {
+      opened.on('console', (msg) => logged.push({ type: msg.type(), text: msg.text() }));
+      opened.on('response', (response) => {
+        if (response.request().isNavigationRequest()) navigations.push(response.status());
+      });
+    },
   });
-  const url = preview.url(route);
-  await page.goto(url, { waitUntil: 'networkidle' });
+
   return {
     page,
-    url,
+    url: measured.url,
     console: logged,
     navigations,
-    offline: (on) => ctx.setOffline(on),
-    close: () => ctx.close(),
+    offline: (on) => context.setOffline(on),
+    close,
   };
 }
 

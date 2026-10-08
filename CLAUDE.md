@@ -191,6 +191,27 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   import that looks backwards: the GitHub Pages resolver lives in `scripts/dist-origin.mjs`
   and `test/helpers/serve.ts` re-exports it, because a `.mjs` script cannot import a `.ts`
   helper and two models of the host would drift (MUSE-9).
+- **A browser check measures the page it names** (MUSE-48). `/` client-side-redirects to
+  `/en/` unless the browser is Croatian, and every automation defaults to `en-US` — so a
+  check that did not pin the locale opened the Croatian homepage, measured the English
+  one, and labelled its results `/`. The primary page was the one page the tooling never
+  looked at; MUSE-35's QA nearly filed the redirect's refetching as a font-preload bug.
+  `scripts/browser-checks.mjs` is the only way to open a page: `openCheckPage(browser,
+  site, route)` derives the locale **from the route** — the route is the intent, asking
+  for `/en/` is asking for English — pins `navigator.language` *and* the stored language,
+  and asserts after navigating that it landed where it asked. That assertion is the
+  general half: it catches the next redirect too, whatever it is about. Two scripts used
+  to carry a hand-written `addInitScript` line instead, which is exactly the shape of
+  defence this repo has watched fail three times. So the module **owns Playwright** —
+  nothing in `scripts/` imports it, and no file in `scripts/` or `test/` may call
+  `newContext`, `newPage`, `addInitScript`, `setItem` or `chromium.launch`;
+  `test/browserlocale.test.ts` reads both directories and fails if one of them opens its
+  own browser, so a suite written next year inherits this without knowing it exists. Each
+  check prints `describeMeasured()` beside its result, so the log names the page and its
+  `<html lang>` rather than the route that was requested. `openRedirectProbe` is the
+  deliberate opt-out that asserts nothing, for `test/lang.test.ts` and
+  `test/localeswitch.test.ts`, whose subject *is* the redirect — it must be handed a
+  browser language rather than defaulted one, and `scripts/` may not use it.
 - **A test never chooses where it builds.** `npm test` runs ten real `astro build`s in
   parallel workers; `test/helpers/scratch.ts` mints a directory per build with `mkdtemp`
   and passes each one its own cache root, so two suites cannot share an output tree and

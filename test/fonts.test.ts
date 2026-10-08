@@ -2,9 +2,10 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { chromium, type Browser } from 'playwright';
+import type { Browser } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { launchChecks, openCheckPage } from '../scripts/browser-checks.mjs';
 import {
   APEX_DEPLOY,
   basePath,
@@ -95,7 +96,7 @@ beforeAll(async () => {
   // weight of not leaking a dev server on the `process.once('exit')` backstop in
   // `scratch.ts`. The browser is the cheapest to start, so it goes first and is always
   // cleanable by the time anything else can fail.
-  browser = await chromium.launch();
+  browser = await launchChecks();
   dev = await astroDev({}, 'fonts');
 
   const pages = buildSite(PAGES_DEPLOY);
@@ -197,30 +198,40 @@ async function facesNeededWithoutPreloads(
   env: Environment,
   route: string,
 ): Promise<string[]> {
-  const pageUrl = env.url(route);
-  const page = await browser.newPage();
   const requested = new Set<string>();
 
+  // Opened through `scripts/browser-checks.mjs` (MUSE-48), and this is the suite the
+  // ticket came out of. A bare Playwright page reports `en-US`, so asking for `''` opened
+  // the Croatian homepage and measured the English one — and worse than that here: the
+  // interception below is registered for *the URL asked for*, so on `/` the redirect
+  // landed on a page whose preloads were never stripped, and "the faces this page needs
+  // without preloads" was silently "the faces this other page needs, preloads included".
+  // That is the double-download MUSE-35's QA nearly filed as a preload mismatch, and the
+  // reason this file's own comment about the Croatian homepage's diacritics was describing
+  // a page no run had ever loaded.
+  const { page, close } = await openCheckPage(browser, env, route, {
+    waitUntil: 'load',
+    prepare: async (opened, url) => {
+      await opened.route(url, async (interception) => {
+        const response = await interception.fetch();
+        const stripped = (await response.text()).replace(
+          /<link\b[^>]*\brel="preload"[^>]*>/g,
+          '',
+        );
+        expect(stripped, 'the preloads were not stripped').not.toContain('rel="preload"');
+        await interception.fulfill({ response, body: stripped });
+      });
+      opened.on('request', (req) => {
+        if (req.url().endsWith('.woff2')) requested.add(req.url());
+      });
+    },
+  });
+
   try {
-    await page.route(pageUrl, async (interception) => {
-      const response = await interception.fetch();
-      const stripped = (await response.text()).replace(
-        /<link\b[^>]*\brel="preload"[^>]*>/g,
-        '',
-      );
-      expect(stripped, 'the preloads were not stripped').not.toContain('rel="preload"');
-      await interception.fulfill({ response, body: stripped });
-    });
-
-    page.on('request', (req) => {
-      if (req.url().endsWith('.woff2')) requested.add(req.url());
-    });
-
-    await page.goto(pageUrl, { waitUntil: 'load' });
     await page.evaluate(() => document.fonts.ready);
     return [...requested].sort();
   } finally {
-    await page.close();
+    await close();
   }
 }
 
@@ -249,10 +260,10 @@ describe.each(ENVIRONMENTS.map((name, index) => ({ name, index })))(
     });
 
     it('reports every face loaded, and none failed, in a real browser', async () => {
-      const page = await browser.newPage();
+      const { page, close } = await openCheckPage(browser, env(), CONTENT_ROUTE, {
+        waitUntil: 'load',
+      });
       try {
-        await page.goto(env().url(CONTENT_ROUTE), { waitUntil: 'load' });
-
         // `document.fonts` only loads a face the page has text for, so a subset
         // covering characters this page happens not to use stays `unloaded` however
         // healthy it is. Asking for each one explicitly makes "all six" a claim about
@@ -273,7 +284,7 @@ describe.each(ENVIRONMENTS.map((name, index) => ({ name, index })))(
         expect(report.loaded, env().name).toBe(FACE_COUNT);
         expect(report.total, env().name).toBe(FACE_COUNT);
       } finally {
-        await page.close();
+        await close();
       }
     });
 

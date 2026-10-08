@@ -1,6 +1,7 @@
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import type { Browser, BrowserContext, Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { launchChecks, openRedirectProbe } from '../scripts/browser-checks.mjs';
 import type { Locale } from '../src/lib/i18n';
 import { LANG_PARAM, LANG_STORAGE_KEY } from '../src/lib/lang';
 import { pagePath, startPreview, type Preview } from './helpers/preview';
@@ -55,7 +56,7 @@ let host: string;
 beforeAll(async () => {
   [preview, browser] = await Promise.all([
     startPreview('localeswitch'),
-    chromium.launch(),
+    launchChecks(),
   ]);
   host = new URL(preview.origin).origin;
 }, 240_000);
@@ -80,37 +81,31 @@ interface Visit {
 /**
  * Open `url` in a browser reporting `locale`, optionally with a language already stored.
  *
- * `storedLang` is seeded with an init script so it is in `localStorage` *before* the
- * blocking inline script in `<head>` reads it.
+ * Through `openRedirectProbe` — the door in `scripts/browser-checks.mjs` that pins no
+ * locale and asserts no landing (MUSE-48). This suite enumerates where the redirect takes
+ * a browser, so pinning the locale would pin away its subject; every suite that *measures*
+ * a page uses `openCheckPage` instead, and the browser language here has to be named
+ * rather than inherited from the automation's default.
  *
- * The seed only writes when the key is absent. An init script runs again on every
- * navigation, including the one the redirect performs, so an unconditional write would
- * reinstate the old value on the destination page and hide the fact that the page we came
- * from had just replaced it.
+ * `storedLang` is seeded there with an init script, so it is in `localStorage` *before*
+ * the blocking inline script in `<head>` reads it, and only when the key is absent — see
+ * the note at the probe for why an unconditional write would hide the write under test.
  */
 async function visit(
   url: string,
   opts: { locale: string; storedLang?: string } = { locale: FOREIGN_LOCALE },
 ): Promise<Visit> {
-  const ctx = await browser.newContext({
-    locale: opts.locale,
+  const { page, context, close } = await openRedirectProbe(browser, {
+    navigatorLocale: opts.locale,
+    storedLang: opts.storedLang,
     // Same viewport as the a11y gate, and wide enough that the header is the desktop
     // layout with the locale switch on screen rather than behind the menu button.
-    viewport: { width: 1280, height: 900 },
+    context: { viewport: { width: 1280, height: 900 } },
   });
-  if (opts.storedLang !== undefined) {
-    await ctx.addInitScript(
-      ([key, value]) => {
-        if (localStorage.getItem(key!) === null) localStorage.setItem(key!, value!);
-      },
-      [LANG_STORAGE_KEY, opts.storedLang] as const,
-    );
-  }
-  const page = await ctx.newPage();
   await page.goto(url, { waitUntil: 'networkidle' });
   await page.evaluate(() => document.fonts.ready);
   await settleScroll(page);
-  return { page, context: ctx, close: () => ctx.close() };
+  return { page, context, close };
 }
 
 /**
@@ -568,17 +563,11 @@ async function landing(opts: {
   locale: string;
   storedLang?: string;
 }): Promise<Landing> {
-  const ctx = await browser.newContext({ locale: opts.locale });
+  const { page, close } = await openRedirectProbe(browser, {
+    navigatorLocale: opts.locale,
+    storedLang: opts.storedLang,
+  });
   try {
-    if (opts.storedLang !== undefined) {
-      await ctx.addInitScript(
-        ([key, value]) => {
-          if (localStorage.getItem(key!) === null) localStorage.setItem(key!, value!);
-        },
-        [LANG_STORAGE_KEY, opts.storedLang] as const,
-      );
-    }
-    const page = await ctx.newPage();
     let navigations = 0;
     page.on('framenavigated', (frame) => {
       if (frame === page.mainFrame() && !frame.url().startsWith('about:')) navigations += 1;
@@ -593,7 +582,7 @@ async function landing(opts: {
       navigations,
     };
   } finally {
-    await ctx.close();
+    await close();
   }
 }
 
@@ -672,7 +661,7 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
       // script that may `location.replace` and then writes the choice; a fixed sleep is
       // long enough on a quiet laptop and not on a loaded CI runner, which is exactly
       // how this timed out at 30s in CI while passing in 1.2s locally.
-      await tab.waitForFunction(() => localStorage.getItem('muse-lang') !== null, null, {
+      await tab.waitForFunction((key) => localStorage.getItem(key) !== null, LANG_STORAGE_KEY, {
         timeout: 15_000,
       });
 
@@ -699,7 +688,7 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
       // script that may `location.replace` and then writes the choice; a fixed sleep is
       // long enough on a quiet laptop and not on a loaded CI runner, which is exactly
       // how this timed out at 30s in CI while passing in 1.2s locally.
-      await tab.waitForFunction(() => localStorage.getItem('muse-lang') !== null, null, {
+      await tab.waitForFunction((key) => localStorage.getItem(key) !== null, LANG_STORAGE_KEY, {
         timeout: 15_000,
       });
 
@@ -741,12 +730,11 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
   it('serves a crawler the bare path, with no parameter in the markup', async () => {
     // The `?lang=` is attached client-side. The rendered href stays the clean canonical
     // spelling, so a crawler is not offered a second URL for every page on the site.
-    const ctx = await browser.newContext({
-      locale: FOREIGN_LOCALE,
-      javaScriptEnabled: false,
+    const { page, close } = await openRedirectProbe(browser, {
+      navigatorLocale: FOREIGN_LOCALE,
+      context: { javaScriptEnabled: false },
     });
     try {
-      const page = await ctx.newPage();
       await page.goto(urlFor('/en/schedule'), { waitUntil: 'load' });
       expect(await switchHref(page, 'hr')).toBe(pagePath('/schedule'));
       // And one link rather than two: the self-reference a crawler was being offered is
@@ -754,7 +742,7 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
       expect(await page.locator('[data-locale-switch] a').count()).toBe(1);
       expect(await page.getAttribute(entryFor('en'), 'aria-current')).toBe('page');
     } finally {
-      await ctx.close();
+      await close();
     }
   });
 });
@@ -869,7 +857,7 @@ describe('the entry for the locale you are reading is inert (MUSE-39)', () => {
       await page.locator(switchTo('hr')).click({ button: 'middle' });
       const tab = await opened;
       await tab.waitForLoadState('load');
-      await tab.waitForFunction(() => localStorage.getItem('muse-lang') !== null, null, {
+      await tab.waitForFunction((key) => localStorage.getItem(key) !== null, LANG_STORAGE_KEY, {
         timeout: 15_000,
       });
       expect(tab.url()).toBe(urlFor('/schedule', `?${LANG_PARAM}=hr`));
