@@ -241,8 +241,47 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   query string would hand the component a URL instead of the `ImageMetadata` `<Image>`
   needs. There is **no `public/`**: on the Pages sub-path a `public/favicon.ico`
   publishes under the base prefix while the bare probe goes to the *origin* root, so it
-  would answer nothing and cost MUSE-35's resolution bug. No `og:image` here —
-  `siteSettings.shareImage` is a different asset.
+  would answer nothing and cost MUSE-35's resolution bug. The share card is a separate
+  asset and a separate bullet, below.
+- **A shared link shows a picture, and `siteSettings.shareImage` is what decides which**
+  (MUSE-69). `BaseLayout.astro` emitted `og:title`, `og:description` and `og:url` and no
+  image, so every link in a WhatsApp group rendered as a bare line of text — and the CMS
+  field for it had existed end to end since MUSE-20 **with no reader**, under a Studio
+  description promising Mina that WhatsApp and Facebook would show it. `shareCard()` in
+  `src/lib/share-card.ts` is the one decision point: her upload if she has set one,
+  `src/assets/muse-share-card.png` if not. **The fallback is allowed and the reasoning is
+  the thing to keep**: the rule MUSE-49 and MUSE-36 share is *never assert something
+  nobody said*, and the studio's own mark asserts nothing beyond "this is Muse by Mina",
+  which every page already says. A fallback the editor does not know about reads as a bug,
+  so the field description tells her it exists and that uploading replaces it.
+
+  The URL is `new URL(card.src, Astro.site)` — **derived, never written**, which is the
+  whole of why MUSE-42 stays green; a root-relative `og:image` is silently ignored by most
+  scrapers, so it has to be absolute and it may not name a host. `og:image:width`/`height`
+  are not padding: without them Facebook renders the *first* share of a URL with no image,
+  because the card is laid out before the fetch, and `imageSize` answers them for an
+  upload off the asset id — clamped to what the asset has and fed back into `imageSrc`, so
+  the tag and the bytes cannot disagree. **No `og:image:type`** (`auto=format` makes it
+  unknowable) and **no `og:locale:alternate`**: it is an instruction, not a hint — Facebook
+  refetches the same URL with `?fb_locale=` expecting a different language, which a static
+  site with the locale in the path cannot give it, so it would cache Croatian as the
+  English rendering. The hreflang cluster is where the pairing is stated.
+
+  **The 404 carries a card**, unlike the canonical and the JSON-LD, because an image is
+  not a claim about a URL — the same reason it carries a tab icon and a `theme-color`. It
+  already emits `og:title` and `og:description`, so withholding only the image is exactly
+  the bare text card this ticket is about, on the page a dead shared link reaches.
+
+  The card itself is §12 executed rather than a new design (MUSE-40's principle): the
+  supplied lockup 500px wide on opaque plum, centred, §12's 120px clear space with 13px of
+  slack — `logo/README.md` has the arithmetic and why 500 rather than the 521 §12 allows.
+  **`npm run budget` structurally cannot see any of this** and reporting nothing is not
+  evidence: no page element references an `og:image`, so headless Chromium never fetches
+  one. `test/share.test.ts` weighs the committed file instead (23,745 bytes) and
+  re-measures its pixels against `muse-lockup-white.png` by **column *and* row** ink
+  profile — a mirrored copy scores 0.22 on columns and 0.9999 on rows, so one axis alone
+  passes it. `assetRefs` reads a `<meta>` image now, which is what gets the card resolved
+  against `dist` under both deploy targets by `test/assets.test.ts` with no build added.
 - `rootPath()`/`rootUrl()` in `src/lib/site.ts` are for files the build publishes at the
   deploy root — `robots.txt`, `llms.txt`, the sitemap — and for a future `CNAME`. They
   are **not** the way to reference a bundled asset; see the bullet above, and note that
