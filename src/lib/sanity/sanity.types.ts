@@ -255,7 +255,11 @@ export type ScheduleSlot = {
   class: ClassReference;
   day: "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
   start: string;
-  instructor?: InstructorReference;
+  instructors?: Array<
+    {
+      _key: string;
+    } & InstructorReference
+  >;
   active: boolean;
 };
 
@@ -267,12 +271,15 @@ export type Class = {
   _rev: string;
   name: LocaleString;
   slug: Slug;
-  style: "traditional" | "moderna" | "sensual";
-  level: "beginner" | "intermediate" | "advanced";
-  description: LocaleText;
+  level: "beginner" | "improver" | "intermediate" | "advanced";
+  description?: LocaleText;
   durationMin: number;
-  instructor: InstructorReference;
-  image: {
+  instructors: Array<
+    {
+      _key: string;
+    } & InstructorReference
+  >;
+  image?: {
     asset?: SanityImageAssetReference;
     media?: unknown;
     hotspot?: SanityImageHotspot;
@@ -292,7 +299,7 @@ export type Instructor = {
   name: string;
   slug: Slug;
   role: LocaleString;
-  bio: LocaleText;
+  bio?: LocaleText;
   portrait?: {
     asset?: SanityImageAssetReference;
     media?: unknown;
@@ -505,7 +512,7 @@ export type PAGES_QUERY_RESULT = Array<{
 
 // Source: src/lib/sanity/queries.ts
 // Variable: SCHEDULE_QUERY
-// Query: *[_type == "scheduleSlot" && active == true] | order(start asc){    _id,    day,    start,    "classId": class->_id,    "name": class->name{ hr, en },    "style": class->style,    "level": class->level,    "durationMin": class->durationMin,    "instructor": coalesce(instructor->name, class->instructor->name)  }
+// Query: *[_type == "scheduleSlot" && active == true] | order(start asc){    _id,    day,    start,    "classId": class->_id,    "name": class->name{ hr, en },    "level": class->level,    "durationMin": class->durationMin,    "instructors": coalesce(instructors[]->name, class->instructors[]->name)  }
 export type SCHEDULE_QUERY_RESULT = Array<{
   _id: string;
   day: "fri" | "mon" | "sat" | "sun" | "thu" | "tue" | "wed";
@@ -515,15 +522,14 @@ export type SCHEDULE_QUERY_RESULT = Array<{
     hr: string;
     en: string;
   };
-  style: "moderna" | "sensual" | "traditional";
-  level: "advanced" | "beginner" | "intermediate";
+  level: "advanced" | "beginner" | "improver" | "intermediate";
   durationMin: number;
-  instructor: string;
+  instructors: Array<string>;
 }>;
 
 // Source: src/lib/sanity/queries.ts
 // Variable: CLASSES_QUERY
-// Query: *[_type == "class"] | order(coalesce(order, 999) asc, name.hr asc){    _id,    "slug": slug.current,    name{ hr, en },    style,    level,    description{ hr, en },    durationMin,    "instructor": instructor->name,    image{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop }  }
+// Query: *[_type == "class"] | order(coalesce(order, 999) asc, name.hr asc){    _id,    "slug": slug.current,    name{ hr, en },    level,    description{ hr, en },    durationMin,    "instructors": instructors[]->name,    image{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop }  }
 export type CLASSES_QUERY_RESULT = Array<{
   _id: string;
   slug: string;
@@ -531,14 +537,13 @@ export type CLASSES_QUERY_RESULT = Array<{
     hr: string;
     en: string;
   };
-  style: "moderna" | "sensual" | "traditional";
-  level: "advanced" | "beginner" | "intermediate";
+  level: "advanced" | "beginner" | "improver" | "intermediate";
   description: {
     hr: string;
     en: string;
-  };
+  } | null;
   durationMin: number;
-  instructor: string;
+  instructors: Array<string>;
   image: {
     assetId: string | null;
     alt: {
@@ -547,7 +552,7 @@ export type CLASSES_QUERY_RESULT = Array<{
     };
     hotspot: SanityImageHotspot | null;
     crop: SanityImageCrop | null;
-  };
+  } | null;
 }>;
 
 // Source: src/lib/sanity/queries.ts
@@ -564,7 +569,7 @@ export type INSTRUCTORS_QUERY_RESULT = Array<{
   bio: {
     hr: string;
     en: string;
-  };
+  } | null;
   portrait: {
     assetId: string | null;
     alt: {

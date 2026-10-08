@@ -2,13 +2,12 @@
 import TrialForm from './TrialForm.astro';
 import { localeUrl, type Locale } from '../lib/i18n';
 import { CTA, STUDIO } from '../lib/nav';
-import { SCHEDULE } from '../data/schedule';
 import {
   formatTime,
   groupByDay,
   LEVEL_NAME,
-  STYLES,
-  STYLE_NAME,
+  minutesPhrase,
+  uniformDuration,
   WEEKDAY_NAME,
   type ClassEntry,
   type Level,
@@ -34,20 +33,34 @@ interface Props {
    * import position — see the note there.
    */
   address: string;
+  /**
+   * The weekly timetable, from `getSchedule()` — the same rows `/schedule` renders.
+   *
+   * A prop for the reason `address` is a prop: this file's import list cannot grow. It
+   * also closes MUSE-11's door from the other side — the doors are derived from the
+   * schedule, and the schedule now arrives from the CMS, so the homepage cannot advertise
+   * a class the timetable does not have even for one build.
+   */
+  entries: ClassEntry[];
 }
-const { locale, address } = Astro.props;
+const { locale, address, entries } = Astro.props;
+
+/** As on `/schedule`: the class length is read off the rows, never typed (MUSE-36). */
+const minutes = uniformDuration(entries);
 
 const t = {
   hr: {
     eyebrow: 'Plesni studio · Zagreb',
     h1: 'Nauči bachatu u Zagrebu',
-    lede: 'Bez partnera, bez iskustva. Satovi traju 60 minuta i podijeljeni su u tri razine.',
+    lede: [
+      'Bez partnera, bez iskustva.',
+      minutes === undefined
+        ? 'Razinu biraš po tome koliko dugo plešeš.'
+        : `Satovi traju ${minutesPhrase(minutes, 'hr')}, a razinu biraš po tome koliko dugo plešeš.`,
+    ].join(' '),
     schedule: 'Pogledaj raspored',
     startHere: 'Nova si u plesu?',
     startLede: 'Dvoja vrata, ne šest. Odaberi ono koje ti odgovara.',
-    flavours: 'Tri okusa, jedan ples',
-    flavoursLede:
-      'Bachata je ples u paru iz Dominikanske Republike. Kod nas je naučiš u tri izraza — ali to je i dalje jedan ples, i sve počinje istim koracima.',
     where: 'Gdje smo',
     openMaps: 'Otvori u Google Maps',
     trial: 'Dođi na probni sat',
@@ -56,22 +69,19 @@ const t = {
       beginner: 'Nikad nisi plesao/la. Počni ovdje.',
       intermediate: 'Plešeš oko godinu dana.',
     },
-    flavour: {
-      traditional: 'Korijeni plesa — zaigrana, ritmična, bliska glazbi.',
-      moderna: 'Čišće linije i okreti, s naglaskom na vođenje i praćenje.',
-      sensual: 'Mekani pokreti tijela i valovi, uvijek kroz vezu u paru.',
-    },
   },
   en: {
     eyebrow: 'Dance studio · Zagreb',
     h1: 'Learn bachata in Zagreb',
-    lede: 'No partner, no experience needed. Classes run 60 minutes across three levels.',
+    lede: [
+      'No partner, no experience needed.',
+      minutes === undefined
+        ? 'Pick your level by how long you have been dancing.'
+        : `Classes run ${minutesPhrase(minutes, 'en')}, and you pick your level by how long you have been dancing.`,
+    ].join(' '),
     schedule: 'See the schedule',
     startHere: 'New to dancing?',
     startLede: 'Two doors, not six. Pick the one that fits.',
-    flavours: 'Three flavours, one dance',
-    flavoursLede:
-      'Bachata is a partner dance from the Dominican Republic. We teach it in three expressions — but it is still one dance, and it all starts with the same steps.',
     where: 'Where we are',
     openMaps: 'Open in Google Maps',
     trial: 'Come to a trial class',
@@ -79,11 +89,6 @@ const t = {
     doorWho: {
       beginner: 'You have never danced. Start here.',
       intermediate: 'About a year of dancing.',
-    },
-    flavour: {
-      traditional: 'The roots — playful, rhythmic, close to the music.',
-      moderna: 'Cleaner lines and turns, built on leading and following.',
-      sensual: 'Soft body movement and waves, always through the connection.',
     },
   },
 }[locale];
@@ -100,6 +105,15 @@ const t = {
 const DOOR_LEVELS = ['beginner', 'intermediate'] as const satisfies readonly Level[];
 
 /**
+ * There are four levels now and still two doors (MUSE-36).
+ *
+ * `improver` joined `LEVELS` with the real timetable, and it is deliberately *not* a
+ * door: the brief's reason for picking two was who needs telling where to start, and
+ * somebody a few months in already knows they are not a beginner. A door per level would
+ * be four doors, which is the "six doors" the section's own heading rejects.
+ */
+
+/**
  * The class a door points at: the first session of that level in the week.
  *
  * MUSE-11 — the day and time used to be typed into this file, and had already
@@ -109,31 +123,53 @@ const DOOR_LEVELS = ['beginner', 'intermediate'] as const satisfies readonly Lev
  * there. `groupByDay` is week-ordered and sorts each day by start time, so
  * "first" means the soonest in the week — the nearest way in.
  */
-function firstSession(level: Level): ClassEntry {
-  for (const { entries } of groupByDay(SCHEDULE)) {
-    const entry = entries.find((candidate) => candidate.level === level);
+function firstSession(level: Level): ClassEntry | undefined {
+  for (const group of groupByDay(entries)) {
+    const entry = group.entries.find((candidate) => candidate.level === level);
     if (entry) return entry;
   }
-  // A door onto a level nobody teaches is worse than one door fewer: fail the build.
-  throw new Error(`No ${level} class in the schedule — a homepage door has nothing to open.`);
+  return undefined;
 }
 
-/** Level name, day and time all come from the schedule; only `who` is page copy. */
-const doors = DOOR_LEVELS.map((level) => {
+/**
+ * Level name, day and time all come from the schedule; only `who` is page copy.
+ *
+ * **A door onto a level nobody teaches is dropped, not a build failure** — and that
+ * changed in MUSE-36, so the reasoning is worth having here.
+ *
+ * MUSE-11 threw: "a door onto a level nobody teaches is worse than one door fewer". That
+ * was right while the rows were a file in this repository, where a missing beginner class
+ * could only be a developer's mistake and a loud build failure was the cheapest way to
+ * find it. The rows are CMS content now, and `scheduleSlot.active` exists precisely so
+ * Mina can take a class off the timetable for the summer — so the same rule would mean a
+ * legitimate edit in the Studio stops the site building, on every pull request and every
+ * scheduled rebuild, with an error about a homepage door.
+ *
+ * What MUSE-11 was actually protecting is still protected: a door never shows a day and
+ * time that is not in the schedule, because it has none to show unless there is a class.
+ * The section going *empty* is still a build failure, below — "New to dancing?" with no
+ * way in is a broken page rather than a smaller one.
+ */
+const doors = DOOR_LEVELS.flatMap((level) => {
   const entry = firstSession(level);
-  return {
-    level,
-    name: LEVEL_NAME[locale][level],
-    when: `${WEEKDAY_NAME[locale][entry.day]} · ${formatTime(entry.start)}`,
-    who: t.doorWho[level],
-  };
+  if (!entry) return [];
+  return [
+    {
+      level,
+      name: LEVEL_NAME[locale][level],
+      when: `${WEEKDAY_NAME[locale][entry.day]} · ${formatTime(entry.start)}`,
+      who: t.doorWho[level],
+    },
+  ];
 });
 
-/** The three styles, named by `STYLE_NAME` for the same reason the doors are. */
-const flavours = STYLES.map((style) => ({
-  name: STYLE_NAME[locale][style],
-  text: t.flavour[style],
-}));
+if (doors.length === 0) {
+  throw new Error(
+    `The homepage's „${t.startHere}" section has no doors: the schedule holds no ` +
+      `${DOOR_LEVELS.join(' or ')} class. One of those two has to be on the timetable — ` +
+      `check that their slots are switched on in the Studio.`,
+  );
+}
 ---
 
 <section class="hero">
@@ -170,22 +206,22 @@ const flavours = STYLES.map((style) => ({
   </div>
 </section>
 
-<section class="section">
-  <div class="wrap">
-    <p class="eyebrow">{t.flavours}</p>
-    <p class="lede">{t.flavoursLede}</p>
-    <ul class="cards three">
-      {
-        flavours.map((f) => (
-          <li class="card">
-            <p class="cardName">{f.name}</p>
-            <p class="cardWho">{f.text}</p>
-          </li>
-        ))
-      }
-    </ul>
-  </div>
-</section>
+{/*
+  **„Tri okusa, jedan ples" was here, and nothing replaces it** (MUSE-36).
+
+  Three cards — Traditional / Moderna / Sensual — each with a paragraph about what that
+  style is like. It was the homepage's most substantial piece of writing and it described
+  a distinction the studio does not make: the three styles were invented in the foundation
+  commit alongside the thirteen invented classes, and the real timetable has no style
+  dimension at all. Copy that is well written about something untrue is worse than no copy,
+  because it reads as authoritative.
+
+  Nothing takes its place on purpose. The honest candidates were all facts the page already
+  carries — the two doors name the days and times, `/schedule` is one click from the hero,
+  the address is two sections down — and writing a section about what a class is like would
+  be inventing the next thing somebody has to come back and delete. A section here is a
+  content decision for Mina, not a gap to be filled by whoever happened to notice it.
+*/}
 
 <section class="section invert" id="trial">
   <div class="wrap">
@@ -333,9 +369,6 @@ const flavours = STYLES.map((style) => ({
     }
     .cards.two {
       grid-template-columns: repeat(2, 1fr);
-    }
-    .cards.three {
-      grid-template-columns: repeat(3, 1fr);
     }
   }
 

@@ -208,19 +208,58 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   ticket that routes the page**; an entry that outlives its ticket is a page nobody
   shipped.
 - **An optional field is a decision, not laziness.** `instructor.portrait`,
-  `instructor.instagram`, `siteSettings.phone` and `openingHours` are optional because no
-  real value exists for any of them, and a `required()` field with no value can only be
-  filled with fiction — which is how MUSE-36 happened. The cost is paid in the page: the
-  3:4 placeholder frame in `AboutUs.astro` reserves exactly the box a photograph will take,
-  so nothing shifts when one lands. Making one required later is a schema change plus a
+  `instructor.instagram`, `instructor.bio`, `class.description`, `class.image`,
+  `siteSettings.phone` and `openingHours` are optional because no real value exists for
+  any of them, and a `required()` field with no value can only be filled with fiction —
+  which is how MUSE-36 happened. The last three came off the required list *in* MUSE-36:
+  seeding two real instructors meant a required bio could only be satisfied by writing a
+  paragraph about a real person to get past a validator, and the homepage style cards were
+  the only consumer `class.description` and `class.image` ever had.
+
+  The cost is paid in the page: the 3:4 placeholder frame in `AboutUs.astro` reserves
+  exactly the box a photograph will take, and a bio that has not been written is a card
+  that is a name and a role rather than a gap. Making one required later is a schema
+  change plus a
   line moved back onto the `Guaranteed` list in `src/lib/sanity/shape.ts` — and note the
   `OptionalIn<>` assertions beside it, which exist because a field with no assertion at all
   is a field nothing watches: delete `instagram` from the projection and the generated type
   simply stops having the key.
-- **The schedule and the instructors are deliberately not in Sanity yet** (MUSE-36).
-  `src/data/schedule.ts` is invented content naming instructors who do not exist; importing
-  it would make fiction look authoritative in the Studio. The real timetable is entered
-  there directly, and `Schedule.astro` already takes its rows as a prop.
+- **The schedule is in Sanity, and `src/data/schedule.ts` is gone** (MUSE-36). It held
+  thirteen invented classes across five days naming two instructors who do not exist, and
+  it was live. What is published now came from Mina: four classes, two evenings, 90
+  minutes each, Mina **and** Antonio on every one.
+
+  ```
+  PONEDJELJAK   Beginner      19:30–21:00
+                Intermediate  21:00–22:30
+  ČETVRTAK      Improver      19:30–21:00
+                Advanced      21:00–22:30
+  ```
+
+  Four things follow from it that are easy to undo by accident:
+
+  - **`LEVELS` has four entries, in dancer order** — `beginner → improver → intermediate
+    → advanced`. The order drives the grid, the Studio dropdown and the homepage doors, so
+    a new level is *inserted*, never appended. `LEVEL_PREREQUISITE.improver` is the one
+    string on the site nobody has confirmed with Mina; it is marked as such in
+    `src/lib/schedule.ts`.
+  - **There is no `STYLES`.** `['traditional','moderna','sensual']` was invented with the
+    rows and had shaped a filter, three homepage cards and a required `class.style` field.
+    `test/sanity.test.ts` asserts no field anywhere in the schema is named after a style,
+    so it cannot come back without the decision being made again.
+  - **`instructors` is an array** on `class` and on `scheduleSlot`, and the override
+    *replaces* rather than adds. Not for today's data — for lady styling, a confirmed
+    coming class that Mina teaches alone. `formatNames` in `src/lib/schedule.ts` joins
+    them („Mina i Antonio" / "Mina and Antonio"); a comma-joined list reads as a label.
+  - **Both pages take the rows as a prop with no default.** `/schedule` and `/` pass
+    `await getSchedule()`. The old default was what made it possible to render the page
+    before anyone had asked the studio what it teaches.
+
+  And one behaviour changed with it: **a homepage door whose level has no class is
+  dropped, not a build failure.** MUSE-11 threw, correctly, while the rows were a file in
+  this repository. `scheduleSlot.active` is the field Mina uses for a summer pause, so the
+  same rule would now mean an ordinary Studio edit stops the site building. The section
+  going *empty* is still a build failure — see the note in `Home.astro`.
 - **A page imports `src/lib/sanity` and nothing deeper.** The index is what decodes; a
   module from inside the read path hands back raw rows with silent nulls. Both halves are
   tests, not conventions: `test/sanity.test.ts` fails on an import specifier containing
@@ -263,10 +302,12 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   translated string is a missing field an error can name. See the long note in
   `sanity/schemaTypes/objects/locale.ts` before changing this: it is hard to reverse once
   content exists.
-- **Enums are structure and stay in code.** `LEVELS`, `STYLES`, `WEEKDAYS` and the route
-  list are imported *into* the schema from `src/lib/schedule.ts` and `src/lib/pages.ts`
+- **Enums are structure and stay in code.** `LEVELS`, `WEEKDAYS` and the route list are
+  imported *into* the schema from `src/lib/schedule.ts` and `src/lib/pages.ts`
   (`sanity/schemaTypes/enums.ts`), so the Studio offers a fixed list and Mina cannot type
-  a level. Prerequisites, form copy, and time/currency formatting are deliberately **not**
+  a level. `STYLES` was a fourth and MUSE-36 deleted it — a closed set belongs in code
+  because the site *branches* on it, not because it is short, and the three styles were
+  invented rather than taught. Prerequisites, form copy, and time/currency formatting are deliberately **not**
   in Sanity — see that file for why each one would be a mistake.
 - **Every image field is built by `imageField()`**, which is the only way to get
   `hotspot: true` and a required bilingual `alt`. The design system crops one upload to
@@ -297,8 +338,11 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   installed regardless, but `sanity build` preflights *declarations*, not resolution.
 - **A missing or malformed document fails the build naming itself** — `_id`, type and
   field path — through `src/lib/sanity/decode.ts`. "Unreachable", "empty" and "malformed"
-  are three different error types on purpose: most of the dataset is still empty
-  (MUSE-36), so "nothing on the page" has to be readable as which of the three it was.
+  are three different error types on purpose: much of the dataset is still empty, so
+  "nothing on the page" has to be readable as which of the three it was. `textList` is the
+  one to know about for the schedule: `instructors[]->name` answers `null` for an absent
+  field, `[]` for an empty array and `[null, 'Mina']` for a deleted reference, and a page
+  joining the names would publish „ i Mina" for the third — so the error names the index.
 - **The Studio is hosted by Sanity**, at `musebymina.sanity.studio`, never mounted at
   `/studio` here. `.github/workflows/studio.yml` redeploys it when a schema file lands on
   `main`. `SANITY_PROJECT_ID` and `SANITY_DATASET` are repository *variables*; there is

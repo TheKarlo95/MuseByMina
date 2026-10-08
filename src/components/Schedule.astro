@@ -5,18 +5,18 @@ import {
   classCount,
   daysWithClasses,
   entriesAt,
+  formatNames,
   formatTime,
   groupByDay,
   LEVELS,
   LEVEL_NAME,
   LEVEL_PREREQUISITE,
-  STYLES,
-  STYLE_NAME,
+  minutesPhrase,
   timeRows,
+  uniformDuration,
   WEEKDAY_NAME,
   type ClassEntry,
 } from '../lib/schedule';
-import { SCHEDULE } from '../data/schedule';
 
 /**
  * The weekly schedule — design system §7.2, "the largest responsive shift in the
@@ -39,28 +39,46 @@ import { SCHEDULE } from '../data/schedule';
  * **It is real HTML, never an image.** An image of a schedule is unreadable on a
  * phone, invisible to search, and out of date the day it is exported.
  *
- * Data source: `entries` defaults to the placeholder rows in
- * `src/data/schedule.ts`. Sanity becomes `entries={await getSchedule()}` — a prop
- * change. Nothing in this file knows where the rows came from.
+ * Data source: `entries` is **required** and comes from the CMS — the page wrappers pass
+ * `await getSchedule()`. It used to default to thirteen invented rows in
+ * `src/data/schedule.ts`, which is the bug MUSE-36 was raised for: the default made the
+ * page renderable before anybody had asked the studio what it teaches, and it then stayed
+ * live for the life of the project. There is no default now, so a `/schedule` with no
+ * content is a build failure naming the missing documents rather than a page of fiction.
+ * Nothing else in this file knows where the rows came from.
  */
 interface Props {
   locale: Locale;
-  /** Defaults to the hardcoded placeholder set. See `src/data/schedule.ts`. */
-  entries?: ClassEntry[];
+  /** The weekly timetable, from `getSchedule()`. No default — see above. */
+  entries: ClassEntry[];
 }
 
-const { locale, entries = SCHEDULE } = Astro.props;
+const { locale, entries } = Astro.props;
+
+/**
+ * How long a class is, **read off the rows rather than typed into the lede** (MUSE-36).
+ *
+ * The lede said „Satovi traju 60 minuta." while every class was 60 minutes, and went on
+ * saying it after the real timetable turned out to be 90 — a sentence of copy disagreeing
+ * with the table underneath it. Same failure as the homepage door that advertised a class
+ * that was not there (MUSE-11), and the same fix: derive it. Classes of differing length
+ * drop the sentence instead of picking one, because there is no honest single number then.
+ */
+const minutes = uniformDuration(entries);
 
 const t = {
   hr: {
     eyebrow: 'Raspored · Ilica 209',
     h1: 'Tjedni raspored',
-    lede: 'Satovi traju 60 minuta. Dolaziš bez partnera i bez iskustva — razinu biraš po tome koliko dugo plešeš.',
+    lede: [
+      minutes === undefined ? undefined : `Satovi traju ${minutesPhrase(minutes, 'hr')}.`,
+      'Dolaziš bez partnera i bez iskustva — razinu biraš po tome koliko dugo plešeš.',
+    ]
+      .filter(Boolean)
+      .join(' '),
     filters: 'Filtriraj raspored',
     levelFilter: 'Razina',
-    styleFilter: 'Stil',
     allLevels: 'Sve razine',
-    allStyles: 'Svi stilovi',
     time: 'Vrijeme',
     gridCaption: 'Tjedni raspored — dani u stupcima, vrijeme u redovima.',
     empty: 'Nema termina za odabrani filter.',
@@ -70,12 +88,15 @@ const t = {
   en: {
     eyebrow: 'Schedule · Ilica 209',
     h1: 'Weekly schedule',
-    lede: 'Classes run 60 minutes. Come without a partner and without experience — pick your level by how long you have been dancing.',
+    lede: [
+      minutes === undefined ? undefined : `Classes run ${minutesPhrase(minutes, 'en')}.`,
+      'Come without a partner and without experience — pick your level by how long you have been dancing.',
+    ]
+      .filter(Boolean)
+      .join(' '),
     filters: 'Filter the schedule',
     levelFilter: 'Level',
-    styleFilter: 'Style',
     allLevels: 'All levels',
-    allStyles: 'All styles',
     time: 'Time',
     gridCaption: 'Weekly schedule — days in columns, times in rows.',
     empty: 'No classes match the selected filter.',
@@ -88,19 +109,25 @@ const days = groupByDay(entries);
 const columns = daysWithClasses(entries);
 const rows = timeRows(entries);
 
-/** Level and style, the two dimensions design system §7.5 names for the chips. */
+/**
+ * Level, which is the only dimension left (MUSE-36).
+ *
+ * Design system §7.5 names two, "style and level filters above the schedule", and the
+ * style half is gone with `STYLES` — the studio does not teach by style, so a style chip
+ * filtered an attribute no class carries.
+ *
+ * A chip per level in `LEVELS`, **not** per level present in `entries`: a class paused for
+ * the summer (`active: false` on its slot) leaves its chip in place with nothing behind
+ * it, and „Nema termina za odabrani filter." is the right answer to that. Deriving the
+ * chips from the data instead would silently remove the level and leave the empty state
+ * unreachable — which is the state design system §7.2 specifies wording for.
+ */
 const filterGroups = [
   {
     kind: 'level' as const,
     label: t.levelFilter,
     all: t.allLevels,
     values: LEVELS.map((value) => ({ value, label: LEVEL_NAME[locale][value] })),
-  },
-  {
-    kind: 'style' as const,
-    label: t.styleFilter,
-    all: t.allStyles,
-    values: STYLES.map((value) => ({ value, label: STYLE_NAME[locale][value] })),
   },
 ];
 ---
@@ -166,18 +193,18 @@ const filterGroups = [
             </summary>
             <ul class="slots">
               {group.entries.map((entry) => (
-                <li class="slot" data-slot data-level={entry.level} data-style={entry.style}>
+                <li class="slot" data-slot data-level={entry.level}>
                   <time class="slotTime" datetime={formatTime(entry.start)}>
                     {formatTime(entry.start)}
                   </time>
                   <span class="slotBody">
-                    <span class="slotName">{STYLE_NAME[locale][entry.style]}</span>
+                    <span class="slotName">{entry.name[locale]}</span>
                     <span class="slotMeta">
                       {/* `data-level-name`: see the contract in Home.astro (MUSE-11). */}
                       <span data-level-name={entry.level}>
                         {LEVEL_NAME[locale][entry.level]}
                       </span>{' '}
-                      · {entry.instructor} · {entry.durationMin} min
+                      · {formatNames(entry.instructors, locale)} · {entry.durationMin} min
                     </span>
                     <span class="slotPrereq">{LEVEL_PREREQUISITE[locale][entry.level]}</span>
                   </span>
@@ -215,18 +242,13 @@ const filterGroups = [
                 {columns.map((day) => (
                   <td>
                     {entriesAt(entries, day, start).map((entry) => (
-                      <div
-                        class="block"
-                        data-slot
-                        data-level={entry.level}
-                        data-style={entry.style}
-                      >
-                        <span class="blockName">{STYLE_NAME[locale][entry.style]}</span>
+                      <div class="block" data-slot data-level={entry.level}>
+                        <span class="blockName">{entry.name[locale]}</span>
                         <span class="blockMeta">
                           <span data-level-name={entry.level}>
                             {LEVEL_NAME[locale][entry.level]}
                           </span>{' '}
-                          · {entry.instructor}
+                          · {formatNames(entry.instructors, locale)}
                         </span>
                         <span class="blockPrereq">
                           {LEVEL_PREREQUISITE[locale][entry.level]}
@@ -256,7 +278,8 @@ const filterGroups = [
   import { classCount } from '../lib/schedule';
 
   /**
-   * Level and style filters. Filtering by instructor is out of scope (MUSE-6).
+   * The level filter. Filtering by instructor is out of scope (MUSE-6), and the style
+   * filter went with the styles (MUSE-36).
    *
    * Progressive enhancement, in this order:
    *   1. the full schedule is server-rendered and needs no script at all;
@@ -282,11 +305,19 @@ const filterGroups = [
 
     if (filters) filters.hidden = false;
 
-    const state: Record<string, string> = { level: 'all', style: 'all' };
+    /**
+     * One dimension today, still a map rather than a single variable.
+     *
+     * The chips address it by `data-filter`, so a second dimension is a group in the
+     * markup and nothing here — which is how the style filter was removed (MUSE-36)
+     * without touching the apply loop below.
+     */
+    const state: Record<string, string> = { level: 'all' };
 
     const matches = (slot: HTMLElement) =>
-      (state.level === 'all' || slot.dataset.level === state.level) &&
-      (state.style === 'all' || slot.dataset.style === state.style);
+      Object.entries(state).every(
+        ([kind, value]) => value === 'all' || slot.dataset[kind] === value,
+      );
 
     const shown = (el: Element) =>
       [...el.querySelectorAll<HTMLElement>('[data-slot]')].filter((s) => !s.hidden).length;
@@ -660,11 +691,20 @@ const filterGroups = [
 
   /* §7.2: classes as raised blocks with a 2px accent left border. No shadow —
      depth in this system is surface value plus hairlines (§5). */
+  /*
+    `max-width` because the week got shorter (MUSE-36). The grid is `width: 100%` and
+    the real timetable has two day columns instead of five, so a block that filled its
+    cell stretched to ~600px for three short lines and read as a banner rather than a
+    class. The cap is a measure, not a fixed width — §10 forbids those, and Croatian
+    runs 20–25% longer than English — so a longer class name still grows the block up to
+    this point and then wraps.
+  */
   .block {
     display: flex;
     flex-direction: column;
     gap: 2px;
     min-width: 7rem;
+    max-width: 26rem;
     padding: var(--space-3);
     background: var(--surface-raised);
     border-left: 2px solid var(--accent);

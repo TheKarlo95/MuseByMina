@@ -154,6 +154,58 @@ const PUBLISHED_BEFORE_THE_MIGRATION = {
 
 const PUBLISHED_ADDRESS = `${PUBLISHED_BEFORE_THE_MIGRATION.studio.street}, ${PUBLISHED_BEFORE_THE_MIGRATION.studio.city}`;
 
+type CopyField = 'name' | 'title' | 'description';
+
+/**
+ * **Copy that has legitimately changed since the migration — the sentence, in a diff.**
+ *
+ * `PUBLISHED_BEFORE_THE_MIGRATION` is a receipt, not maintenance: it is *allowed* to stop
+ * matching, and CLAUDE.md's rule is that the response is a note saying who changed it and
+ * why, never a quiet edit to make the test pass again. This is where that note goes.
+ *
+ * An entry does not switch the assertion off. The comparison moves to the seed's current
+ * value for that one field, and `the superseded copy really is gone` below asserts the
+ * frozen string appears nowhere in the built output — so a superseded entry still fails
+ * if the old words are somehow still being published, and a *spurious* entry fails too,
+ * because the old and new values would be identical.
+ */
+const SUPERSEDED: { route: string; field: CopyField; ticket: string; because: string }[] = [
+  {
+    route: '/schedule',
+    field: 'description',
+    ticket: 'MUSE-36',
+    because:
+      'The frozen description described the invented schedule: „…dan, vrijeme, razina i ' +
+      'instruktor za tradicionalnu, modernu i sensual bachatu." The three styles were ' +
+      'invented in the foundation commit and the studio does not teach by them, and the ' +
+      'four real classes are each taught by two people, so the singular „instruktor" was ' +
+      'wrong as well. Replaced with what the timetable actually is: Mondays and ' +
+      'Thursdays, 90 minutes, four levels.',
+  },
+];
+
+function supersededEntry(route: string, field: CopyField) {
+  return SUPERSEDED.find((entry) => entry.route === route && entry.field === field);
+}
+
+/** The `page` document in the committed seed for one route. */
+function seededPage(route: string): SeedDoc {
+  const found = seedDocs().find((doc) => doc._type === 'page' && doc.route === route);
+  if (!found) throw new Error(`The seed has no \`page\` document for ${route}.`);
+  return found;
+}
+
+/**
+ * What a route should publish for one field: the frozen words, or — where they have been
+ * superseded — whatever the CMS now holds.
+ */
+function expectedCopy(route: string, field: CopyField, locale: Locale): string {
+  if (supersededEntry(route, field)) {
+    return (seededPage(route)[field] as Bilingual)[locale];
+  }
+  return PUBLISHED_BEFORE_THE_MIGRATION.pages[route]![field][locale];
+}
+
 interface SeedDoc {
   _id: string;
   _type: string;
@@ -352,18 +404,27 @@ describe('the migration is a committed artefact, not a Studio session', () => {
     }
   });
 
-  it('moves the singleton and the four page documents, and nothing else', () => {
+  it('holds the singleton, the four page documents and the real timetable', () => {
     /**
-     * The ticket's scope line, asserted. The schedule and the instructors are
-     * deliberately *not* here: `src/data/schedule.ts` is invented placeholder content
-     * naming two instructors who do not exist (MUSE-36), and importing it would move
-     * fiction out of a file that admits it is fiction and into a Studio where it reads
-     * as authoritative. The real timetable is entered in the Studio directly.
+     * MUSE-20's scope line was "the singleton and the four `page` documents, and nothing
+     * else", and the schedule was excluded on purpose: `src/data/schedule.ts` was invented
+     * placeholder content naming two instructors who do not exist, and importing it would
+     * have moved fiction out of a file that admitted it was fiction and into a Studio
+     * where it reads as authoritative.
+     *
+     * MUSE-36 is the ticket that got the real timetable from Mina, so the seed now also
+     * carries it — **not** migrated from that file, which is deleted: four `class`
+     * documents, four `scheduleSlot` documents, and the two instructors who really teach
+     * them. The counts are spelled out rather than loosened to "at least", because this
+     * is the one assertion that would notice the invented thirteen coming back.
      */
     const byType = new Map<string, number>();
     for (const doc of seedDocs()) byType.set(doc._type, (byType.get(doc._type) ?? 0) + 1);
     expect([...byType.entries()].sort()).toEqual([
+      ['class', 4],
+      ['instructor', 2],
       ['page', 4],
+      ['scheduleSlot', 4],
       ['siteSettings', 1],
     ]);
   });
@@ -503,23 +564,56 @@ describe('AC1: every page renders the words `main` published', () => {
      * about whether the words survived the move.
      */
     for (const { route, locale, html } of everyPage(build)) {
-      const published = PUBLISHED_BEFORE_THE_MIGRATION.pages[route]!;
-      expect(titleOf(html), `<title> of ${route} (${locale})`).toBe(published.title[locale]);
+      expect(titleOf(html), `<title> of ${route} (${locale})`).toBe(
+        expectedCopy(route, 'title', locale),
+      );
       expect(metaDescription(html), `description of ${route} (${locale})`).toBe(
-        published.description[locale],
+        expectedCopy(route, 'description', locale),
       );
     }
   });
 
   it('publishes those same strings in `llms.txt`, under the frozen link text', () => {
     for (const { route } of ROUTES) {
-      const published = PUBLISHED_BEFORE_THE_MIGRATION.pages[route]!;
       for (const locale of LOCALES) {
         const line = llmsLine(build, route, locale);
         expect(linkDescription(line), `${route} (${locale})`).toBe(
-          published.description[locale],
+          expectedCopy(route, 'description', locale),
         );
-        expect(line, `${route} (${locale}) link text`).toContain(`[${published.name[locale]}]`);
+        expect(line, `${route} (${locale}) link text`).toContain(
+          `[${expectedCopy(route, 'name', locale)}]`,
+        );
+      }
+    }
+  });
+
+  /**
+   * The other half of a `SUPERSEDED` entry: the old words are *gone*, and the entry is
+   * not a stale note about a change that never happened.
+   */
+  it('publishes none of the superseded copy, and claims no change that is not one', () => {
+    expect(
+      SUPERSEDED.every((entry) => entry.ticket !== '' && entry.because.length > 40),
+      'a superseded entry has to say which ticket changed it and why',
+    ).toBe(true);
+
+    for (const entry of SUPERSEDED) {
+      const frozen = PUBLISHED_BEFORE_THE_MIGRATION.pages[entry.route]![entry.field];
+      for (const locale of LOCALES) {
+        // Spurious entry: if the words did not actually change, the comparison above was
+        // switched off for nothing.
+        expect(
+          expectedCopy(entry.route, entry.field, locale),
+          `${entry.route} ${entry.field} (${locale}) is listed as superseded but is unchanged`,
+        ).not.toBe(frozen[locale]);
+
+        // And the superseded words reach no visitor.
+        for (const file of build.allFiles().filter((f) => /\.(html|txt|xml)$/.test(f))) {
+          expect(
+            build.read(file).includes(frozen[locale]),
+            `${file} still publishes the superseded ${entry.route} ${entry.field}`,
+          ).toBe(false);
+        }
       }
     }
   });
@@ -616,10 +710,10 @@ describe('AC2: editing a document changes every place it is rendered', () => {
      * above would still pass.
      */
     const stale = [
-      PUBLISHED_BEFORE_THE_MIGRATION.pages[EDITED_ROUTE]!.title.hr,
-      PUBLISHED_BEFORE_THE_MIGRATION.pages[EDITED_ROUTE]!.title.en,
-      PUBLISHED_BEFORE_THE_MIGRATION.pages[EDITED_ROUTE]!.description.hr,
-      PUBLISHED_BEFORE_THE_MIGRATION.pages[EDITED_ROUTE]!.description.en,
+      ...LOCALES.flatMap((locale) => [
+        expectedCopy(EDITED_ROUTE, 'title', locale),
+        expectedCopy(EDITED_ROUTE, 'description', locale),
+      ]),
       PUBLISHED_ADDRESS,
     ];
     for (const file of edited.allFiles().filter((f) => /\.(html|txt|xml)$/.test(f))) {
@@ -636,11 +730,16 @@ describe('AC2: editing a document changes every place it is rendered', () => {
     // A migration, not a redesign: substituting the edited strings back into the edited
     // build reproduces the seeded build exactly.
     for (const locale of LOCALES) {
-      const published = PUBLISHED_BEFORE_THE_MIGRATION.pages[EDITED_ROUTE]!;
       let after = edited.read(pageFile(EDITED_ROUTE, locale));
       for (const [next, before] of [
-        [locale === 'hr' ? EDITED_TITLE_HR : EDITED_TITLE_EN, published.title[locale]],
-        [locale === 'hr' ? EDITED_DESC_HR : EDITED_DESC_EN, published.description[locale]],
+        [
+          locale === 'hr' ? EDITED_TITLE_HR : EDITED_TITLE_EN,
+          expectedCopy(EDITED_ROUTE, 'title', locale),
+        ],
+        [
+          locale === 'hr' ? EDITED_DESC_HR : EDITED_DESC_EN,
+          expectedCopy(EDITED_ROUTE, 'description', locale),
+        ],
         [EDITED_ADDRESS.split(', ')[0]!, PUBLISHED_BEFORE_THE_MIGRATION.studio.street],
         [EDITED_ADDRESS.split(', ')[1]!, PUBLISHED_BEFORE_THE_MIGRATION.studio.city],
       ] as const) {

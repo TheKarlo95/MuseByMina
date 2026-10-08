@@ -9,14 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { fingerprint, SOURCE_GLOBS } from '../scripts/check-sanity.mjs';
 import { schemaTypes, SINGLETON_TYPES } from '../sanity/schemaTypes';
 import { SOCIAL_PLATFORMS, SOCIAL_PLATFORM_NAME } from '../sanity/schemaTypes/enums';
-import {
-  LEVELS,
-  LEVEL_NAME,
-  STYLES,
-  STYLE_NAME,
-  WEEKDAYS,
-  WEEKDAY_NAME,
-} from '../src/lib/schedule';
+import { LEVELS, LEVEL_NAME, WEEKDAYS, WEEKDAY_NAME } from '../src/lib/schedule';
 import { ROUTES } from '../src/lib/pages';
 import { LOCALES } from '../src/lib/i18n';
 import {
@@ -42,9 +35,11 @@ import { SCHEMA_ASSERTIONS } from '../src/lib/sanity/shape';
  *      has a label and an explanation in Croatian, every required field is marked, and
  *      every image field has a hotspot. These are read off the schema *definitions*, so
  *      they cannot drift from what the Studio renders.
- *   2. **The closed sets stay closed.** The level, style and weekday options the Studio
- *      offers are the same constants `src/lib/schedule.ts` renders from — not copies of
- *      them. This is MUSE-11's guarantee carried across the CMS boundary.
+ *   2. **The closed sets stay closed.** The level and weekday options the Studio offers
+ *      are the same constants `src/lib/schedule.ts` renders from — not copies of them.
+ *      This is MUSE-11's guarantee carried across the CMS boundary, and MUSE-36's fourth
+ *      level is the first time it has had to move. The *style* set is asserted as an
+ *      absence now, which is the same mechanism pointed the other way.
  *   3. **One typed client.** No GROQ, and no Sanity client, anywhere under `src/` except
  *      `src/lib/sanity/`. Read off the source tree, like `test/isolation.test.ts`.
  *   4. **A missing or malformed document fails, naming itself.** The decoders are run
@@ -255,7 +250,17 @@ describe('the Studio Mina opens', () => {
      * `instagram` is optional because an instructor may not have a public profile, and a
      * name linking to nothing is worse than a name.
      */
-    expect(requiredFieldsOf('instructor')).toEqual(['bio', 'name', 'role', 'slug']);
+    /**
+     * `bio` came off this list in MUSE-36, and that is the assertion working.
+     *
+     * Mina and Antonio are the first two real `instructor` documents and nobody has
+     * written a paragraph about either of them. A required bio could only be satisfied by
+     * writing one — a claim about how long a named real person has danced, invented to
+     * get past a validator, which is precisely how thirteen invented classes reached
+     * production. `role` stays required because it is one short line that is simply true
+     * of anyone on the roster.
+     */
+    expect(requiredFieldsOf('instructor')).toEqual(['name', 'role', 'slug']);
     expect(requiredFieldsOf('studioStory')).toEqual(['foundedOn', 'heading', 'story']);
     expect(requiredFieldsOf('scheduleSlot')).toEqual(['active', 'class', 'day', 'start']);
     expect(requiredFieldsOf('page')).toEqual(['description', 'name', 'route', 'title']);
@@ -275,15 +280,21 @@ describe('the Studio Mina opens', () => {
       'summary',
       'tagline',
     ]);
+    /**
+     * `style` is gone and `description` and `image` came off the list (MUSE-36).
+     *
+     * `style` was never a thing the studio taught by. The other two had exactly one
+     * consumer between them — the homepage style cards — which went with the styles, so
+     * both became required fields with nothing rendering them and no real value to put
+     * in: four invented paragraphs and four photographs that do not exist. Same rule as
+     * `siteSettings.phone` (MUSE-20) and `instructor.portrait` (MUSE-23).
+     */
     expect(requiredFieldsOf('class')).toEqual([
-      'description',
       'durationMin',
-      'image',
-      'instructor',
+      'instructors',
       'level',
       'name',
       'slug',
-      'style',
     ]);
   });
 
@@ -363,11 +374,31 @@ describe('the closed sets stay in code, not in the CMS', () => {
     );
   });
 
-  it('offers exactly the styles the site renders', () => {
-    const style = typeNamed('class').fields?.find((field) => field.name === 'style');
-    expect(style?.options?.list).toEqual(
-      STYLES.map((value) => ({ title: STYLE_NAME.hr[value], value })),
-    );
+  it('models no style at all, on any type', () => {
+    /**
+     * MUSE-36, asserted as an absence — the replacement for "offers exactly the styles
+     * the site renders", which was a test that the Studio offered three values nobody
+     * had ever asked the studio about.
+     *
+     * `['traditional', 'moderna', 'sensual']` was invented in the foundation commit
+     * alongside the thirteen invented classes, and a fixed list in the Studio made it
+     * look like a decision somebody had taken: a required radio button Mina had to pick
+     * from before she could save a class. The real timetable splits by level only.
+     *
+     * Checked across every field in the schema rather than on `class` alone, because the
+     * way this comes back is on a different type — a `style` on `event`, or on a future
+     * `course`. If the studio ever does teach by style, that is a product decision and a
+     * schema change, not a constant restored from git history.
+     */
+    const stylish = allFields()
+      .filter(({ field }) => field.name.toLowerCase().includes('style'))
+      .map(({ path }) => path);
+    expect(
+      stylish,
+      'MUSE-36 deleted the style dimension: it was invented with the invented ' +
+        'schedule and the studio teaches by level. Read the note on this assertion ' +
+        'before adding it back.',
+    ).toEqual([]);
   });
 
   it('offers exactly the weekdays the schedule grid knows, Monday first', () => {
@@ -405,7 +436,6 @@ describe('the closed sets stay in code, not in the CMS', () => {
   it('keeps a level out of free text, so a typo cannot reach a badge', () => {
     for (const [type, field] of [
       ['class', 'level'],
-      ['class', 'style'],
       ['scheduleSlot', 'day'],
     ] as const) {
       const definition = typeNamed(type).fields?.find((f) => f.name === field);
@@ -697,22 +727,58 @@ describe('a missing or malformed document fails the build, naming itself', () =>
 
   it('rejects a time the schedule page could not render', () => {
     const slot = {
-      _id: 'slot-mon-19',
-      classId: 'class-trad-beginner',
-      name: { hr: 'Bachata za početnike', en: 'Bachata for beginners' },
+      _id: 'slot-mon-1930',
+      classId: 'class-a',
+      name: { hr: 'HR class', en: 'EN class' },
       day: 'mon',
-      start: '19:00',
-      durationMin: 60,
-      style: 'traditional',
+      start: '19:30',
+      durationMin: 90,
       level: 'beginner',
-      instructor: 'Mina',
+      instructors: ['Instructor A', 'Instructor B'],
     };
-    expect(decodeScheduleEntry(slot).start).toBe('19:00');
+    // A half-hour start, which is what the real timetable turned out to be (MUSE-36) and
+    // what nothing had ever handed the decoder before.
+    expect(decodeScheduleEntry(slot).start).toBe('19:30');
 
     // `formatTime` throws on anything but 24-hour HH:MM, so the decoder refuses it first
     // and the error names the document rather than the formatter.
-    expect(() => decodeScheduleEntry({ ...slot, start: '7:30 PM' })).toThrow(/slot-mon-19/);
+    expect(() => decodeScheduleEntry({ ...slot, start: '7:30 PM' })).toThrow(/slot-mon-1930/);
     expect(() => decodeScheduleEntry({ ...slot, start: '25:00' })).toThrow(/24-hour/);
+    expect(() => decodeScheduleEntry({ ...slot, start: '19:3' })).toThrow(/24-hour/);
+  });
+
+  it('refuses a class with nobody teaching it', () => {
+    /**
+     * The three shapes GROQ answers `instructors[]->name` with when the content is
+     * broken, all of which a template rendering a joined phrase turns into the same
+     * thing — a published class with no teacher (MUSE-36).
+     */
+    const slot = {
+      _id: 'slot-no-teacher',
+      classId: 'class-a',
+      name: { hr: 'HR class', en: 'EN class' },
+      day: 'mon',
+      start: '19:30',
+      durationMin: 90,
+      level: 'beginner',
+      instructors: ['Instructor A'],
+    };
+    expect(decodeScheduleEntry(slot).instructors).toEqual(['Instructor A']);
+
+    // The field is absent, or was renamed in the schema.
+    expect(() => decodeScheduleEntry({ ...slot, instructors: null })).toThrow(
+      /slot-no-teacher/,
+    );
+    // The array is there and empty — a slot saved mid-edit.
+    expect(() => decodeScheduleEntry({ ...slot, instructors: [] })).toThrow(/instructors/);
+    // A member points at an instructor document that has been deleted.
+    expect(() => decodeScheduleEntry({ ...slot, instructors: [null] })).toThrow(
+      /instructors\[0\]/,
+    );
+    // And a single name where a list belongs — the shape before MUSE-36.
+    expect(() => decodeScheduleEntry({ ...slot, instructors: 'Instructor A' })).toThrow(
+      /a list with at least one entry/,
+    );
   });
 
   it('rejects a level outside the closed set', () => {
@@ -722,13 +788,14 @@ describe('a missing or malformed document fails the build, naming itself', () =>
       name: { hr: 'x', en: 'x' },
       day: 'mon',
       start: '19:00',
-      durationMin: 60,
-      style: 'traditional',
+      durationMin: 90,
       level: 'Beginer',
-      instructor: 'Mina',
+      instructors: ['Instructor A'],
     };
     expect(() => decodeScheduleEntry(slot)).toThrow(/slot-bad-level/);
     expect(() => decodeScheduleEntry(slot)).toThrow(/`beginner`/);
+    // All four of them are named in the message, so the fix is readable from the log.
+    expect(() => decodeScheduleEntry(slot)).toThrow(/`improver`/);
   });
 
   it('names the image field when alt text is missing', () => {
@@ -761,6 +828,14 @@ describe('a missing or malformed document fails the build, naming itself', () =>
     // rather than failing the build, and `/aboutus` renders a placeholder frame.
     expect(decodeInstructor(base).portrait).toBeUndefined();
     expect(decodeInstructor(base).instagram).toBeUndefined();
+
+    // And so is "no bio" (MUSE-36): Mina and Antonio are real and nothing is written
+    // about either of them. The card is the name and the role until something is.
+    expect(decodeInstructor({ ...base, bio: undefined }).bio).toBeUndefined();
+    // Optional is not unchecked here either — a half-translated bio is still named.
+    expect(() => decodeInstructor({ ...base, bio: { hr: 'HR bio.' } })).toThrow(
+      /bio\.en/,
+    );
 
     // Optional is not unchecked. A portrait that *is* there has to be a whole one — this
     // is the MUSE-49 shape, an image object whose asset reference has gone — and the

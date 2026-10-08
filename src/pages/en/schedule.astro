@@ -1,11 +1,11 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import Schedule from '../../components/Schedule.astro';
-import { getPage } from '../../lib/sanity';
+import { getPage, getSchedule } from '../../lib/sanity';
 
-const meta = await getPage('/schedule');
+const [meta, entries] = await Promise.all([getPage('/schedule'), getSchedule()]);
 ---
 
 <BaseLayout locale="en" title={meta.title.en} description={meta.description.en}>
-  <Schedule locale="en" />
+  <Schedule locale="en" entries={entries} />
 </BaseLayout>

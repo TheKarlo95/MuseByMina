@@ -1,20 +1,14 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { buildSite, PAGES_DEPLOY, type Build } from './helpers/build';
-import { SCHEDULE } from '../src/data/schedule';
+import { claimOutDir } from './helpers/scratch';
+import { seedDocs, seededSchedule } from './helpers/seed';
 import { LOCALES, type Locale } from '../src/lib/i18n';
-import {
-  LEVELS,
-  LEVEL_NAME,
-  STYLES,
-  STYLE_NAME,
-  WEEKDAY_NAME,
-  type Level,
-} from '../src/lib/schedule';
+import { LEVELS, LEVEL_NAME, WEEKDAY_NAME, type Level } from '../src/lib/schedule';
 
 /**
  * MUSE-11 — the homepage and `/schedule` named the same class two different
@@ -63,6 +57,9 @@ import {
  */
 const ENGLISH_LEVEL_NAMES = {
   beginner: 'Beginner',
+  // MUSE-36: the real timetable has four levels, and `Improver` is the scene's own word
+  // for the one between — so it is English for exactly the reason the other three are.
+  improver: 'Improver',
   intermediate: 'Intermediate',
   advanced: 'Advanced',
 } as const;
@@ -227,8 +224,36 @@ function displayNames<K extends string>(
   return [...new Set(LOCALES.flatMap((locale) => keys.map((key) => map[locale][key])))];
 }
 
+/**
+ * The committed seed with every slot of one level switched off, written where nothing
+ * else can name it.
+ *
+ * `test/helpers/scratch.ts` owns the directory (MUSE-17): a suite may not choose one.
+ */
+function pauseLevelFixture(level: string): string {
+  const classIds = new Set(
+    seedDocs()
+      .filter((doc) => doc._type === 'class' && doc.level === level)
+      .map((doc) => doc._id),
+  );
+  expect(classIds.size, `the seed has no ${level} class to pause`).toBeGreaterThan(0);
+
+  const docs = seedDocs().map((doc) =>
+    doc._type === 'scheduleSlot' &&
+    classIds.has((doc.class as { _ref?: string } | undefined)?._ref ?? '')
+      ? { ...doc, active: false }
+      : doc,
+  );
+
+  const path = join(claimOutDir('home-paused'), 'content.ndjson');
+  writeFileSync(path, docs.map((doc) => JSON.stringify(doc)).join('\n') + '\n');
+  return path;
+}
+
 let build: Build;
 const page = {} as Record<Locale, { home: string; schedule: string }>;
+/** The same site with the beginner class paused in the "Studio" — see the suite below. */
+let paused: Build;
 
 beforeAll(async () => {
   build = buildSite(PAGES_DEPLOY);
@@ -238,7 +263,19 @@ beforeAll(async () => {
       schedule: build.read(SCHEDULE_PAGE[locale]),
     };
   }
-}, 240_000);
+
+  /**
+   * One extra build, with every beginner slot switched off.
+   *
+   * `scheduleSlot.active` is the field Mina uses for a summer pause, so this is an
+   * ordinary Studio edit rather than a broken dataset — and before MUSE-36 it would have
+   * stopped the build, because the beginner door threw when it could not find a class.
+   * The rows were a file in this repository then; they are content now.
+   */
+  paused = buildSite(PAGES_DEPLOY, {
+    MUSE_CONTENT_FIXTURE: pauseLevelFixture('beginner'),
+  });
+}, 300_000);
 
 /**
  * AC1 — Given the Croatian homepage, then the beginner doors use the same level
@@ -357,12 +394,19 @@ describe('AC3: the guard — a level name may not be hardcoded outside LEVEL_NAM
       map: 'LEVEL_NAME',
       names: [...displayNames(LEVEL_NAME, LEVELS), ...RETIRED_HR_LEVEL_NAMES],
     },
-    {
-      kind: 'style',
-      source: SINGLE_SOURCE,
-      map: 'STYLE_NAME',
-      names: displayNames(STYLE_NAME, STYLES),
-    },
+    /**
+     * There was a `style` group here, over `STYLE_NAME`, and MUSE-36 deleted the map
+     * along with `STYLES` and `class.style` — the three styles were invented with the
+     * thirteen invented classes and the studio does not teach by them.
+     *
+     * The guard it provided is replaced rather than dropped, from two other directions:
+     * `test/sanity.test.ts` asserts the schema has no `style` field on `class` at all,
+     * and `test/schedule.test.ts` asserts no style filter chip survives on `/schedule`.
+     * A dist-wide sweep for the three *words* was considered and rejected — „sensualna
+     * bachata" is an ordinary phrase a dance studio may legitimately write, so a guard
+     * on the word would eventually be weakened rather than obeyed, which is MUSE-18's
+     * note about `Advanced` one field over.
+     */
   ];
 
   for (const group of groups) {
@@ -389,8 +433,38 @@ describe('AC3: the guard — a level name may not be hardcoded outside LEVEL_NAM
 
   it('checks a set of names that is actually non-empty', () => {
     // A derived forbidden set is only a guard while it has something in it.
+    expect(groups.length, 'the guard has no groups left to check').toBeGreaterThan(0);
     for (const group of groups) expect(group.names.length).toBeGreaterThanOrEqual(3);
   });
+});
+
+/**
+ * MUSE-36 — the homepage's „Tri okusa, jedan ples" section, and what replaced it.
+ *
+ * Nothing did, deliberately: three cards describing Traditional / Moderna / Sensual
+ * bachata, a distinction the studio does not make and that was invented alongside the
+ * invented timetable. Asserted as an absence so the section cannot come back by being
+ * pasted from git history without the decision being made again — and asserted on the
+ * *shape* rather than on the three words, which `AC3` explains.
+ */
+describe('the homepage no longer describes three styles of bachata', () => {
+  for (const locale of LOCALES) {
+    it(`renders exactly one card grid, the two doors (${locale})`, () => {
+      const html = page[locale].home;
+      const grids = [...html.matchAll(/<ul\b[^>]*class="[^"]*\bcards\b[^"]*"/g)];
+      expect(grids, `${locale} homepage card grids`).toHaveLength(1);
+      expect(doors(html), 'the one grid is not the doors').toHaveLength(2);
+    });
+
+    it(`keeps no three-up grid rule in its stylesheet (${locale})`, () => {
+      // The `.cards.three` rule had one user. A rule with no user is where the section
+      // comes back from.
+      const styles = [...page[locale].home.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)]
+        .map((m) => m[1]!)
+        .join('\n');
+      expect(styles).not.toMatch(/\.cards\.three\b/);
+    });
+  }
 });
 
 /**
@@ -424,8 +498,44 @@ describe('the two beginner doors', () => {
         expect(start, `"${door.when}" carries no 24-hour time`).toBeDefined();
 
         expect(
-          SCHEDULE.some((e) => e.day === day && e.start === start && e.level === door.level),
+          seededSchedule().some(
+            (row) => row.day === day && row.start === start && row.level === door.level,
+          ),
           `the ${door.level} door points at ${day} ${start}, which is not a ${door.level} class`,
+        ).toBe(true);
+      }
+    });
+
+    it(`drops a door whose level is paused rather than failing the build (${locale})`, () => {
+      /**
+       * MUSE-36 — the rows are CMS content now, so this had to change.
+       *
+       * `firstSession` threw when a door's level had no class: "a door onto a level
+       * nobody teaches is worse than one door fewer". Correct while the schedule was a
+       * file in this repository, where a missing level could only be a developer's
+       * mistake. Now `scheduleSlot.active` is the field Mina uses for a summer pause, and
+       * the same rule would mean an ordinary Studio edit stops the site building.
+       *
+       * So the door goes and the page stands. What MUSE-11 was protecting is untouched:
+       * a door still cannot show a day and time the schedule does not have, because with
+       * no class there is nothing for it to show.
+       */
+      const html = paused.read(HOME[locale]);
+      const remaining = doors(html);
+
+      expect(remaining.map((d) => d.level), 'the paused level still has a door').not.toContain(
+        'beginner',
+      );
+      expect(remaining.length, 'every door vanished — the section is empty').toBeGreaterThan(0);
+
+      // And the doors that survive still point at classes that run.
+      for (const door of remaining) {
+        const start = HH_MM.exec(door.when)?.[1];
+        expect(
+          seededSchedule().some(
+            (row) => row.start === start && row.level === door.level,
+          ),
+          `the ${door.level} door points at ${door.when}, which is not a ${door.level} class`,
         ).toBe(true);
       }
     });

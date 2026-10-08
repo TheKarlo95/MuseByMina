@@ -3,39 +3,63 @@ import type { Locale } from './i18n';
 /**
  * The weekly schedule's domain model.
  *
- * This file is the part that survives the move to Sanity: types, the closed sets
- * of days / levels / styles, and the locale wording for each. The rows themselves
- * are placeholder content and live in `src/data/schedule.ts` — the one file the
- * Sanity ticket replaces.
+ * This file is the part that survived the move to Sanity: types, the closed sets of days
+ * and levels, the locale wording for each, and the grouping the two layouts share. The
+ * rows themselves are CMS content as of MUSE-36 — `src/lib/sanity/` reads them and
+ * `src/data/schedule.ts`, which held thirteen invented classes, is gone.
  *
- * Nothing here is locale-specific *data*. An entry stores a weekday key, a
- * 24-hour `HH:MM` string and three enum values; the view resolves those to words
- * through the maps below. That is what makes `/schedule` and `/en/schedule` two
- * renderings of one dataset rather than two datasets.
+ * A row stores a weekday key, a 24-hour `HH:MM` string, a level and the names of the
+ * people teaching it; the view resolves the keys to words through the maps below. That is
+ * what makes `/schedule` and `/en/schedule` two renderings of one dataset rather than two
+ * datasets. The class's own name is the one genuinely bilingual *datum* on a row, because
+ * it is something the studio typed rather than a key this module can look up.
  */
 
 /** Monday-first, which is how a Croatian week is written and read. */
 export const WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 export type Weekday = (typeof WEEKDAYS)[number];
 
-/** The fixed set of levels: beginner / intermediate / advanced. There is no fourth. */
-export const LEVELS = ['beginner', 'intermediate', 'advanced'] as const;
+/**
+ * The fixed set of levels, in the order a dancer passes through them.
+ *
+ * **Four since MUSE-36**, when the real timetable arrived: the studio teaches an
+ * *Improver* class between the beginner and the intermediate one. The order is
+ * load-bearing — it is the grid's row order, the order the homepage doors are picked in,
+ * and the order of the Studio's dropdown (`sanity/schemaTypes/enums.ts`) — so a level is
+ * inserted in sequence rather than appended.
+ */
+export const LEVELS = ['beginner', 'improver', 'intermediate', 'advanced'] as const;
 export type Level = (typeof LEVELS)[number];
 
-/** The three flavours of bachata the studio teaches, as on the homepage. */
-export const STYLES = ['traditional', 'moderna', 'sensual'] as const;
-export type Style = (typeof STYLES)[number];
+/**
+ * There is no `STYLES`, and that is a decision rather than an omission (MUSE-36).
+ *
+ * `['traditional', 'moderna', 'sensual']` was invented in the foundation commit alongside
+ * the thirteen invented classes, and it shaped three style cards, a filter dimension, a
+ * homepage section and a required `class.style` field in the Studio. The studio teaches
+ * bachata and splits its classes by level only; there was never a style dimension to
+ * model. If one ever appears it is a schema change and a product decision, not a constant
+ * restored from git history.
+ */
 
 export interface ClassEntry {
   day: Weekday;
   /** Start time, 24-hour `HH:MM`. Stored unformatted; the view decides display. */
   start: string;
-  /** Minutes. Every class is 60 today, but a workshop will not be. */
+  /** Minutes. Every class is 90 today; a workshop will not be. */
   durationMin: number;
-  style: Style;
   level: Level;
-  /** Display name. Not an id — a CMS will hand over whatever the studio typed. */
-  instructor: string;
+  /** The class's own name, as the studio typed it. Bilingual, so it is a Record. */
+  name: Record<Locale, string>;
+  /**
+   * Everyone who teaches this class, in the order the studio listed them.
+   *
+   * An array, not a name (MUSE-36). Mina and Antonio teach every group class together,
+   * which a single field could only have published half of — and lady styling is a known
+   * coming class that Mina teaches alone, so one-instructor-per-class is already known to
+   * be the wrong shape. Display names rather than ids: a CMS hands over what was typed.
+   */
+  instructors: string[];
 }
 
 export const WEEKDAY_NAME: Record<Locale, Record<Weekday, string>> = {
@@ -72,8 +96,18 @@ export const WEEKDAY_NAME: Record<Locale, Record<Weekday, string>> = {
  * It is still a Record<Locale, …> so reversing this is a data edit, not a refactor.
  */
 export const LEVEL_NAME: Record<Locale, Record<Level, string>> = {
-  hr: { beginner: 'Beginner', intermediate: 'Intermediate', advanced: 'Advanced' },
-  en: { beginner: 'Beginner', intermediate: 'Intermediate', advanced: 'Advanced' },
+  hr: {
+    beginner: 'Beginner',
+    improver: 'Improver',
+    intermediate: 'Intermediate',
+    advanced: 'Advanced',
+  },
+  en: {
+    beginner: 'Beginner',
+    improver: 'Improver',
+    intermediate: 'Intermediate',
+    advanced: 'Advanced',
+  },
 };
 
 /**
@@ -84,24 +118,52 @@ export const LEVEL_NAME: Record<Locale, Record<Level, string>> = {
  * taken. "Confident cross-body lead" tells a beginner nothing; "about a year of
  * dancing" tells them everything. No step names, no figure names, no course
  * numbering — ever, in either language.
+ *
+ * ---
+ *
+ * **`improver` is the one line here nobody has confirmed (MUSE-36).**
+ *
+ * The other three were written with Mina. „Improver" is a word of the scene, and the
+ * honest answer to *who is an Improver?* is "somebody who has finished a beginner course
+ * and is a few months in" — which is what the wording says, measured in months because
+ * the rule above allows nothing else. It deliberately claims no more than that: no
+ * course-completion requirement, no figure vocabulary, no number of terms. Flagged for
+ * Karlo to confirm with Mina; if she words it differently, this is a one-line edit and
+ * both pages move with it.
  */
 export const LEVEL_PREREQUISITE: Record<Locale, Record<Level, string>> = {
   hr: {
     beginner: 'Bez iskustva — nikad nisi plesao ni plesala.',
+    improver: 'Plešeš nekoliko mjeseci.',
     intermediate: 'Plešeš oko godinu dana.',
     advanced: 'Plešeš dvije ili više godina.',
   },
   en: {
     beginner: 'No experience — you have never danced.',
+    improver: 'A few months of dancing.',
     intermediate: 'About a year of dancing.',
     advanced: 'Two or more years of dancing.',
   },
 };
 
-export const STYLE_NAME: Record<Locale, Record<Style, string>> = {
-  hr: { traditional: 'Tradicionalna', moderna: 'Moderna', sensual: 'Sensual' },
-  en: { traditional: 'Traditional', moderna: 'Moderna', sensual: 'Sensual' },
-};
+/**
+ * A list of names as a sentence: „Mina i Antonio", "Mina and Antonio".
+ *
+ * Here rather than in the component because both layouts render it and the conjunction is
+ * per locale — a comma-joined list reads as a label in either language, and „and" on the
+ * Croatian page is the sort of leak nobody greps for. Two names is the case that exists
+ * today; three or more take a comma before the conjunction in Croatian *and* in English
+ * („Mina, Antonio i Ana" / "Mina, Antonio and Ana"), which is why this is a function and
+ * not a `join`.
+ *
+ * No serial comma: design system §10 does not ask for one, and Croatian forbids it.
+ */
+export function formatNames(names: readonly string[], locale: Locale): string {
+  const and = locale === 'hr' ? 'i' : 'and';
+  if (names.length === 0) return '';
+  if (names.length === 1) return names[0]!;
+  return `${names.slice(0, -1).join(', ')} ${and} ${names[names.length - 1]!}`;
+}
 
 const HH_MM = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
@@ -140,6 +202,30 @@ export function classCount(n: number, locale: Locale): string {
     return `${n} ${one ? 'termin' : 'termina'}`;
   }
   return `${n} ${n === 1 ? 'class' : 'classes'}`;
+}
+
+/**
+ * A class's length as a phrase: „90 minuta", "90 minutes".
+ *
+ * Croatian takes the nominative plural for n ending in 2–4 (except the teens) and the
+ * genitive plural everywhere else — `2 minute`, `5 minuta`, `90 minuta`, `22 minute`,
+ * `12 minuta`. Every duration the studio has ever used takes `minuta`, which is exactly
+ * why this is a function: the lede derives the number from the data (MUSE-36, so that
+ * „60 minuta" cannot outlive the 60-minute class), and a 45-minute class would otherwise
+ * publish a grammatical error on the most-visited page on the site.
+ */
+export function minutesPhrase(n: number, locale: Locale): string {
+  if (locale === 'hr') {
+    const twoToFour = n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14);
+    return `${n} ${twoToFour ? 'minute' : 'minuta'}`;
+  }
+  return `${n} ${n === 1 ? 'minute' : 'minutes'}`;
+}
+
+/** The one length every class shares, or `undefined` when they differ. */
+export function uniformDuration(entries: readonly ClassEntry[]): number | undefined {
+  const lengths = new Set(entries.map((entry) => entry.durationMin));
+  return lengths.size === 1 ? [...lengths][0] : undefined;
 }
 
 export interface ScheduleDay {

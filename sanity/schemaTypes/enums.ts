@@ -1,11 +1,4 @@
-import {
-  LEVELS,
-  LEVEL_NAME,
-  STYLES,
-  STYLE_NAME,
-  WEEKDAYS,
-  WEEKDAY_NAME,
-} from '../../src/lib/schedule';
+import { LEVELS, LEVEL_NAME, WEEKDAYS, WEEKDAY_NAME } from '../../src/lib/schedule';
 import { ROUTES } from '../../src/lib/pages';
 
 /**
@@ -21,14 +14,20 @@ import { ROUTES } from '../../src/lib/pages';
  * second copy, published, with a typo ("Beginer") that renders an unstyled badge and a
  * filter chip that matches nothing. Worse, it would be a copy nobody could grep for.
  *
- * Same for styles and weekdays: `STYLES` drives the three style cards and the filter
- * row, `WEEKDAYS` is Monday-first because that is how a Croatian week is read, and the
- * schedule grid derives its columns from it.
+ * Same for weekdays: `WEEKDAYS` is Monday-first because that is how a Croatian week is
+ * read, and the schedule grid derives its columns from it.
+ *
+ * There was a third list, `STYLE_OPTIONS`, and MUSE-36 deleted it along with
+ * `class.style`. It is the counter-example worth keeping in view: the three styles were
+ * never structure the studio taught by, they were invented in the foundation commit, and
+ * putting them in the Studio as a fixed list made an invention look like a decision
+ * somebody had made. A closed set belongs in code *because the site branches on it* —
+ * not merely because it is short.
  *
  * So these stay in code, and the Studio offers them as a **fixed list**: Mina picks,
- * she cannot type. The option *titles* come from the same `LEVEL_NAME` / `STYLE_NAME` /
- * `WEEKDAY_NAME` maps the pages render, so what she sees in the Studio is what a
- * visitor sees — and a renamed level is a one-line code change that moves both at once.
+ * she cannot type. The option *titles* come from the same `LEVEL_NAME` / `WEEKDAY_NAME`
+ * maps the pages render, so what she sees in the Studio is what a visitor sees — and a
+ * renamed level is a one-line code change that moves both at once.
  *
  * What *is* content, and does live in Sanity: the class names and descriptions, the
  * instructors, the prices, the events, the images and their alt text, the FAQ, the
@@ -65,15 +64,14 @@ export interface EnumOption {
  * of the bachata scene than to prose, and one spelling per level means the HR and EN
  * pages render the same badge from the same enum. `LEVEL_NAME.hr` is therefore the
  * right label for a Croatian-speaking editor — it is what her Croatian page will say.
+ *
+ * Four of them since MUSE-36, in `LEVELS` order rather than alphabetically: the dropdown
+ * reads beginner → improver → intermediate → advanced, which is the order a dancer moves
+ * through and the order the grid renders.
  */
 export const LEVEL_OPTIONS: readonly EnumOption[] = LEVELS.map((level) => ({
   title: LEVEL_NAME.hr[level],
   value: level,
-}));
-
-export const STYLE_OPTIONS: readonly EnumOption[] = STYLES.map((style) => ({
-  title: STYLE_NAME.hr[style],
-  value: style,
 }));
 
 export const WEEKDAY_OPTIONS: readonly EnumOption[] = WEEKDAYS.map((day) => ({
@@ -127,7 +125,7 @@ export const EVENT_TYPE_OPTIONS: readonly EnumOption[] = [
  * **One list, and the names derived from it.** It was two — a tuple with no consumers and
  * a hand-written option list — so adding `linktree` meant adding it twice in this file,
  * in a file whose own opening rule is that an option list is `MAP`ped from the constant
- * that owns it (`LEVEL_OPTIONS`, `STYLE_OPTIONS`, `WEEKDAY_OPTIONS`, `ROUTE_OPTIONS`).
+ * that owns it (`LEVEL_OPTIONS`, `WEEKDAY_OPTIONS`, `ROUTE_OPTIONS`).
  * Adding it once and forgetting the other would have been a platform the Studio offers
  * and nothing renders, or renders and nothing offers. `test/sanity.test.ts` pins the
  * options to this tuple the same way it pins the levels.

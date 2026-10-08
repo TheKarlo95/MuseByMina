@@ -1581,11 +1581,25 @@
         },
         "optional": false
       },
-      "instructor": {
+      "instructors": {
         "type": "objectAttribute",
         "value": {
-          "type": "inline",
-          "name": "instructor.reference"
+          "type": "array",
+          "of": {
+            "type": "object",
+            "attributes": {
+              "_key": {
+                "type": "objectAttribute",
+                "value": {
+                  "type": "string"
+                }
+              }
+            },
+            "rest": {
+              "type": "inline",
+              "name": "instructor.reference"
+            }
+          }
         },
         "optional": true
       },
@@ -1649,27 +1663,6 @@
         },
         "optional": false
       },
-      "style": {
-        "type": "objectAttribute",
-        "value": {
-          "type": "union",
-          "of": [
-            {
-              "type": "string",
-              "value": "traditional"
-            },
-            {
-              "type": "string",
-              "value": "moderna"
-            },
-            {
-              "type": "string",
-              "value": "sensual"
-            }
-          ]
-        },
-        "optional": false
-      },
       "level": {
         "type": "objectAttribute",
         "value": {
@@ -1678,6 +1671,10 @@
             {
               "type": "string",
               "value": "beginner"
+            },
+            {
+              "type": "string",
+              "value": "improver"
             },
             {
               "type": "string",
@@ -1697,7 +1694,7 @@
           "type": "inline",
           "name": "localeText"
         },
-        "optional": false
+        "optional": true
       },
       "durationMin": {
         "type": "objectAttribute",
@@ -1706,11 +1703,25 @@
         },
         "optional": false
       },
-      "instructor": {
+      "instructors": {
         "type": "objectAttribute",
         "value": {
-          "type": "inline",
-          "name": "instructor.reference"
+          "type": "array",
+          "of": {
+            "type": "object",
+            "attributes": {
+              "_key": {
+                "type": "objectAttribute",
+                "value": {
+                  "type": "string"
+                }
+              }
+            },
+            "rest": {
+              "type": "inline",
+              "name": "instructor.reference"
+            }
+          }
         },
         "optional": false
       },
@@ -1767,7 +1778,7 @@
             }
           }
         },
-        "optional": false
+        "optional": true
       },
       "order": {
         "type": "objectAttribute",
@@ -1842,7 +1853,7 @@
           "type": "inline",
           "name": "localeText"
         },
-        "optional": false
+        "optional": true
       },
       "portrait": {
         "type": "objectAttribute",

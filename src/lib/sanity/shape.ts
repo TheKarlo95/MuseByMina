@@ -1,5 +1,5 @@
 import type { Locale } from '../i18n';
-import type { ClassEntry, Level, Style, Weekday } from '../schedule';
+import type { ClassEntry, Level, Weekday } from '../schedule';
 import type { PageMetaDoc, ScheduleEntry } from './decode';
 import type {
   CLASSES_QUERY_RESULT,
@@ -63,33 +63,49 @@ type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : { ERROR: 'B is wid
 /* ------------------------------------------------------------------------- */
 
 /**
- * `LEVELS`, `STYLES` and `WEEKDAYS` live in `src/lib/schedule.ts`; the Studio builds its
- * option lists from those same constants (`sanity/schemaTypes/enums.ts`), so the schema
- * cannot offer a value the renderer does not know — and `sanity typegen` reads the
- * option list back out of the extracted schema as a string union.
+ * `LEVELS` and `WEEKDAYS` live in `src/lib/schedule.ts`; the Studio builds its option
+ * lists from those same constants (`sanity/schemaTypes/enums.ts`), so the schema cannot
+ * offer a value the renderer does not know — and `sanity typegen` reads the option list
+ * back out of the extracted schema as a string union.
  *
- * These three lines close that circle. Add a fourth level in `schedule.ts` without
- * regenerating and `scripts/check-sanity.mjs` fails; regenerate and these still hold;
- * type a fourth level *anywhere else* and one of them stops compiling. It is the MUSE-11
- * guarantee — one source for a level name — extended across the CMS boundary.
+ * These two lines close that circle, and MUSE-36 is the first time the loop has actually
+ * been exercised: adding `improver` in `schedule.ts` without regenerating fails
+ * `scripts/check-sanity.mjs`; regenerating makes these hold again with four levels; typing
+ * a fifth level *anywhere else* stops one of them compiling. It is the MUSE-11 guarantee —
+ * one source for a level name — extended across the CMS boundary.
+ *
+ * `AssertScheduleStyles` used to be the third. It is gone with `class.style` and `STYLES`
+ * (MUSE-36), and its absence is covered from the other side: `scripts/check-sanity.mjs`'s
+ * read contract no longer lists the field, and `test/sanity.test.ts` asserts the schema
+ * has no `style` on `class` at all — so the field cannot come back without a decision.
  */
 type SlotRow = SCHEDULE_QUERY_RESULT[number];
 
 export type AssertScheduleLevels = Same<SlotRow['level'], Level>;
-export type AssertScheduleStyles = Same<SlotRow['style'], Style>;
 export type AssertScheduleDays = Same<SlotRow['day'], Weekday>;
 
 const _levels: AssertScheduleLevels = true;
-const _styles: AssertScheduleStyles = true;
 const _days: AssertScheduleDays = true;
+
+/**
+ * Two teachers on one class arrive as a list of names, not a name (MUSE-36).
+ *
+ * `Same<…, string[]>` rather than `Guaranteed`, because the failure this is aimed at is a
+ * *shape* change and not an absence: revert `instructors` to a single reference and the
+ * projection still resolves, to `string`, which every template that renders a joined
+ * phrase would accept by printing the first teacher's name and nothing else.
+ */
+export type AssertScheduleInstructorsAreAList = Same<SlotRow['instructors'], string[]>;
+const _instructors: AssertScheduleInstructorsAreAList = true;
 
 /**
  * A decoded schedule row still *is* a `ClassEntry`.
  *
- * This is the compile-time half of the promise in `src/data/schedule.ts`'s header: that
- * replacing the placeholder rows is a prop change and nothing else. `Schedule.astro`
- * takes `ClassEntry[]`; if the CMS read path ever stops producing one, the error lands
- * here rather than in the grid.
+ * `src/data/schedule.ts` promised in its header that replacing the placeholder rows would
+ * be a prop change and nothing else, and this was the compile-time half of that promise.
+ * MUSE-36 collected on it: the file is gone, `Schedule.astro` and `Home.astro` take
+ * `ClassEntry[]`, and if the CMS read path ever stops producing one the error lands here
+ * rather than in the grid.
  */
 export type AssertScheduleEntryIsClassEntry = ScheduleEntry extends ClassEntry ? true : never;
 const _entry: AssertScheduleEntryIsClassEntry = true;
@@ -104,29 +120,42 @@ const _slotFields: [
   Guaranteed<SlotRow, 'start'>,
   Guaranteed<SlotRow, 'classId'>,
   Guaranteed<SlotRow, 'name'>,
-  Guaranteed<SlotRow, 'style'>,
   Guaranteed<SlotRow, 'level'>,
   Guaranteed<SlotRow, 'durationMin'>,
-  Guaranteed<SlotRow, 'instructor'>,
-] = [true, true, true, true, true, true, true, true, true];
+  Guaranteed<SlotRow, 'instructors'>,
+] = [true, true, true, true, true, true, true, true];
 
 type ClassRow = CLASSES_QUERY_RESULT[number];
 const _classFields: [
   Guaranteed<ClassRow, '_id'>,
   Guaranteed<ClassRow, 'slug'>,
   Guaranteed<ClassRow, 'name'>,
-  Guaranteed<ClassRow, 'style'>,
   Guaranteed<ClassRow, 'level'>,
-  Guaranteed<ClassRow, 'description'>,
   Guaranteed<ClassRow, 'durationMin'>,
-  Guaranteed<ClassRow, 'instructor'>,
-  Guaranteed<ClassRow, 'image'>,
-] = [true, true, true, true, true, true, true, true, true];
+  Guaranteed<ClassRow, 'instructors'>,
+] = [true, true, true, true, true, true];
 
 /**
- * `portrait` and `instagram` are deliberately **not** on this list (MUSE-23), the same way
- * `phone` and `openingHours` came off the `siteSettings` list in MUSE-20 — and for the
- * same reason, which is this assertion working rather than being relaxed.
+ * `description` and `image` are optional (MUSE-36), and still projected.
+ *
+ * They were on the `Guaranteed` list and had to come off when the fields stopped being
+ * `required()` — the assertion working rather than being relaxed. The homepage style
+ * cards were the only consumer of either and they went with `class.style`, so a required
+ * field would have been one nothing renders and nobody has a real value for, which is the
+ * shape of fiction. `OptionalIn` keeps both honest from the other side: a deleted
+ * projection, a renamed one, and a `required()` quietly returning all fail here.
+ */
+export type AssertClassDescriptionOptional = OptionalIn<ClassRow, 'description'>;
+export type AssertClassImageOptional = OptionalIn<ClassRow, 'image'>;
+
+const _classDescriptionOptional: AssertClassDescriptionOptional = true;
+const _classImageOptional: AssertClassImageOptional = true;
+
+/**
+ * `bio`, `portrait` and `instagram` are deliberately **not** on this list (MUSE-23 for the
+ * last two, MUSE-36 for the first), the same way `phone` and `openingHours` came off the
+ * `siteSettings` list in MUSE-20 — and for the same reason, which is this assertion working
+ * rather than being relaxed.
  *
  * `Guaranteed` stops compiling the moment a field can be `null`, so the two lines *had* to
  * come out when both fields became optional; an optional field cannot be left here by
@@ -143,28 +172,29 @@ const _instructorFields: [
   Guaranteed<InstructorRow, 'name'>,
   Guaranteed<InstructorRow, 'slug'>,
   Guaranteed<InstructorRow, 'role'>,
-  Guaranteed<InstructorRow, 'bio'>,
-] = [true, true, true, true, true];
+] = [true, true, true, true];
 
 /**
- * The two optional instructor fields are *still projected*, and still optional.
+ * The three optional instructor fields are *still projected*, and still optional.
  *
  * Dropping a field off `Guaranteed` leaves nothing watching it: delete `instagram` from
  * the query and `INSTRUCTORS_QUERY_RESULT` simply stops having the key, which no
- * `Guaranteed` line can notice because there is no line. These two say the key is there
+ * `Guaranteed` line can notice because there is no line. These say the key is there
  * **and** that it can be absent — so a deleted projection, a renamed one, and a
- * `required()` quietly returning both fail here, naming the field.
+ * `required()` quietly returning all fail here, naming the field.
  */
 type OptionalIn<T, K extends keyof T> = [null] extends [T[K]]
   ? true
   : {
-      ERROR: 'This field is projected as non-nullable, which means the Sanity schema now requires it. MUSE-23 made it optional on purpose: no photography of this studio exists, and an instructor may have no public Instagram, so a required field here can only be filled in with fiction (MUSE-36). If the photographs now exist, say so in the schema AND move this to the Guaranteed list above — do not delete the assertion.';
+      ERROR: 'This field is projected as non-nullable, which means the Sanity schema now requires it. It is optional on purpose: no photography of this studio exists (MUSE-23), an instructor may have no public Instagram (MUSE-23), nobody has written a bio for a real instructor (MUSE-36), and no class has copy or a photograph now that the invented style cards are gone (MUSE-36). A required field with no value can only be filled in with fiction, which is how the invented schedule reached production. If the real content now exists, say so in the schema AND move this to the Guaranteed list above — do not delete the assertion.';
       field: K;
     };
 
+export type AssertInstructorBioOptional = OptionalIn<InstructorRow, 'bio'>;
 export type AssertInstructorPortraitOptional = OptionalIn<InstructorRow, 'portrait'>;
 export type AssertInstructorInstagramOptional = OptionalIn<InstructorRow, 'instagram'>;
 
+const _bioOptional: AssertInstructorBioOptional = true;
 const _portraitOptional: AssertInstructorPortraitOptional = true;
 const _instagramOptional: AssertInstructorInstagramOptional = true;
 
@@ -267,11 +297,14 @@ const _pageMeta: AssertPageMetaShape = true;
  */
 export const SCHEMA_ASSERTIONS = Object.freeze({
   levels: _levels,
-  styles: _styles,
   days: _days,
+  scheduleInstructorsAreAList: _instructors,
   scheduleEntryIsClassEntry: _entry,
   localisedIsRecord: _localised,
   pageMetaShape: _pageMeta,
+  classDescriptionOptional: _classDescriptionOptional,
+  classImageOptional: _classImageOptional,
+  bioOptional: _bioOptional,
   portraitOptional: _portraitOptional,
   instagramOptional: _instagramOptional,
   storyParagraphs: _storyParagraphs,

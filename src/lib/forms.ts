@@ -112,12 +112,22 @@ export interface LevelOption {
  */
 const LEVEL_VALUE: Record<Level, string> = {
   beginner: 'pocetni',
+  /**
+   * `improver` rather than a Croatian word (MUSE-36).
+   *
+   * The other three were chosen before MUSE-6 settled on English level names and the
+   * studio inbox has been receiving them since, so they stay. There is no settled
+   * Croatian word for an Improver, and coining one here — `napredniji`? `srednji-1`? —
+   * would be a word nobody at the studio uses sitting in an email nobody can map back to
+   * a class. The level key is the honest wire value.
+   */
+  improver: 'improver',
   intermediate: 'srednji',
   advanced: 'napredni',
 };
 
 /**
- * The level `<select>`: "not sure yet" first, then the three levels in order.
+ * The level `<select>`: "not sure yet" first, then the levels in `LEVELS` order.
  *
  * The blank default is deliberate (MUSE-7) — asking a beginner to self-assess is
  * the fastest way to lose them — and it is the only option with wording of its

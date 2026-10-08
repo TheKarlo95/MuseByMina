@@ -347,14 +347,44 @@ describe('AC1: who runs the studio, how it started, and who teaches', () => {
   });
 
   it('gives every instructor their name, what they teach and a short bio', () => {
+    /**
+     * `bio` became optional in MUSE-36, when Mina and Antonio became the first two real
+     * `instructor` documents and nobody had written a paragraph about either of them — so
+     * `INSTRUCTOR_C` now has none, and its card is a name and a role.
+     *
+     * The assertion is therefore "the bio is rendered **when there is one**", with a row
+     * on each side of the condition: two fixture instructors have a paragraph and one does
+     * not, which is also what keeps `bio` and a typo of it distinguishable in
+     * `INSTRUCTORS_QUERY` (`test/projections.test.ts`).
+     */
     for (const locale of LOCALES) {
       const html = preview.read(PREVIEW_FILE[locale]);
+      let withBio = 0;
       for (const id of ['instructor-a', 'instructor-b', 'instructor-c'] as const) {
         const doc = FULL.find((d) => d._id === id)!;
         const card = memberCard(html, doc.name as string);
         expect(card, `${id} role (${locale})`).toContain(localeField(doc, 'role')[locale]);
+        if (doc.bio === undefined) continue;
         expect(card, `${id} bio (${locale})`).toContain(localeField(doc, 'bio')[locale]);
+        withBio += 1;
       }
+      expect(withBio, 'no fixture instructor has a bio — the check is vacuous').toBeGreaterThan(
+        0,
+      );
+    }
+  });
+
+  it('omits the bio paragraph entirely for an instructor who has none', () => {
+    // Not an empty `<p class="bio">`, which would leave a gap the design system did not
+    // ask for — and not a placeholder sentence, which is the move MUSE-36 exists to undo.
+    const doc = FULL.find((d) => d._id === 'instructor-c')!;
+    expect(doc.bio, 'the fixture instructor without a bio has one').toBeUndefined();
+
+    for (const locale of LOCALES) {
+      const card = memberCard(preview.read(PREVIEW_FILE[locale]), doc.name as string);
+      expect(card, `${locale} card renders an empty bio paragraph`).not.toMatch(
+        /class="bio[^"]*"/,
+      );
     }
   });
 
@@ -393,7 +423,9 @@ describe('AC1: who runs the studio, how it started, and who teaches', () => {
         ...FULL.filter((doc) => doc._type === 'instructor').flatMap((doc) => [
           doc.name as string,
           localeField(doc, 'role')[locale],
-          localeField(doc, 'bio')[locale],
+          // Optional since MUSE-36: an instructor with no bio supplies no paragraph, so
+          // there is nothing to subtract — and nothing for the residue to contain either.
+          ...(doc.bio === undefined ? [] : [localeField(doc, 'bio')[locale]]),
         ]),
       ]
         // Longest first, so a bio is removed before the name it may contain.

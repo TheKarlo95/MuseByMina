@@ -2,6 +2,7 @@ import { chromium, type Browser, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { startPreview, type Preview } from './helpers/preview';
+import { seededSchedule } from './helpers/seed';
 
 /**
  * MUSE-14 — numerals set in the display face must be LINING figures.
@@ -49,8 +50,19 @@ const SCALE = 3;
  */
 const MIN_RISE_EM = 0.12;
 
-/** Times that contain the two glyphs the ticket is about, as they appear in the grid. */
-const TIMES = ['11:00', '19:00', '21:00'];
+/**
+ * The times the grid's gutter actually shows, read off the CMS seed.
+ *
+ * It was `['11:00', '19:00', '21:00']` — three of the invented rows (MUSE-36) — which
+ * meant the measurement silently stopped happening the moment the real timetable landed:
+ * `.gutter time` with the text `11:00` does not exist, so the locator timed out and four
+ * cases failed for a reason that had nothing to do with numerals. Derived now, so a
+ * schedule edit in the Studio cannot take the only test of MUSE-14 with it.
+ *
+ * `1` and `0` are the two glyphs the ticket is about — a text-figure `1` reads as `I` and
+ * `0` as `o` — so the set is checked for both rather than assumed to contain them.
+ */
+const TIMES = [...new Set(seededSchedule().map((row) => row.start))].sort();
 
 let browser: Browser;
 let preview: Preview;
@@ -178,6 +190,14 @@ const CASES = [
 ];
 
 describe('a time on /schedule is readable as a number (MUSE-14)', () => {
+  it('has a published time carrying both of the glyphs this measures', () => {
+    // The guard on the derived set above: a timetable of, say, 18:45 and 22:45 would
+    // leave every case below passing without ever drawing a `1` or a `0`.
+    expect(TIMES.length, 'the schedule publishes no times at all').toBeGreaterThan(0);
+    expect(TIMES.some((time) => time.includes('1')), 'no `1` in any time').toBe(true);
+    expect(TIMES.some((time) => time.includes('0')), 'no `0` in any time').toBe(true);
+  });
+
   for (const { name, route, scheme } of CASES) {
     it(`draws cap-height figures — ${name}`, async () => {
       const { page, close } = await visit(route, scheme);

@@ -14,7 +14,7 @@ Remaining pages, the CMS and the delivery pipeline are not yet wired up.
 | Styling | Plain CSS — design tokens + scoped component styles. **No Tailwind.** |
 | i18n | Astro i18n; HR at `/`, EN at `/en/` |
 | Hosting | GitHub Pages via Actions |
-| CMS | Sanity — the per-page titles/descriptions and the studio details are read from it at build time (MUSE-20); the schedule is not there yet (MUSE-36) |
+| CMS | Sanity — the per-page titles/descriptions, the studio details (MUSE-20) and the weekly schedule, its classes and its instructors (MUSE-36) are read from it at build time |
 | Video | Cloudflare R2 — *not yet wired* |
 
 Astro rather than a React framework because this is a content site: the build ships
@@ -115,9 +115,6 @@ src/
                 `public/`: both the `@font-face` src and the preload resolve through
                 Vite, so they are one URL in dev and in the build (MUSE-35)
   components/   UI, one file each, styles co-located
-  data/         hardcoded content waiting on the CMS — schedule.ts today.
-                Marked as placeholder; components take it as a prop with this
-                as the default, so the Sanity swap is a prop change
   layouts/      BaseLayout — head, theme script, header/footer
   lib/          theme.ts (pre-paint script), i18n.ts, lang.ts, nav.ts,
                 pages.ts (which routes the site serves — the words are in Sanity),
@@ -269,9 +266,11 @@ length in the code:
 
 - **Bilingual values are two named fields** (`hr`, `en`) in one object, not a field-level
   i18n plugin and not one document per locale — `sanity/schemaTypes/objects/locale.ts`.
-- **The closed sets stay in code.** Levels, styles, weekdays and the route list are
-  imported into the schema from `src/lib/schedule.ts` and `src/lib/pages.ts`, so the
-  Studio offers a fixed list — `sanity/schemaTypes/enums.ts`.
+- **The closed sets stay in code.** Levels, weekdays and the route list are imported into
+  the schema from `src/lib/schedule.ts` and `src/lib/pages.ts`, so the Studio offers a
+  fixed list — `sanity/schemaTypes/enums.ts`. There was a fourth, `STYLES`, and MUSE-36
+  deleted it: the three bachata styles were invented alongside the invented schedule, and
+  a fixed list in the Studio made an invention look like somebody's decision.
 - **The Studio is hosted by Sanity**, at `musebymina.sanity.studio`, redeployed by
   `.github/workflows/studio.yml` when a schema file lands on `main` — `sanity.config.ts`.
 
@@ -288,12 +287,25 @@ by the Studio workflow and nothing else.
 
 ### What is in the dataset, and how the tests get it
 
-Two document types hold real content today (MUSE-20): the `siteSettings` singleton —
-studio name, tagline, summary, address, email, the three social links — and four `page`
-documents carrying each route's short name, `<title>` and one-line description. The weekly
-schedule and the instructors are deliberately **not** there: `src/data/schedule.ts` is
-invented placeholder content naming two instructors who do not exist (MUSE-36), and the
-real timetable goes into the Studio directly rather than through a migration.
+Four document types hold real content today. MUSE-20 moved in the `siteSettings`
+singleton — studio name, tagline, summary, address, email, the three social links — and
+four `page` documents carrying each route's short name, `<title>` and one-line
+description. MUSE-36 added the weekly schedule: four `class` documents, four
+`scheduleSlot` documents and the two `instructor` documents for the people who teach
+them.
+
+The schedule arrived **from Mina**, not from a migration, and that was the point of
+holding it back. `src/data/schedule.ts` held thirteen invented classes across five days
+naming two instructors who do not exist, and importing them would have moved fiction out
+of a file that admitted it was fiction and into a Studio where it reads as authoritative.
+What is published now is four classes on two evenings:
+
+```
+PONEDJELJAK   Beginner      19:30–21:00      Mina i Antonio
+              Intermediate  21:00–22:30      Mina i Antonio
+ČETVRTAK      Improver      19:30–21:00      Mina i Antonio
+              Advanced      21:00–22:30      Mina i Antonio
+```
 
 The migration itself is a committed artefact, not a Studio session:
 
