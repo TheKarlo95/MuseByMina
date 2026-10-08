@@ -239,7 +239,10 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   `astroDev()` itself fetches one page through it before handing the server over, so the
   *base* is proven rather than cross-checked and no suite has to remember any of this;
   `pagesRender: false` is the opt-out for `test/devcontent.test.ts`'s live arm, whose pages
-  are expected to be 500s.
+  are expected to be 500s. Behind that, `unmeasuredDevServers` in
+  `test/helpers/source-guard.ts` fails a file that imports `astroDev` without importing
+  `./measured` — the belt to the probe's braces, and it lives there because that module is
+  the only parser of the test tree (MUSE-61).
 - **Page URLs end in a slash.** `trailingSlash: 'always'` + `build.format: 'directory'`,
   so `dist/en/index.html` is served at `/en/` and `/en` 301s to it. Build hrefs with
   `localeUrl()` (`src/lib/i18n.ts`) and nothing else — it is the single place the slash is
@@ -492,6 +495,29 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   file it was removed from. What that rule cannot reach is written out beside it and
   asserted: a measurement that never waited at all, a fixed-interval poll spelled with
   `setTimeout`, and a correct wait given too small a budget.
+
+  **And the condition has to be about the document being measured** (MUSE-61). The
+  middle-click test waited on three real conditions, every one of them satisfiable while
+  the tab was still `about:blank`: `context.waitForEvent('page')` resolves when the tab
+  *object* exists, `load` has already fired on a blank document, and a `localStorage` read
+  there answers from an opaque origin — it raises `SecurityError`, measured. So
+  `expect(tab.url())` compared against the empty document Chromium opens a middle-clicked
+  tab at, and reddened a pull request that touched no browser code. `settleNewTab` and
+  `settleMove` are the gate, and what they wait for is a **main-frame commit read from
+  Playwright's own `framenavigated`** — the same bookkeeping `page.url()` reads. An in-page
+  `location.href` poll observes the commit too, but in the renderer, and the gap between
+  the renderer knowing and the frame bookkeeping knowing is where this was lost: 11 of 160
+  trials reproduce the exact CI failure with the tab's first document request delayed 8–14
+  ms, and 0 of 240 do with the commit awaited. **Never gate on
+  `waitForURL(theExpectedUrl)`** — that hands the judging to the wait, so a dropped
+  `?lang=` becomes a 15-second timeout instead of a comparison naming what it got, and
+  `?lang=` is the whole subject of those tests. The predicate is a property of the URL
+  (*not blank*, *not where we started*); `expect` stays the judge. The `localStorage` wait
+  is **gone rather than moved**: `langInitScript` is a blocking head script, so
+  `readyState === 'complete'` already proves it ran, and waiting for the thing the next
+  line asserts made that assertion unfailable except by timeout. `uncommittedTabs` keeps
+  the shape out, and the suite takes delivery of a new tab in exactly one helper so that
+  name-scoped rule has one binding to watch rather than three.
 
 - **The formatting convention is stated in `prettier.config.mjs`, and `prettier --write`
   over the tree is still wrong** (MUSE-58). Nothing stated it before, and Prettier's

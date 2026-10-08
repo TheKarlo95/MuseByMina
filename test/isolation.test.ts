@@ -37,6 +37,8 @@ import {
   processStarts,
   testFiles,
   uncheckedKinds,
+  uncommittedTabs,
+  unmeasuredDevServers,
 } from './helpers/source-guard';
 
 /**
@@ -64,6 +66,11 @@ import {
  *   8. Every build **stages** inside its own output directory (MUSE-41) — the third
  *      directory a build writes, after the output and the caches, and the one that is
  *      invisible to (3) because Astro derives it rather than us naming it.
+ *   9. Nothing under `test/` asserts about a tab it has not seen commit a document
+ *      (MUSE-61), and nothing drives a dev server without asking whether its URLs name
+ *      real pages (MUSE-62). Both are the family MUSE-48 named: a check that measures
+ *      something other than the thing it is about. Their limits are written out at the
+ *      rules and asserted at the bottom of this file, like (7)'s.
  *
  * (5) is deliberately about *child processes*, not about `astro build`. MUSE-35 needed
  * a real `astro dev` — the bug it fixes is invisible to anything that reads `dist` —
@@ -463,6 +470,24 @@ describe('the rules are enforced on the test tree, not remembered', () => {
     expect(offences(fixedSleeps)).toEqual([]);
   });
 
+  it('lets no suite judge a tab it has not seen commit a document', () => {
+    // MUSE-61. The instance was one `expect(tab.url())` reading `about:blank`; the pattern
+    // is that `waitForEvent('page')` is an event about a tab object and every gate the
+    // suite then had — `load` on an already-loaded blank document, a `localStorage` read
+    // against an opaque origin — was satisfiable while the tab held nothing.
+    //
+    // No exemptions, and the tree needs none: the suite takes delivery of a new tab in one
+    // helper, which hands it to `settleNewTab` before returning it.
+    expect(offences(uncommittedTabs)).toEqual([]);
+  });
+
+  it('lets no suite drive a dev server without measuring which page it got', () => {
+    // MUSE-62, whose runtime probe in `astroDev()` is the primary defence; this is the
+    // belt. The rule is MUSE-61's author's to own because this is the only parser of the
+    // test tree and a second one would be worse than the rule being absent.
+    expect(offences(unmeasuredDevServers)).toEqual([]);
+  });
+
   it('keeps the textual tripwire green as well', () => {
     // Crude on purpose, and no longer the only line: it is what catches a deletion
     // through a package nobody has modelled, or an `rm -rf` handed to a shell.
@@ -485,6 +510,9 @@ describe('the guard catches what it claims to, and nothing else', () => {
   const RM_SYNC = frag('r', 'mSync');
   const SPAWN = frag('spa', 'wn');
   const NODE_MODULES = frag('node', '_modules');
+  const TAB_EVENT = frag('waitFor', 'Event');
+  const TAB_COMMIT = frag('settleNew', 'Tab');
+  const DEV_SERVER = frag('astro', 'Dev');
 
   it('catches a deletion imported from fs/promises', () => {
     // The exact evasion in the ticket: the old needles were `rmSync`, `rmdir` and
@@ -660,6 +688,88 @@ describe('the guard catches what it claims to, and nothing else', () => {
 
     expect(deletions('probe.ts', probe)).toEqual([]);
     expect(copyPasteTripwire('probe.ts', probe).length).toBeGreaterThan(0);
+  });
+
+  it('catches the middle-click test as MUSE-61 found it', () => {
+    // Verbatim shape of the failing test: the tab taken out of the event, then three waits
+    // a blank tab satisfies. Named `probe.ts` so the rule is being tested, not the tree.
+    const probe = [
+      `const opened = context.${TAB_EVENT}('page', { timeout: 15_000 });`,
+      "await page.locator(switchTo('hr')).click({ button: 'middle' });",
+      'const tab = await opened;',
+      "await tab.waitForLoadState('load');",
+      'await tab.waitForFunction((key) => localStorage.getItem(key) !== null, KEY);',
+      'expect(tab.url()).toBe(expected);',
+    ].join('\n');
+
+    const [offence] = uncommittedTabs('test/somewhere.test.ts', probe);
+    expect(offence?.line).toBe(1);
+    expect(listed(uncommittedTabs('test/somewhere.test.ts', probe))[0]).toContain(
+      'test/somewhere.test.ts:1',
+    );
+    expect(offence?.what).toContain(TAB_COMMIT);
+  });
+
+  it('is satisfied by the commit wait, however the tab was obtained', () => {
+    // Both idioms: the promise held in a variable, and the event awaited inline. And the
+    // `popup` event as well as `page`, since either produces the same blank tab.
+    for (const probe of [
+      [
+        `const opened = context.${TAB_EVENT}('page');`,
+        'const tab = await opened;',
+        `await ${TAB_COMMIT}(tab, 'the tab to commit');`,
+      ].join('\n'),
+      [
+        `const tab = await context.${TAB_EVENT}('popup');`,
+        `await ${TAB_COMMIT}(tab, 'the tab to commit');`,
+      ].join('\n'),
+    ]) {
+      expect(uncommittedTabs('probe.ts', probe), probe).toEqual([]);
+    }
+  });
+
+  it('does not fire on a comment that explains the blank-tab trap', () => {
+    // The MUSE-34 property, for this rule too: the paragraph in `browser-settle.ts` that
+    // explains what a tab event does not prove must not be the thing that fails CI.
+    const prose = [
+      `// ${TAB_EVENT}('page') resolves when the tab object exists, not when it has`,
+      '// navigated — so `const tab = await opened` holds about:blank.',
+      'await settleScroll(page);',
+    ].join('\n');
+
+    expect(uncommittedTabs('probe.ts', prose)).toEqual([]);
+    expect(copyPasteTripwire('probe.ts', prose)).toEqual([]);
+  });
+
+  it('cannot see a tab the file never gives a name to', () => {
+    // Written out because a limit nobody states is read as a limit that does not exist.
+    // There is no binding to follow here, so the rule is silent; the suite's single point
+    // of delivery is what makes that acceptable rather than a hole.
+    const probe = [
+      `const opened = context.${TAB_EVENT}('page');`,
+      "await (await opened).waitForLoadState('load');",
+      'expect((await opened).url()).toBe(expected);',
+    ].join('\n');
+
+    expect(uncommittedTabs('probe.ts', probe)).toEqual([]);
+  });
+
+  it('catches a dev server driven without the which-page check, and clears one with it', () => {
+    // MUSE-62's rule. The offence is the import, so the message can name the line that
+    // brought the server in rather than the first request that measured the wrong page.
+    const without = [
+      `import { ${DEV_SERVER} } from './helpers/scratch';`,
+      `dev = await ${DEV_SERVER}({}, 'fonts');`,
+    ].join('\n');
+    const with_ = [
+      "import { fetchMeasuredPage } from './helpers/measured';",
+      `import { ${DEV_SERVER} } from './helpers/scratch';`,
+      `dev = await ${DEV_SERVER}({}, 'fonts');`,
+    ].join('\n');
+
+    expect(unmeasuredDevServers('probe.ts', without).length).toBeGreaterThan(0);
+    expect(unmeasuredDevServers('probe.ts', without)[0]?.line).toBe(1);
+    expect(unmeasuredDevServers('probe.ts', with_)).toEqual([]);
   });
 });
 
