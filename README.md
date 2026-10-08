@@ -221,9 +221,14 @@ src/lib/sanity/             the one read path; pages import this and nothing els
 src/lib/sanity/sanity.types.ts   generated from the schema + the queries
 ```
 
-Document types: `siteSettings` (a singleton), `page`, `class`, `scheduleSlot`,
-`instructor`, `pricingTier`, `event`, `galleryImage`, `post`, `faq`. Field labels and
-descriptions are **Croatian**, because the person editing them is.
+Document types: `siteSettings` and `studioStory` (both singletons), `page`, `class`,
+`scheduleSlot`, `instructor`, `pricingTier`, `event`, `galleryImage`, `post`, `faq`. Field
+labels and descriptions are **Croatian**, because the person editing them is.
+
+A singleton gets a fixed document id, a sidebar entry of its own and no "create new"
+button (`sanity/structure.ts`, `sanity.config.ts`), because its query pins that id — so a
+second copy would be a document the site never reads rather than one it reads at random.
+`SINGLETON_TYPES` in `sanity/schemaTypes/index.ts` is the list that drives all three.
 
 Three things about this are decisions rather than defaults, and all three are argued at
 length in the code:
@@ -269,6 +274,28 @@ whether anybody is mid-edit in the Studio — so `vitest.config.ts` sets
 `MUSE_CONTENT_FIXTURE=sanity/seed/content.ndjson` and `src/lib/sanity/fixture.ts`
 evaluates the real queries against it with `groq-js`, Sanity's own GROQ engine. One file,
 so the migration and the fixture cannot drift apart.
+
+### A component whose page cannot be routed yet
+
+`/aboutus` is built and not published (MUSE-23). Its `studioStory` and `instructor`
+documents do not exist, and the read path fails the build naming a missing document — so
+routing the page would stop `main` building, every pull request and every deploy with it.
+The component is still held to its acceptance criteria, most of which are statements about
+CSS that only a real build produces:
+
+```bash
+MUSE_PREVIEW_ROUTES=aboutus npm run build   # injects /aboutus-preview and /en/aboutus-preview
+```
+
+`src/lib/preview.ts` is the registry and carries the argument; `astro.config.mjs` injects
+the routes from it and announces them in capitals. Unset — which is every deploy, every CI
+job and every plain `npm run build` — nothing is injected and the output is identical to a
+build that has never heard of it. The entry points live under `test/`, never `src/pages/`,
+so a preview route cannot reach `llms.txt`, the sitemap or the nav; `test/aboutus.test.ts`
+asserts that, and that no workflow sets the variable.
+
+**An entry in that registry is meant to be short-lived.** If one outlives the ticket that
+added it, that is a page somebody forgot to ship.
 
 The deploy fetches live, and cannot do otherwise by accident: there is no default fixture
 path and no fallback (a path that does not resolve *fails* the build), the build log says

@@ -293,7 +293,7 @@ export type Instructor = {
   slug: Slug;
   role: LocaleString;
   bio: LocaleText;
-  portrait: {
+  portrait?: {
     asset?: SanityImageAssetReference;
     media?: unknown;
     hotspot?: SanityImageHotspot;
@@ -301,7 +301,23 @@ export type Instructor = {
     alt: LocaleString;
     _type: "image";
   };
+  instagram?: string;
   order?: number;
+};
+
+export type StudioStory = {
+  _id: string;
+  _type: "studioStory";
+  _createdAt: string;
+  _updatedAt: string;
+  _rev: string;
+  heading: LocaleString;
+  foundedOn: string;
+  story: Array<
+    {
+      _key: string;
+    } & LocaleText
+  >;
 };
 
 export type SanityImagePaletteSwatch = {
@@ -421,6 +437,7 @@ export type AllSanitySchemaTypes =
   | ScheduleSlot
   | Class
   | Instructor
+  | StudioStory
   | SanityImagePaletteSwatch
   | SanityImagePalette
   | SanityImageDimensions
@@ -535,7 +552,7 @@ export type CLASSES_QUERY_RESULT = Array<{
 
 // Source: src/lib/sanity/queries.ts
 // Variable: INSTRUCTORS_QUERY
-// Query: *[_type == "instructor"] | order(coalesce(order, 999) asc, name asc){    _id,    name,    "slug": slug.current,    role{ hr, en },    bio{ hr, en },    portrait{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop }  }
+// Query: *[_type == "instructor"] | order(coalesce(order, 999) asc, name asc){    _id,    name,    "slug": slug.current,    role{ hr, en },    bio{ hr, en },    portrait{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop },    instagram  }
 export type INSTRUCTORS_QUERY_RESULT = Array<{
   _id: string;
   name: string;
@@ -556,8 +573,25 @@ export type INSTRUCTORS_QUERY_RESULT = Array<{
     };
     hotspot: SanityImageHotspot | null;
     crop: SanityImageCrop | null;
-  };
+  } | null;
+  instagram: string | null;
 }>;
+
+// Source: src/lib/sanity/queries.ts
+// Variable: STUDIO_STORY_QUERY
+// Query: *[_type == "studioStory" && _id == "studioStory"][0]{    _id,    heading{ hr, en },    foundedOn,    "story": story[]{ hr, en }  }
+export type STUDIO_STORY_QUERY_RESULT = {
+  _id: "studioStory";
+  heading: {
+    hr: string;
+    en: string;
+  };
+  foundedOn: string;
+  story: Array<{
+    hr: string;
+    en: string;
+  }>;
+} | null;
 
 // Source: src/lib/sanity/queries.ts
 // Variable: PRICING_QUERY
@@ -711,9 +745,10 @@ export type FAQS_QUERY_RESULT = Array<{
 
 // Source: src/lib/sanity/queries.ts
 // Variable: DOCUMENT_COUNTS_QUERY
-// Query: {    "siteSettings": count(*[_type == "siteSettings"]),    "page": count(*[_type == "page"]),    "class": count(*[_type == "class"]),    "scheduleSlot": count(*[_type == "scheduleSlot"]),    "instructor": count(*[_type == "instructor"]),    "pricingTier": count(*[_type == "pricingTier"]),    "event": count(*[_type == "event"]),    "galleryImage": count(*[_type == "galleryImage"]),    "post": count(*[_type == "post"]),    "faq": count(*[_type == "faq"])  }
+// Query: {    "siteSettings": count(*[_type == "siteSettings"]),    "studioStory": count(*[_type == "studioStory"]),    "page": count(*[_type == "page"]),    "class": count(*[_type == "class"]),    "scheduleSlot": count(*[_type == "scheduleSlot"]),    "instructor": count(*[_type == "instructor"]),    "pricingTier": count(*[_type == "pricingTier"]),    "event": count(*[_type == "event"]),    "galleryImage": count(*[_type == "galleryImage"]),    "post": count(*[_type == "post"]),    "faq": count(*[_type == "faq"])  }
 export type DOCUMENT_COUNTS_QUERY_RESULT = {
   siteSettings: number;
+  studioStory: number;
   page: number;
   class: number;
   scheduleSlot: number;

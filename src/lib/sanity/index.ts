@@ -14,6 +14,7 @@ import {
   decodePricingTier,
   decodeScheduleEntry,
   decodeSiteSettings,
+  decodeStudioStory,
   requireDocument,
   requireDocuments,
 } from './decode';
@@ -29,6 +30,7 @@ import {
   PRICING_QUERY,
   SCHEDULE_QUERY,
   SITE_SETTINGS_QUERY,
+  STUDIO_STORY_QUERY,
 } from './queries';
 
 /**
@@ -91,9 +93,20 @@ export type {
   ScheduleEntry,
   SiteSettings,
   StudioEvent,
+  StudioStory,
 } from './decode';
 export { SanityContentError, SanityUnavailableError, addressLines, socialUrl } from './decode';
 export type { SanitySource } from './client';
+/**
+ * Resolving an image ref to a URL, at the point of use.
+ *
+ * Here rather than in `./decode.ts` for the reason that module states: a decoded image
+ * carries the asset and the hotspot, never a URL, because the ratio is the page's
+ * decision. `./images.ts` has the long note on why the ratio crop is CSS's job and the
+ * CDN is only asked for a width.
+ */
+export { imageFocus, imageSrc } from './images';
+export type { ImageFocus, ImageSrcOptions } from './images';
 
 /** Which project and dataset this build is reading from. For build logs. */
 export function source(): SanitySource {
@@ -238,6 +251,21 @@ export async function getClasses({ minimum = 1 }: ListOptions = {}) {
 export async function getInstructors({ minimum = 1 }: ListOptions = {}) {
   const rows = await runQuery<unknown>(INSTRUCTORS_QUERY);
   return requireDocuments(rows, 'instructor', decodeInstructor, minimum);
+}
+
+/**
+ * The studio's origin story. The singleton behind the other half of `/aboutus` (MUSE-23).
+ *
+ * **Not memoised**, unlike `getSiteSettings` and `pagesByRoute`. Those two are read by the
+ * footer on every page and by `llms.txt`, so without a cache a build makes a dozen
+ * identical requests for one document. This one is read by `AboutUs.astro` and nothing
+ * else — twice per build, once per locale — so a cache would save one request and cost the
+ * thing a cache costs: `test/projections.test.ts` swaps the fixture per test, and a
+ * memoised reader silently answers the second test from the first test's dataset.
+ */
+export async function getStudioStory() {
+  const row = await runQuery<unknown>(STUDIO_STORY_QUERY);
+  return requireDocument(row, 'studioStory', decodeStudioStory);
 }
 
 export async function getPricingTiers({ minimum = 1 }: ListOptions = {}) {

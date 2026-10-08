@@ -1,0 +1,45 @@
+---
+import BaseLayout from '../../src/layouts/BaseLayout.astro';
+import AboutUs from '../../src/components/AboutUs.astro';
+import { localeFromPath } from '../../src/lib/i18n';
+
+/**
+ * **A throwaway route for `AboutUs.astro`. Test-only, and injected only when
+ * `MUSE_PREVIEW_ROUTES` names it** (MUSE-23).
+ *
+ * `src/lib/preview.ts` holds the argument for why this exists; the short version is that
+ * `/aboutus` cannot be routed until Mina's words exist — the build fails by name on a
+ * missing document, so the page would stop `main` from building — and more than half of
+ * the ticket's acceptance criteria are statements about CSS that only a real build
+ * produces.
+ *
+ * Three things about this file are deliberate:
+ *
+ *   - **It is under `test/`, not `src/pages/`.** `test/seo.test.ts` reads the site's page
+ *     list off `src/pages/`, so a preview route cannot leak into `llms.txt`, the sitemap
+ *     or the nav however the config is set.
+ *   - **It reads its own locale off the path.** Both patterns (`/aboutus-preview` and
+ *     `/en/aboutus-preview`) share this one entry point, exactly as `BaseLayout.astro`
+ *     derives its route key — two files would be two chances for the locales to drift,
+ *     and one component rendering both from one source is the thing under test.
+ *   - **`indexable={false}`.** It has no canonical of its own to declare and no locale
+ *     twin worth routing to, and `noindex` is the honest answer for a URL that exists for
+ *     the length of one test run.
+ *
+ * The title and description are structural — `test/helpers/structural-content.ts` explains
+ * the convention. They are not page copy, and the real `<title>` for `/aboutus` is a
+ * `page` document the follow-up ticket creates in the Studio.
+ *
+ * **Delete this file when the follow-up routes the page.**
+ */
+const locale = localeFromPath(Astro.url.pathname);
+---
+
+<BaseLayout
+  locale={locale}
+  title="AboutUs preview — not a page"
+  description="Preview route for test/aboutus.test.ts. Not published."
+  indexable={false}
+>
+  <AboutUs locale={locale} />
+</BaseLayout>

@@ -27,6 +27,19 @@ export const structure: StructureResolver = (S) =>
         ),
       S.documentTypeListItem('class').title('Satovi'),
       S.documentTypeListItem('instructor').title('Instruktori'),
+
+      // The second singleton (MUSE-23). Same treatment as „Postavke stranice" below: a
+      // fixed document id and no list in front of it, because a second „Priča studija"
+      // would be a story the site never reads — `STUDIO_STORY_QUERY` pins this id.
+      S.listItem()
+        .title('Priča studija')
+        .id('studioStory')
+        .child(
+          S.document()
+            .schemaType('studioStory')
+            .documentId('studioStory')
+            .title('Priča studija'),
+        ),
       S.divider(),
       S.documentTypeListItem('pricingTier').title('Cjenik'),
       S.documentTypeListItem('event').title('Događaji'),

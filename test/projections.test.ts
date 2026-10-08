@@ -14,7 +14,6 @@ import {
   GALLERY_TWO,
   INSTRUCTOR_A,
   INSTRUCTOR_B,
-  INSTRUCTOR_C,
   NOW,
   POST_EARLIER,
   POST_FUTURE,
@@ -41,6 +40,7 @@ import {
   getPricingTiers,
   getSchedule,
   getSiteSettings,
+  getStudioStory,
   countDocuments,
 } from '../src/lib/sanity';
 // The literal query text, imported rather than retyped — see the note below on why a
@@ -254,7 +254,7 @@ describe('CLASSES_QUERY: the class, its teacher and its photograph', () => {
 
 /* ------------------------------------------------------------ INSTRUCTORS_QUERY */
 
-describe('INSTRUCTORS_QUERY: name, slug, role, bio, portrait', () => {
+describe('INSTRUCTORS_QUERY: name, slug, role, bio, portrait, Instagram', () => {
   it('projects every field', async () => {
     const instructors = await from(full, () => getInstructors());
 
@@ -266,6 +266,7 @@ describe('INSTRUCTORS_QUERY: name, slug, role, bio, portrait', () => {
         role: { hr: 'HR role B', en: 'EN role B' },
         bio: { hr: 'HR bio B.', en: 'EN bio B.' },
         portrait: expectedImage(INSTRUCTOR_B, 'portrait'),
+        instagram: undefined,
       },
       {
         id: 'instructor-a',
@@ -274,6 +275,7 @@ describe('INSTRUCTORS_QUERY: name, slug, role, bio, portrait', () => {
         role: { hr: 'HR role A', en: 'EN role A' },
         bio: { hr: 'HR bio A.', en: 'EN bio A.' },
         portrait: expectedImage(INSTRUCTOR_A, 'portrait'),
+        instagram: 'https://example.invalid/instagram/instructor-a',
       },
       {
         id: 'instructor-c',
@@ -281,7 +283,9 @@ describe('INSTRUCTORS_QUERY: name, slug, role, bio, portrait', () => {
         slug: 'instructor-c',
         role: { hr: 'HR role C', en: 'EN role C' },
         bio: { hr: 'HR bio C.', en: 'EN bio C.' },
-        portrait: expectedImage(INSTRUCTOR_C, 'portrait'),
+        // No photograph, which is the state every real instructor is in (MUSE-23).
+        portrait: undefined,
+        instagram: undefined,
       },
     ]);
   });
@@ -290,6 +294,87 @@ describe('INSTRUCTORS_QUERY: name, slug, role, bio, portrait', () => {
     // B alone carries `order: 0`, so manual order is B, A, C and alphabetical is A, B, C.
     const names = (await from(full, () => getInstructors())).map((entry) => entry.name);
     expect(names).toEqual(['Instructor B', 'Instructor A', 'Instructor C']);
+  });
+
+  /**
+   * **An instructor with no portrait is a page, not a build failure** (MUSE-23).
+   *
+   * Spelled out as its own case because the default the rest of this schema takes is the
+   * opposite one: `class.image` is `required()`, and a missing image there stops the
+   * build. No photography of this studio exists, so a required portrait could only be
+   * satisfied by uploading something that is not one — the same argument that made
+   * `siteSettings.phone` optional in MUSE-20, and the same failure mode (MUSE-36) behind
+   * it. The placeholder frame is what pays for that, and `test/aboutus.test.ts` is what
+   * checks it reserves the right box.
+   */
+  it('accepts an instructor with no photograph at all', async () => {
+    const instructors = await from(full, () => getInstructors());
+    const withoutPortrait = instructors.filter((entry) => entry.portrait === undefined);
+
+    expect(withoutPortrait.map((entry) => entry.id)).toEqual(['instructor-c']);
+    // And the ones that do have a portrait still carry the hotspot and crop, so "optional"
+    // did not quietly become "dropped".
+    expect(instructors.find((entry) => entry.id === 'instructor-a')?.portrait).toEqual(
+      expectedImage(INSTRUCTOR_A, 'portrait'),
+    );
+  });
+
+  /**
+   * The Instagram URL is content, not markup.
+   *
+   * The ticket's own words: "put the URL in Sanity, not the component". `instagram` is
+   * optional, so only `INSTRUCTOR_A` carries one — which is what makes this assertion
+   * able to fail. With no row holding the field, `instagram` and a typo of it both
+   * project `undefined` and the suite agrees with either.
+   */
+  it('projects the Instagram URL only for the instructor that has one', async () => {
+    const byId = new Map(
+      (await from(full, () => getInstructors())).map((entry) => [entry.id, entry.instagram]),
+    );
+
+    expect(byId.get('instructor-a')).toBe('https://example.invalid/instagram/instructor-a');
+    expect(byId.get('instructor-b')).toBeUndefined();
+    expect(byId.get('instructor-c')).toBeUndefined();
+  });
+});
+
+/* ------------------------------------------------------------ STUDIO_STORY_QUERY */
+
+describe('STUDIO_STORY_QUERY: the dated origin story', () => {
+  it('projects the heading, the founding date and every paragraph', async () => {
+    const story = await from(full, () => getStudioStory());
+
+    expect(story).toEqual({
+      id: 'studioStory',
+      heading: { hr: 'HR story heading', en: 'EN story heading' },
+      foundedOn: '2026-08-13',
+      story: [
+        { hr: 'HR story one.', en: 'EN story one.' },
+        { hr: 'HR story two.', en: 'EN story two.' },
+      ],
+    });
+  });
+
+  it('keeps the paragraphs in the order Mina wrote them', async () => {
+    // An array projection that lost its order is a story told backwards, which no decoder
+    // can detect — both paragraphs are present and both are well-formed.
+    const story = await from(full, () => getStudioStory());
+    expect(story.story.map((paragraph) => paragraph.hr)).toEqual([
+      'HR story one.',
+      'HR story two.',
+    ]);
+  });
+
+  it('reports a dataset with no story as never created, not as a broken query', async () => {
+    // The state the live dataset is in today, and the state `main` must keep building in:
+    // `/aboutus` is deliberately not routed until the document exists (MUSE-23), so
+    // nothing calls this reader yet. When the follow-up routes the page, this is the
+    // message that has to name the document.
+    const empty = fixtureOf([SITE_SETTINGS_DOC], 'projections-no-story');
+    const run = from(empty, () => getStudioStory());
+
+    await expect(run).rejects.toThrow(SanityContentError);
+    await expect(run).rejects.toThrow(/`studioStory`/);
   });
 });
 
@@ -503,9 +588,12 @@ describe('SITE_SETTINGS_QUERY: the singleton, including the fields the seed leav
       email: 'fixture@example.invalid',
       phone: '+00 0 000 0000',
       openingHours: { hr: 'HR opening hours', en: 'EN opening hours' },
+      // All three the footer links to. `linktree` is the one `socialUrl` would otherwise
+      // fail the build over — see the note on it in the fixture.
       social: [
         { platform: 'instagram', url: 'https://example.invalid/instagram' },
         { platform: 'facebook', url: 'https://example.invalid/facebook' },
+        { platform: 'linktree', url: 'https://example.invalid/linktree' },
       ],
       shareImage: expectedImage(SITE_SETTINGS_DOC, 'shareImage'),
     });

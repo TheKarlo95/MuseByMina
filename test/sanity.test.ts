@@ -80,6 +80,7 @@ const REQUIRED_DOCUMENT_TYPES = [
   'faq',
   'page',
   'siteSettings',
+  'studioStory',
 ] as const;
 
 /** A field definition as the schema modules write them, loosely enough to walk. */
@@ -240,7 +241,22 @@ describe('the Studio Mina opens', () => {
     // fields whose validation requires a value — so this asserts what the Studio shows
     // *and* what `sanity typegen` believes, in one go.
     expect(requiredFieldsOf('faq')).toEqual(['answer', 'question']);
-    expect(requiredFieldsOf('instructor')).toEqual(['bio', 'name', 'portrait', 'role', 'slug']);
+    /**
+     * `portrait` and `instagram` are deliberately absent (MUSE-23), on the same argument
+     * that took `phone` off the `siteSettings` list in MUSE-20.
+     *
+     * No photography of this studio exists — §9's shoot direction describes a session
+     * nobody has booked — so a `required()` portrait can only be satisfied by uploading
+     * something that is not a portrait of that person, and inventing content to satisfy a
+     * validator is how the fabricated schedule (MUSE-36) reached production. The page pays
+     * for it with a placeholder frame that reserves the real 3:4 box, so nothing shifts on
+     * the day a photograph lands; `test/aboutus.test.ts` is what holds that.
+     *
+     * `instagram` is optional because an instructor may not have a public profile, and a
+     * name linking to nothing is worse than a name.
+     */
+    expect(requiredFieldsOf('instructor')).toEqual(['bio', 'name', 'role', 'slug']);
+    expect(requiredFieldsOf('studioStory')).toEqual(['foundedOn', 'heading', 'story']);
     expect(requiredFieldsOf('scheduleSlot')).toEqual(['active', 'class', 'day', 'start']);
     expect(requiredFieldsOf('page')).toEqual(['description', 'name', 'route', 'title']);
     /**
@@ -316,16 +332,24 @@ describe('the Studio Mina opens', () => {
     }
   });
 
-  it('keeps the singleton a singleton', () => {
-    expect([...SINGLETON_TYPES]).toEqual(['siteSettings']);
+  it('keeps the singletons singletons', () => {
+    /**
+     * Two of them now (MUSE-23). A studio has one origin story, and a second
+     * „Priča studija" would be a story the site never reads: `STUDIO_STORY_QUERY` pins
+     * `_id == "studioStory"`, so the spare is invisible rather than wrong — which is the
+     * failure the fixed id exists to prevent, and the reason it is blocked in the same
+     * three places `siteSettings` is.
+     */
+    expect([...SINGLETON_TYPES]).toEqual(['siteSettings', 'studioStory']);
     const config = readFileSync(join(ROOT, 'sanity.config.ts'), 'utf8');
     // A second "Postavke stranice" is a change that silently never reaches the site,
     // so it is blocked in three places: the fixed document id, the template list and
     // the new-document menu.
     expect(config).toContain('newDocumentOptions');
-    expect(readFileSync(join(ROOT, 'sanity/structure.ts'), 'utf8')).toContain(
-      "documentId('siteSettings')",
-    );
+    const structure = readFileSync(join(ROOT, 'sanity/structure.ts'), 'utf8');
+    for (const type of SINGLETON_TYPES) {
+      expect(structure, type).toContain(`documentId('${type}')`);
+    }
   });
 });
 
@@ -719,6 +743,35 @@ describe('a missing or malformed document fails the build, naming itself', () =>
     expect(() => decodeInstructor(instructor)).toThrow(/instructor-mina/);
     expect(() => decodeInstructor(instructor)).toThrow(/portrait\.alt\.en/);
   });
+
+  it('accepts an instructor with no portrait, and still names a malformed one', () => {
+    /**
+     * MUSE-23. Structural values, not plausible ones — `test/helpers/structural-content.ts`
+     * explains why, and the rule holds in a hand-written row just as much as in a fixture.
+     */
+    const base = {
+      _id: 'instructor-a',
+      name: 'Instructor A',
+      slug: 'instructor-a',
+      role: { hr: 'HR role', en: 'EN role' },
+      bio: { hr: 'HR bio.', en: 'EN bio.' },
+    };
+
+    // "No photograph" is the ordinary state of every instructor today, so it decodes
+    // rather than failing the build, and `/aboutus` renders a placeholder frame.
+    expect(decodeInstructor(base).portrait).toBeUndefined();
+    expect(decodeInstructor(base).instagram).toBeUndefined();
+
+    // Optional is not unchecked. A portrait that *is* there has to be a whole one — this
+    // is the MUSE-49 shape, an image object whose asset reference has gone — and the
+    // field is named rather than rendering an empty frame.
+    const assetGone = { ...base, portrait: { alt: { hr: 'HR alt', en: 'EN alt' } } };
+    expect(() => decodeInstructor(assetGone)).toThrow(SanityContentError);
+    expect(() => decodeInstructor(assetGone)).toThrow(/portrait\.assetId/);
+
+    // An empty Instagram URL is a name linking to nowhere, which is worse than a name.
+    expect(() => decodeInstructor({ ...base, instagram: '' })).toThrow(/`instagram`/);
+  });
 });
 
 /* ------------------------------------------------- 5. empty is not the same as broken */
@@ -782,7 +835,26 @@ describe('the generated types cannot go stale unnoticed', () => {
       'pricingTier',
       'scheduleSlot',
       'siteSettings',
+      'studioStory',
     ]);
+  });
+
+  it('watches the optional fields too, which no `Guaranteed` line can', () => {
+    /**
+     * MUSE-23. `portrait` and `instagram` had to come off the `Guaranteed` list when they
+     * became optional — that is the assertion working — but a field with no line is a
+     * field nothing watches: delete `instagram` from the projection and the generated type
+     * simply stops having the key.
+     *
+     * `OptionalIn` in `src/lib/sanity/shape.ts` closes that: it says the key is present
+     * *and* nullable, so a deleted projection, a renamed one and a `required()` quietly
+     * returning all stop the compile naming the field.
+     */
+    expect(SCHEMA_ASSERTIONS.portraitOptional).toBe(true);
+    expect(SCHEMA_ASSERTIONS.instagramOptional).toBe(true);
+    // And the origin story's paragraphs are still an array of bilingual values, which
+    // `Guaranteed` alone would not notice collapsing to a single object.
+    expect(SCHEMA_ASSERTIONS.storyParagraphs).toBe(true);
   });
 
   it('is gated by the build, not by remembering to regenerate', () => {

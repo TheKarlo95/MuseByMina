@@ -1,0 +1,399 @@
+---
+import { formatDate } from '../lib/dates';
+import { getInstructors, getStudioStory, imageFocus, imageSrc } from '../lib/sanity';
+import type { Locale } from '../lib/i18n';
+
+/**
+ * `/aboutus` — the studio's origin story and the people who teach (MUSE-23).
+ *
+ * For a studio this is where somebody decides whether these are people they want to spend
+ * an evening with, so it carries more weight than its traffic suggests. World Bachata Meet
+ * Up's version works because it is a *dated* story plus real bios rather than a list of
+ * names; Faith Connect's works because an instructor is a name, one line of specialism and
+ * an Instagram link, which is how a dance scene actually finds people.
+ *
+ * ---------------------------------------------------------------------------------
+ * **There is no studio copy in this file, and that is deliberate.**
+ *
+ * Every word a visitor reads about the studio or about a person comes from Sanity: the
+ * heading, the founding date, the paragraphs, the names, the roles, the bios, the Instagram
+ * URLs and the alt text. What is written here is interface chrome — an eyebrow, a section
+ * heading, the word before the date, and the "on Instagram" a screen reader hears — and
+ * nothing in it describes the studio or anybody in it.
+ *
+ * The reason is MUSE-36, which is open and Urgent: invented-but-plausible placeholder
+ * content reached production and named two instructors who do not exist. A paragraph of
+ * "somebody will replace this" prose in a component is one deploy away from being the next
+ * one, because it looks finished.
+ *
+ * **This component is also not routed yet.** There is no `src/pages/aboutus.astro`, no
+ * `ROUTES` entry and no nav entry, because `src/lib/sanity/decode.ts` fails the build by
+ * name when a document a page needs is missing — and the `studioStory` singleton and every
+ * `instructor` document are missing. A routed page would stop `main` building: every pull
+ * request, every deploy, and MUSE-21's scheduled rebuild. The follow-up adds the two page
+ * wrappers, the route, the nav entry and the three documents together, because they are
+ * only correct together. `test/aboutus.test.ts` drives this component through a preview
+ * route (`src/lib/preview.ts`) and asserts the absence of the real one.
+ * ---------------------------------------------------------------------------------
+ */
+interface Props {
+  locale: Locale;
+}
+const { locale } = Astro.props;
+
+/**
+ * Both readers use the strict default `minimum: 1`: a page about who runs the studio with
+ * nobody on it is a broken page, not an empty state, so it fails the build naming the type
+ * rather than publishing a heading above nothing.
+ */
+const story = await getStudioStory();
+const instructors = await getInstructors();
+
+/**
+ * The portrait is served at one width and cropped to 3:4 by CSS (§9 rule 2), so this is
+ * the only number the markup needs — see `src/lib/sanity/images.ts` for why the ratio crop
+ * is not asked of the CDN. The `height` attribute is the 3:4 partner of it, present so the
+ * box is reserved before the file arrives rather than after.
+ */
+const PORTRAIT_WIDTH = 600;
+const PORTRAIT_HEIGHT = 800;
+
+/**
+ * Interface chrome only. Nothing here says anything about the studio or about a person —
+ * see the note above. Croatian first, because Croatian sets the layout (§10).
+ */
+const t = {
+  hr: {
+    eyebrow: 'O nama',
+    since: 'Od',
+    teamEyebrow: 'Tko predaje',
+    team: 'Instruktori',
+    onInstagram: 'na Instagramu',
+  },
+  en: {
+    eyebrow: 'About us',
+    since: 'Since',
+    teamEyebrow: 'Who teaches',
+    team: 'Instructors',
+    onInstagram: 'on Instagram',
+  },
+}[locale];
+---
+
+<section class="story">
+  <p class="eyebrow">{t.eyebrow}</p>
+  <h1 class="display">{story.heading[locale]}</h1>
+  {/* The dated half of the origin story. `<time>` carries the machine-readable value so
+      the rendered form can follow §10 per locale without the date becoming unparseable. */}
+  <p class="founded">
+    {t.since} <time datetime={story.foundedOn}>{formatDate(story.foundedOn, locale)}</time>
+  </p>
+  <div class="prose">
+    {story.story.map((paragraph) => <p>{paragraph[locale]}</p>)}
+  </div>
+</section>
+
+<section class="team">
+  <div class="wrap">
+    <p class="eyebrow">{t.teamEyebrow}</p>
+    <h2 class="displayM">{t.team}</h2>
+
+    <ul class="roster" role="list">
+      {
+        instructors.map((instructor) => (
+          <li class="member">
+            {/*
+              One frame, both branches. The 3:4 box is declared on this element and
+              nowhere else, so a photograph landing where a placeholder was cannot move
+              anything — which is the acceptance criterion, stated as CSS rather than as
+              an intention.
+
+              It keeps a plum ground in BOTH themes (§7.2), through the `--band-*` roles:
+              that is the role set defined as "plum-ink in both themes, contents must not
+              follow the page theme". Do not "fix" this on a light page.
+            */}
+            <div class="frame">
+              {instructor.portrait ? (
+                <img
+                  class="portrait"
+                  src={imageSrc(instructor.portrait, { width: PORTRAIT_WIDTH })}
+                  width={PORTRAIT_WIDTH}
+                  height={PORTRAIT_HEIGHT}
+                  alt={instructor.portrait.alt[locale]}
+                  loading="lazy"
+                  decoding="async"
+                  style={`object-position: ${imageFocus(instructor.portrait).x}% ${imageFocus(instructor.portrait).y}%`}
+                />
+              ) : (
+                /* Decorative: a frame with nothing in it. The name, the role and the bio
+                   are right below as real text, so there is nothing for a screen reader
+                   to be told about an absent photograph. */
+                <span class="placeholder" aria-hidden="true">✦</span>
+              )}
+            </div>
+
+            <h3 class="name">
+              {
+                instructor.instagram ? (
+                  <a
+                    class="link"
+                    href={instructor.instagram}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {instructor.name}<span class="srOnly"> {t.onInstagram}</span>
+                  </a>
+                ) : (
+                  instructor.name
+                )
+              }
+            </h3>
+            <p class="role">{instructor.role[locale]}</p>
+            <p class="bio">{instructor.bio[locale]}</p>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</section>
+
+<style>
+  /* ---------------------------------------------------------------- sections */
+  /* §3 section rhythm: canvas, then one contrasting surface. Not alternating — that
+     produces stripes. */
+  .story {
+    max-width: 1280px;
+    margin-inline: auto;
+    padding: var(--space-8) var(--space-5) var(--space-7);
+  }
+  .team {
+    padding: var(--space-8) var(--space-5);
+    background: var(--surface-sunken);
+  }
+  .wrap {
+    max-width: 1280px;
+    margin-inline: auto;
+  }
+  @media (min-width: 768px) {
+    .story {
+      padding: var(--space-10) var(--space-7) var(--space-8);
+    }
+    .team {
+      padding: var(--space-10) var(--space-7);
+    }
+  }
+
+  /* -------------------------------------------------------------- typography */
+  .eyebrow {
+    font-family: var(--font-label);
+    font-weight: 300;
+    font-size: 0.75rem;
+    letter-spacing: 0.32em;
+    /* Č Ć Ž Š carry marks above the cap line — 1.4 is the floor in Croatian (§4.6) */
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+  }
+
+  /* Cormorant's floor is 26px = 1.625rem: below it the `đ` crossbar stops rendering and
+     *Dođi* reads as "Dodi" (§4). Every display size here clamps at or above it. */
+  .display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.75rem, 8vw, 5.5rem);
+    line-height: 0.96;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: var(--space-4) 0 0;
+  }
+  .displayM {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.125rem, 5vw, 3.75rem);
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    margin: var(--space-4) 0 0;
+  }
+
+  .founded {
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--text-subtle);
+    margin: var(--space-4) 0 0;
+  }
+
+  .prose {
+    /* §5: prose measures 68ch. A `max-width` rather than a width, so Croatian — 20–25%
+       longer than English (§10) — reflows instead of being clipped. */
+    max-width: 68ch;
+    margin-top: var(--space-5);
+  }
+  .prose p {
+    font-size: 1.125rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+    margin: 0;
+  }
+  .prose p + p {
+    margin-top: var(--space-5);
+  }
+
+  /* ------------------------------------------------------------- the roster */
+  /* One column until there is room for more. The narrow case is the *absence* of a
+     multi-column rule rather than a breakpoint somebody has to pick correctly, which is
+     what keeps 390px free of horizontal overflow whatever the Croatian strings do. */
+  .roster {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-6);
+    list-style: none;
+    margin: var(--space-7) 0 0;
+    padding: 0;
+  }
+  @media (min-width: 768px) {
+    .roster {
+      grid-template-columns: repeat(2, 1fr);
+      gap: var(--space-6);
+    }
+  }
+  @media (min-width: 1280px) {
+    .roster {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  .member {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    /* No min-width: a grid track already bounds this, and a pixel floor is what clips a
+       long Croatian role line. */
+    min-width: 0;
+  }
+
+  /* --------------------------------------------------------------- the frame */
+  /*
+    The 3:4 box, declared exactly once, on the element that is present whether or not
+    there is a photograph. §9 rule 2: `object-fit: cover` with an explicit `aspect-ratio` —
+    images never dictate layout height.
+
+    `--band-*` rather than the page-theme roles, because a media frame keeps its plum
+    ground in both themes (§7.2) and `--band-*` is the role set that means exactly that.
+    Depth is the hairline, not a shadow (§5) — there are no drop shadows in this system.
+  */
+  .frame {
+    aspect-ratio: 3 / 4;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    background: var(--band-surface);
+    border: 1px solid var(--band-line-accent);
+    border-radius: var(--radius-lg);
+  }
+
+  .portrait {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    /* §7.2 / §9: greyscale at rest, full colour on reveal, over `--dur-slow` (700ms).
+       This is the one place in the system greyscale-to-colour is allowed. */
+    filter: grayscale(1);
+    transition: filter var(--dur-slow) var(--ease);
+  }
+
+  /*
+    The reveal, and the two ways to reach it that are not a mouse.
+
+    `:focus-within` is the keyboard: tabbing to an instructor's Instagram link reveals the
+    card it belongs to. `(hover: none)` below is touch, where there is no hover state to
+    wait for and a tap is a navigation rather than a reveal — so the portraits are simply
+    in colour. A hover-only treatment would make the colour version unreachable for both.
+
+    Nothing is *gated* on this (§8): the photograph is visible either way, in one of two
+    renderings. `src/styles/base.css` already collapses every transition to 0.01ms under
+    `prefers-reduced-motion`, which is the whole of what §8 asks for here — so there is no
+    second copy of that rule in this file, and nothing in this component animates a
+    position or a size for it to have to switch off.
+  */
+  .member:hover .portrait,
+  .member:focus-within .portrait {
+    filter: grayscale(0);
+  }
+
+  @media (hover: none) {
+    .portrait {
+      filter: grayscale(0);
+    }
+  }
+
+  .placeholder {
+    /* The frame's own mark while there is no photograph. Decorative and `aria-hidden`, so
+       the low opacity is a choice about weight rather than about legibility. */
+    font-size: 1.5rem;
+    line-height: 1;
+    color: var(--band-accent);
+    opacity: 0.4;
+  }
+
+  /* ------------------------------------------------------- name, role, bio */
+  .name {
+    font-family: var(--font-display);
+    font-weight: 400;
+    /* display-s. 1.625rem is Cormorant's 26px floor, and this is the smallest display
+       size on the page — a name is where a missing `đ` would be most obvious. */
+    font-size: clamp(1.625rem, 3vw, 2.125rem);
+    line-height: 1.15;
+    margin: var(--space-2) 0 0;
+  }
+
+  .link {
+    /* The accent carries the affordance; the name keeps the text colour, because a
+       display-size line in `--accent` reads as a heading shouting rather than a link. */
+    color: inherit;
+    text-decoration-line: underline;
+    text-decoration-color: var(--accent);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 6px;
+    transition: color var(--dur-fast) var(--ease);
+  }
+  .link:hover {
+    color: var(--accent);
+  }
+
+  .role {
+    font-family: var(--font-label);
+    font-weight: 400;
+    font-size: 0.8125rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+  }
+
+  .bio {
+    font-size: 1rem;
+    line-height: 1.65;
+    color: var(--text-muted);
+    max-width: 68ch;
+    margin: 0;
+  }
+
+  /* Visible to a screen reader, not to a reader. Used for the " on Instagram" suffix, so
+     the link's accessible name says where it goes while its visible label stays the
+     person's name — WCAG 2.5.3 wants the visible label to be part of the accessible one. */
+  .srOnly {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+</style>

@@ -91,6 +91,20 @@ export const CLASSES_QUERY = defineQuery(`
   }
 `);
 
+/**
+ * The people who teach. `/aboutus` is the only page that renders them (MUSE-23).
+ *
+ * `portrait` and `instagram` are both **optional** in the schema, so both project
+ * `undefined` for a document that has neither — which is every real instructor today,
+ * because no photography of this studio exists. The page has a placeholder frame for the
+ * first and renders a plain name instead of a link for the second; see the notes on
+ * `instructor` in `sanity/schemaTypes/documents/studio.ts` for why neither is required.
+ *
+ * That makes them the two fields in this query a typo could hide: an absent optional field
+ * and a misspelled projection of it are the same `undefined`. `test/projections.test.ts`
+ * covers it by giving exactly one fixture instructor an Instagram URL and exactly one no
+ * portrait at all, so there is always a row that can disagree.
+ */
 export const INSTRUCTORS_QUERY = defineQuery(`
   *[_type == "instructor"] | order(coalesce(order, 999) asc, name asc){
     _id,
@@ -98,7 +112,30 @@ export const INSTRUCTORS_QUERY = defineQuery(`
     "slug": slug.current,
     role{ hr, en },
     bio{ hr, en },
-    portrait{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop }
+    portrait{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop },
+    instagram
+  }
+`);
+
+/**
+ * The studio's origin story — the other half of `/aboutus`.
+ *
+ * A singleton pinned to a fixed `_id`, like `SITE_SETTINGS_QUERY`, so "no story yet" is a
+ * `null` that `requireDocument` reports as *never created* rather than an empty list that
+ * could mean either. `story` is an array of bilingual paragraphs and is projected as
+ * `{hr, en}` per member for the same reason every other bilingual value is: a bare
+ * `story[]` would hand the page the `localeText` wrapper.
+ *
+ * `foundedOn` carries the raw ISO date. The locale-specific rendering (§10: HR
+ * `13. kolovoza 2026.`, EN `13 August 2026`) is `formatDate` in `src/lib/dates.ts` —
+ * formatting is the page's decision, the same way an image's ratio is.
+ */
+export const STUDIO_STORY_QUERY = defineQuery(`
+  *[_type == "studioStory" && _id == "studioStory"][0]{
+    _id,
+    heading{ hr, en },
+    foundedOn,
+    "story": story[]{ hr, en }
   }
 `);
 
@@ -177,6 +214,7 @@ export const FAQS_QUERY = defineQuery(`
 export const DOCUMENT_COUNTS_QUERY = defineQuery(`
   {
     "siteSettings": count(*[_type == "siteSettings"]),
+    "studioStory": count(*[_type == "studioStory"]),
     "page": count(*[_type == "page"]),
     "class": count(*[_type == "class"]),
     "scheduleSlot": count(*[_type == "scheduleSlot"]),
