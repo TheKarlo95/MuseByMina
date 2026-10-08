@@ -12,12 +12,19 @@ are load-bearing, not stylistic. The three that break things silently:
   `npm run ds` enforces this.
 - **Cormorant never below 26px** — its `đ` crossbar vanishes and *Dođi* renders as "Dodi".
 - **No drop shadows, either theme.** Depth is surface value plus hairlines.
-- **Numerals are set once, on the document.** Cormorant's default figures are old-style,
-  so a number in the display face renders `19:00` as `I9:OO`. `src/styles/base.css` asks
-  for `lining-nums tabular-nums` and everything inherits it. `font-variant-numeric` is a
-  single value, so a component that redeclares it *replaces* that rule rather than adding
-  to it — and the bug comes back with the column still neatly aligned. `npm run ds`
-  rejects the property in a component; `test/numerals.test.ts` measures the glyphs.
+- **Numerals are set in `base.css` and nowhere else — twice, because inheritance only
+  covers half the page.** Cormorant's default figures are old-style, so a number in the
+  display face renders `19:00` as `I9:OO`. `src/styles/base.css` asks `:root` for
+  `lining-nums tabular-nums` and prose inherits it. **Form controls do not inherit it.**
+  The UA stylesheet gives `input`, `select`, `textarea` and `button` their own `font`
+  *shorthand*, which resets the property — so the declaration is not overridden there, it
+  never arrives, and no ordering or `!important` on `:root` can reach it. The same file
+  therefore carries a second rule naming those elements (plus `optgroup`, `option` and
+  `::file-selector-button`); it is part of the fix, not a nicety (MUSE-57). Both rules
+  stay in that one file: `font-variant-numeric` is a single value, so a component that
+  redeclares it *replaces* the rule rather than adding to it — and the bug comes back
+  with the column still neatly aligned. `npm run ds` rejects the property in a component;
+  `test/numerals.test.ts` measures the glyphs, in prose **and** inside a control.
 
 Header and footer sit on a band that is plum-ink in *both* themes, so they use the
 `--band-*` roles rather than page-theme roles.

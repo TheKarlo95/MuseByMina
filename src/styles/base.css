@@ -69,6 +69,60 @@ body {
   font-variant-numeric: lining-nums tabular-nums;
 }
 
+/* ---------- …and the half of the page that does not inherit it — MUSE-57 ----------
+   A form control is not prose. The UA stylesheet gives `input`, `select`, `textarea`
+   and `button` their own `font` SHORTHAND, and a shorthand resets every sub-property it
+   does not mention — `font-variant-numeric` among them. Measured on /contact before
+   this rule existed:
+
+     :root      lining-nums tabular-nums
+     label      lining-nums tabular-nums
+     select     normal      ← and its <option>s
+     input      normal
+     textarea   normal
+     button     normal
+
+   So the declaration above is not *overridden* on a control, it never *arrives*. That
+   is the difference from MUSE-43, which sits next to this and looks identical: that was
+   a declaration losing a tie and was fixed by ordering. Nothing about ordering,
+   specificity or `!important` on `:root` reaches an element that does not inherit — the
+   fix has to name the elements, which is what this is.
+
+   `optgroup` and `option` are named even though they inherit from the `select` once it
+   is fixed in Blink: UA stylesheets differ on which of these they hand a font to, and
+   `inherit` on an element that was going to inherit anyway costs nothing. The same
+   argument covers `::file-selector-button`, a button the UA invents inside
+   `<input type="file">` with a font shorthand of its own, which naming `input` does
+   NOT reach. `::placeholder` is deliberately absent — it inherits from the input, so
+   the line above already covers it.
+
+   Nothing on the site draws a digit inside a control today, and controls are set in
+   Jost/Inter whose figures are lining anyway — so this fixes nothing visible. That is
+   the reason it is here rather than later: MUSE-14 survived the life of the project
+   because a fallback face happened to have lining figures, and the moment /pricing's
+   package <option> reads „55 € / mjesec" instead of a tier name, or a CTA reads
+   "Book for 55 €", the digits are in a control and in Cormorant at the same time.
+
+   `test/numerals.test.ts` measures the glyphs in a real control on a real page rather
+   than reading the computed value — a computed-style assertion would have passed
+   through the whole of this bug.
+
+   Still outside this rule, and known: Blink's UA sets `::marker { font-variant-numeric:
+   tabular-nums }` directly, which REPLACES the document's value the same way a
+   component would. There is no `<ol>` anywhere on the site and a `<ul>` bullet carries
+   no digits, so it draws nothing — but an ordered list in the display face would
+   number itself in old-style figures, and this is where the one-line fix goes.
+   ---------------------------------------------------------------------------------- */
+input,
+select,
+textarea,
+button,
+optgroup,
+option,
+::file-selector-button {
+  font-variant-numeric: inherit;
+}
+
 ::selection {
   background: var(--accent-fill);
   color: var(--accent-fill-text);
