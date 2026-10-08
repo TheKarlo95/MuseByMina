@@ -148,6 +148,24 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   failure names the component whose imports moved. It also checks the order *inside* the
   shared chunk, because `BaseLayout.*.css` carries the globals and the header's and
   footer's scoped styles together and reordering those two leaves the head untouched.
+- **Structured data is one module and one `<script>` tag** (MUSE-31).
+  `src/lib/structured-data.ts` projects the `SiteSettings` singleton into JSON-LD and
+  `BaseLayout.astro` emits it; `test/structured-data.test.ts` fails if a second `.astro`
+  file writes an `application/ld+json` tag, because two emission sites are two answers to
+  "does the markup agree with the page". It holds **no** studio details of its own — it
+  takes the same memoised `getSiteSettings()` promise `Footer.astro` awaits, so the block
+  and the visible page cannot disagree by construction. The suite compares them field by
+  field anyway (street and city out of the `<address>`, the address out of the `mailto:`,
+  `sameAs` against the `rel="me"` links — the same claim in two syntaxes) and then
+  rebuilds the site from an edited dataset and demands both moved: that last assertion is
+  the only one a hardcoded copy fails, since every equality test passes while the literal
+  still happens to match (MUSE-50). Every URL inside a block comes from `localeUrl` — a
+  hand-built one is a 301 and names something other than the page it sits on (MUSE-9) —
+  and the 404 carries no block, for the same reason it declares no canonical.
+  **`DanceSchool` is not a schema.org type** (it 404s; there is no dance type under
+  `LocalBusiness` or `EducationalOrganization`) and an unknown `@type` fails *silently* —
+  the validator reports a node with nothing recognised on it — so the studio is
+  multi-typed as both and a test pins the names.
 - The theme is stamped pre-paint by an inline script (`src/lib/theme.ts`). Never move that
   into a component — it exists to prevent a flash.
 - **A browser check never takes a server it did not start** (MUSE-52). `npm run a11y`,
