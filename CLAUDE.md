@@ -44,6 +44,7 @@ npm run ds         # design-system compliance
 npm run format:check   # the formatting convention — fast, names file:line
 npm run format -- <file>   # apply it to **one file**; never to the tree (MUSE-58)
 npm run shots      # screenshots of all theme states to /tmp/muse-shots
+npm run worktrees:sweep    # reclaimable per-ticket worktrees; `-- --remove` to do it
 
 npm run sanity:types   # re-extract the schema and regenerate types — commit the result
 npm run sanity:check   # the fast gate `npm run build` runs first
@@ -642,6 +643,33 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   deleted the first one's builds mid-flight, which is MUSE-17's flake wearing a different
   hat. An hour is fifteen times the longest a build can live, needs no lock and no pid
   file, and cannot reach anything a live run could still be using.
+
+  **And it prunes every scratch root under the checkout, not only the one it runs in**
+  (MUSE-79). That policy is untouched — same rule, same age, wider reach — because the
+  defect was never the rule: one worktree per ticket meant a run in `muse-71` never looked
+  at `muse-64`, and a worktree whose pull request merged is never run in again, so
+  **30,061 stale build directories accumulated across 43 worktrees** and a run died with
+  `ENOSPC`. Every one was older than the age the prune already allowed itself to delete.
+  Age stays the only discriminator and that is what makes the wider reach safe: another
+  agent's live build is minutes old wherever it lives, so no lock and no pid file is
+  needed here either. `scratchRoots()` in `test/helpers/scratch.ts` is where the roots come
+  from — it reads `.git` rather than asking `git`, because a `globalSetup` may not start a
+  child process — and `test/isolation.test.ts` proves both directions against a
+  two-worktree tree.
+
+  **A worktree is the other half of that disk, and it is swept by hand on purpose.** 42 of
+  the 52 present belonged to merged pull requests, each with its own 653 MB of
+  `node_modules`. `npm run worktrees:sweep` prints a verdict per worktree and removes
+  nothing until it is run again with `--remove`; it removes one only when its pull request
+  is **merged**, its tree is **clean** and its tip commit exists somewhere other than that
+  directory, and it calls `git worktree remove` without `--force` so git re-checks. **Do
+  not make it automatic** — an agent's worktree is indistinguishable from an abandoned one
+  between two tool calls, and deleting one mid-ticket is worse than the disk pressure. And
+  **the signal is the pull request, never the commit graph**: this repository
+  squash-merges, so a merged branch is never an ancestor of `main` and
+  `git merge-base --is-ancestor` calls all 42 of them unmerged. The per-worktree
+  `node_modules` stays — README says which three things break if it is shared, all
+  measured — so the sweep is the whole of that answer.
 
   **A build stages where it outputs, which is why `outDir` may not leave the project
   root** (MUSE-41). The staging area is the *third* directory a build writes, after the
