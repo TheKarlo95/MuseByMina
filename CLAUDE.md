@@ -948,6 +948,34 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   as a complete page. `features` is `required().min(1)`, so „an empty optional field is a
   decision" could not be taken here — the two lines that exist describe the *period*
   rather than claiming what a month of classes contains.
+- **The site makes no claim about what a first class costs** (MUSE-71). „Besplatni probni
+  sat" / "Free trial class" was the header CTA on all fourteen pages in both locales, and
+  the promise was repeated in the homepage `#trial` band, `/contact`'s eyebrow,
+  `/schedule`'s CTA band and both `page` descriptions — so in the two
+  `<meta name="description">` tags Google shows and in `llms.txt`. The studio offers no
+  such thing: its own 2026/2027 enrolment form lists 55 € regular, 40 € student and 20 €
+  drop-in and no trial rate, and the claim came from MUSE-36's commit. It is gone and
+  **nothing replaced it** — naming the drop-in rate would cover one invented offer with a
+  second, since nobody has said that is what a trial costs. Retiring an unsupported
+  commercial promise needs no decision from the studio; **adding one does.**
+
+  The guard is one rule in `test/helpers/offer-claims.ts` applied at two levels, and both
+  are load-bearing. `test/offerclaims.test.ts` reads `src/`, `sanity/` and the seed as
+  plain text, so a failure names a `file:line`; `test/content.test.ts` applies the same
+  needles to `dist`, because a claim *composed* at render time appears in no source file
+  and on every page (MUSE-50) — demonstrated, and caught only there. It uses the build
+  that suite already performs: the heavyweight budget has zero headroom. The needles test
+  **adjacency**, not the word "free", since seven lines under `src/` use it about Actions
+  minutes, a URL fragment and a layout; `INNOCENT` pins each and asserts it still exists.
+  There is **no exemption list**, so a comment explaining the removal names the ticket
+  instead of quoting the claim — MUSE-42's ruling, as `test/contentdrift.test.ts` applies
+  it.
+
+  Two things this cannot do, stated so nobody assumes otherwise. `contentdrift`'s registry
+  classifies a field as CMS-owned or in-code and **cannot ask whether a human said it** —
+  `page.description` was correctly classified and correctly in the CMS, which is the hole
+  this came through, and no test closes it. And the CTA label is still a code literal:
+  moving it into `siteSettings` is a schema change and its own ticket.
 - **An optional field is a decision, not laziness.** `instructor.portrait`,
   `instructor.instagram`, `instructor.bio`, `class.description`, `class.image`,
   `siteSettings.phone` and `openingHours` are optional because no real value exists for

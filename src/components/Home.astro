@@ -65,7 +65,9 @@ const t = {
     where: 'Gdje smo',
     openMaps: 'Otvori u Google Maps',
     trial: 'Dođi na probni sat',
-    trialLede: 'Prvi sat je besplatan. Javi nam se i dogovorit ćemo termin.',
+    // MUSE-71 removed this sentence's first half, which priced the first class at
+    // nothing. The second half is the whole of what the studio has actually said.
+    trialLede: 'Javi nam se i dogovorit ćemo termin.',
     doorNudge: { beginner: 'Počni ovdje.' },
   },
   en: {
@@ -83,7 +85,7 @@ const t = {
     where: 'Where we are',
     openMaps: 'Open in Google Maps',
     trial: 'Come to a trial class',
-    trialLede: 'Your first class is free. Get in touch and we will find you a slot.',
+    trialLede: 'Get in touch and we will find you a slot.',
     doorNudge: { beginner: 'Start here.' },
   },
 }[locale];

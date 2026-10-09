@@ -48,7 +48,9 @@ const settings = await getSiteSettings();
 
 const t = {
   hr: {
-    eyebrow: 'Prvi sat je besplatan',
+    // MUSE-71: the eyebrow used to price the first class at nothing. It names the
+    // subject of the hero instead, which is what every other eyebrow on the site does.
+    eyebrow: 'Prvi sat',
     h1: 'Dođi na probni sat',
     lede:
       'Bez partnera, bez iskustva, bez obveze. Ispuni obrazac i javljamo se s terminom koji ti odgovara.',
@@ -60,7 +62,7 @@ const t = {
     schedule: 'Pogledaj raspored',
   },
   en: {
-    eyebrow: 'The first class is free',
+    eyebrow: 'First class',
     h1: 'Come to a trial class',
     lede:
       'No partner, no experience, no commitment. Fill in the form and we will come back with a time that suits you.',

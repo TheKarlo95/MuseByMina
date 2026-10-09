@@ -14,6 +14,8 @@ import {
   type Build,
 } from './helpers/build';
 import { claimOutDir } from './helpers/scratch';
+// MUSE-71's rule, shared with `test/offerclaims.test.ts`, which applies it to the sources.
+import { claimsIn, report as offenceReport } from './helpers/offer-claims';
 // The read path's own report of what it is configured to read. Imported from the index,
 // which is the only module anything outside `src/lib/sanity/` may import.
 import { source } from '../src/lib/sanity';
@@ -182,6 +184,30 @@ const SUPERSEDED: { route: string; field: CopyField; ticket: string; because: st
       'wrong as well. Replaced with what the timetable actually is: Mondays and ' +
       'Thursdays, 90 minutes, four levels.',
   },
+  {
+    route: '/',
+    field: 'description',
+    ticket: 'MUSE-71',
+    because:
+      'The frozen description ended „Dođi na besplatni probni sat." / "Come to a free ' +
+      'trial class." The studio offers no free class: its own 2026/2027 enrolment form ' +
+      'lists 55 € regular, 40 € student and 20 € drop-in and no trial rate, and nothing ' +
+      'it publishes anywhere mentions one — the claim came from the same foundation ' +
+      "commit as MUSE-36's invented schedule. One word is gone and nothing replaced it; " +
+      'the sentence is now the brief\'s own „Dođi na probni sat.", which makes no price ' +
+      'claim. Removing an unsupported commercial promise needed no decision from the ' +
+      'studio — adding one would.',
+  },
+  {
+    route: '/contact',
+    field: 'description',
+    ticket: 'MUSE-71',
+    because:
+      'The same claim in the same ticket, here as „besplatni probni sat" / "a free ' +
+      'bachata trial class" in the `<meta name="description">` of `/contact` and in its ' +
+      'two `llms.txt` lines. One word removed from each locale; the form, the reply ' +
+      'promise and everything else the sentence says are unchanged.',
+  },
 ];
 
 function supersededEntry(route: string, field: CopyField) {
@@ -220,7 +246,7 @@ const ADDED_AFTER_THE_MIGRATION: { route: string; ticket: string; because: strin
     because:
       'The one trust page of MUSE-27 whose content is general knowledge rather than ' +
       'studio fact — what bachata is, where it comes from, how it is counted. The site ' +
-      'never had it: the nav entry was one of MUSE-13\'s dead links, and it arrived with ' +
+      "never had it: the nav entry was one of MUSE-13's dead links, and it arrived with " +
       'its `prosePage` document long after this receipt was written. Its words are ' +
       'asserted in `test/whatisbachata.test.ts`, including that every sentence is either ' +
       'about the dance or read off the timetable.',
@@ -232,7 +258,7 @@ const ADDED_AFTER_THE_MIGRATION: { route: string; ticket: string; because: strin
       'The about page. MUSE-23 built the component and deliberately did not route it — ' +
       'the dataset held no `studioStory` and `getStudioStory()` fails the build naming ' +
       'the missing document — so `/aboutus` arrived after this receipt was written. Its ' +
-      'story is **placeholder prose seeded in the dataset**, awaiting Mina\'s words; its ' +
+      "story is **placeholder prose seeded in the dataset**, awaiting Mina's words; its " +
       'copy is asserted in `test/aboutus.test.ts`.',
   },
 ];
@@ -660,9 +686,10 @@ describe('AC1: every page renders the words `main` published', () => {
         PUBLISHED_BEFORE_THE_MIGRATION.pages[entry.route],
         `${entry.route} is listed as added after the migration and is also frozen`,
       ).toBeUndefined();
-      expect(ROUTES.map(({ route }) => route), `${entry.route} is not a route`).toContain(
-        entry.route,
-      );
+      expect(
+        ROUTES.map(({ route }) => route),
+        `${entry.route} is not a route`,
+      ).toContain(entry.route);
     }
   });
 
@@ -699,9 +726,10 @@ describe('AC1: every page renders the words `main` published', () => {
         PUBLISHED_BEFORE_THE_MIGRATION.pages[entry.route],
         `${entry.route} is listed as added after the migration and is also frozen`,
       ).toBeUndefined();
-      expect(ROUTES.map(({ route }) => route), `${entry.route} is not a route`).toContain(
-        entry.route,
-      );
+      expect(
+        ROUTES.map(({ route }) => route),
+        `${entry.route} is not a route`,
+      ).toContain(entry.route);
     }
   });
 
@@ -730,6 +758,32 @@ describe('AC1: every page renders the words `main` published', () => {
         }
       }
     }
+  });
+
+  /**
+   * **MUSE-71 — the output half of the retired offer claim.**
+   *
+   * The rule lives in `test/helpers/offer-claims.ts` and `test/offerclaims.test.ts` applies
+   * it to `src/`, `sanity/` and the seed, where it can name a `file:line`. This is the
+   * other level, and it is here rather than in that file because `npm test`'s heavyweight
+   * budget has zero headroom (`test/helpers/concurrency.ts`) and this suite already has a
+   * build: a guard needing an eleventh `astro build` would be spending somebody else's.
+   *
+   * It is not a duplicate of the source scan. A claim **composed** at render time — two
+   * innocent fragments joined by a template literal, or a word that arrives from the live
+   * dataset rather than from the seed — appears in no source file and in every page. That
+   * is MUSE-50 exactly: its fifth address surface was a literal buried inside a longer
+   * composed label, and the guard that missed it was looking for whole values in source.
+   *
+   * The two `SUPERSEDED` entries above already prove the two descriptions are gone, string
+   * for string. This is the claim as a *class*, over every byte a visitor can read.
+   */
+  it('publishes no claim of a class at no cost, in either locale (MUSE-71)', () => {
+    const offences = build
+      .allFiles()
+      .filter((file) => /\.(html|txt|xml)$/.test(file))
+      .flatMap((file) => claimsIn(build.read(file), file));
+    expect(offenceReport(offences)).toEqual([]);
   });
 
   it('keeps the studio details identical — name, summary, address, email, Instagram', () => {
@@ -766,7 +820,9 @@ describe('AC1: every page renders the words `main` published', () => {
      */
     for (const locale of LOCALES) {
       // The footer's two-line `<address>`, on every page.
-      expect(build.read(pageFile('/privacy', locale))).toContain(PUBLISHED_ADDRESS.split(', ')[0]!);
+      expect(build.read(pageFile('/privacy', locale))).toContain(
+        PUBLISHED_ADDRESS.split(', ')[0]!,
+      );
       // The homepage and /contact render it whole, in a heading.
       expect(build.read(pageFile('/', locale))).toContain(PUBLISHED_ADDRESS);
       expect(build.read(pageFile('/contact', locale))).toContain(PUBLISHED_ADDRESS);
