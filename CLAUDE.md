@@ -43,6 +43,7 @@ npm run budget     # the performance budget, per page: budget / actual / headroo
 npm run ds         # design-system compliance
 npm run format:check   # the formatting convention — fast, names file:line
 npm run format -- <file>   # apply it to **one file**; never to the tree (MUSE-58)
+                           # it reflows the whole file — read the diff after (MUSE-82)
 npm run shots      # screenshots of all theme states to /tmp/muse-shots
 npm run worktrees:sweep    # reclaimable per-ticket worktrees; `-- --remove` to do it
 
@@ -765,6 +766,22 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   was **measured** against the tree, so only the two settings that differ from Prettier's
   defaults are written down; the rest would be a value to re-measure when a default moves.
   Run it on **one file**, the one you touched (`npm run format -- <file>`).
+
+  **Then read `git diff`, because the scoped form is not safe either** (MUSE-82). Prettier
+  has no range mode: run it on one file you changed and it reformats *the whole file*. 47 of
+  the 96 files it owns differ from its output in wrapping only, so a 12-line change to
+  `test/home.test.ts` came back as 65 lines and a 14-line hunk in `test/contact.test.ts` as
+  95 — eight blocks of untouched code reflowed, `npm run format:check` green either way,
+  because wrapping is deliberately not its business. **That is this design working, not a
+  defect**; the alternative is the tree-wide reformat the next paragraph refuses. So the
+  working rule is: **run it, read the diff, and if it rewrapped code you did not touch,
+  revert the file and re-apply your hunk by hand.** Converging a file is for a branch that
+  is *about* that file; it is not worth burying a two-line fix in sixty lines of reflow a
+  reviewer then has to read. (Teaching `npm run format` to warn when its output would move
+  lines outside your hunk was considered and rejected: it would have to guess your base to
+  know which lines are yours, it would fire on roughly half of all files touched, and it
+  could only ever *report* what `git diff` already shows — whether a given reflow is
+  reviewable is the judgement, and a wrapper cannot make it.)
 
   **`prettier --check` is not the gate and must not become one.** The tree is not
   Prettier-formatted: 49 of the 96 files Prettier owns are byte-identical under the config,
