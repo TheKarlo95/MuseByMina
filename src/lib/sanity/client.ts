@@ -107,12 +107,15 @@ const CLIENT_CONFIG = {
   // That is a different thing and not worth machinery: no page goes stale, and the next
   // scheduled build converges.)
   //
-  // **Measured, because the cost is the whole of the argument.** All thirteen queries in
-  // `./queries.ts`, run sequentially, median of seven rounds: 294 ms cached, 648 ms
-  // uncached — about 27 ms a query, so ~0.35 s on a build of fifteen-odd seconds, and
-  // that is the ceiling rather than the figure, since the readers are memoised and pages
-  // do not wait on each other. Four scheduled builds a day times thirteen queries is
-  // ~1,600 requests a month. The read volume the CDN exists for is not this site's.
+  // **Measured, because the cost is the whole of the argument.** Five *interleaved* pairs
+  // of real `astro build` runs, so the two configurations shared the machine's noise
+  // rather than taking turns with it: median **2.70 s cached against 3.13 s uncached**,
+  // the two spreads not overlapping. That is **+0.43 s** on an `npm run build` of
+  // fifteen-odd seconds, where it is inside the run-to-run noise, because `astro check`
+  // dominates the wall clock. (The per-query figure, for whoever next changes the query
+  // count: all thirteen sequentially, median of seven rounds, 294 ms against 648 ms —
+  // ~27 ms a query.) Four scheduled builds a day times thirteen queries is ~1,600
+  // requests a month. The read volume the CDN exists for is not this site's.
   //
   // `cacheMode: 'noStale'` is the other candidate and is declined. It is a *request*
   // option rather than a config one, so its correctness would rest on every call site

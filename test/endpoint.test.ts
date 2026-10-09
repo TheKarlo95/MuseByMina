@@ -42,6 +42,30 @@ import { API_HOST, queryUrl, target } from '../scripts/seed-compare.mjs';
  * The *consistency* of the two hosts is Sanity's property, not ours, and is not something
  * a test in this repository can establish. It is documented, it was measured during
  * MUSE-20 (about a minute of lag), and it was observed again above.
+ *
+ * ## The proof that was run by hand, and what it is worth
+ *
+ * Asserting the configured flag proves what this repository *says*. What the build *does*
+ * was established separately, by a real `astro build` against the live dataset with
+ * `dns.lookup` patched from `--import` — at the resolver rather than at `fetch`, because
+ * `@sanity/client`'s Node entry uses get-it's undici-backed fetch and a patch on
+ * `globalThis.fetch` sees Astro's telemetry and nothing else. Two runs, differing only in
+ * `useCdn`, with the **cached host made unresolvable** in both:
+ *
+ *     useCdn: true    6 lookups, all of the cached host; build fails, SanityUnavailableError
+ *     useCdn: false   1 lookup, the uncached host; build succeeds, Complete!
+ *
+ * A falsification rather than an observation: with the flag as `main` had it, removing the
+ * cached host removes the build's only route to the content, which is what "the build read
+ * the CDN" means operationally. With the flag as it is here, the same removal changes
+ * nothing.
+ *
+ * **What that does not prove.** It establishes the endpoint, not the staleness window. The
+ * failing sequence was *write, then immediately build*, and reproducing it needs a write to
+ * the dataset — so the closing of the window rests on the uncached host being strongly
+ * consistent, which is Sanity's documented behaviour and not a measurement taken here. The
+ * honest statement of the fix is therefore: the build no longer reads the host that is
+ * allowed to be behind. Nobody should read these assertions as more than that.
  */
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));

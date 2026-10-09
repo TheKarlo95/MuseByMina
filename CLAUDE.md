@@ -816,6 +816,49 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   alternative is publishing pages with empty titles, which `src/lib/sanity/decode.ts`
   exists to refuse — but it is a real availability dependency, and the `continue-on-error`
   probe step in `ci.yml` no longer protects anything from it.
+- **It reads the *uncached* host, and that is a correctness setting, not a tuning one**
+  (MUSE-81). `useCdn: false` in `src/lib/sanity/client.ts`. The cached read host is
+  eventually consistent, so a build starting inside the refresh window after a publish
+  reads the **previous** revision and publishes it with every gate green — 200 from the
+  API, every document present, nothing for `decode.ts` to object to, `deploy.yml`'s alert
+  silent, because nothing failed. Observed: an import verified in the dataset at 10:12, a
+  successful rebuild at 10:13, the old text live at 10:14, correct after a second rebuild
+  at 10:18. What that breaks is **MUSE-21's promise**: the cron fires at `20 1,7,13,19`
+  and Mina is told a *duration*, so an edit published shortly before a run can be read
+  pre-publish by that run and wait six hours more than the maximum she was given. The
+  comment this replaced argued the opposite and its flaw is worth keeping in mind — it
+  reasoned about the *expected* gap between an edit and the next build, when the thing
+  being promised is the *worst* one.
+
+  `useCdn` is now the literal type `false` in `SanitySource`, the way `perspective` is
+  `'published'`: the two settings here whose loss is silent, each pinned at compile time
+  and again by a test. The cost was measured rather than waved away, because the cost is
+  the whole argument — five interleaved pairs of real `astro build` runs, median 2.70 s
+  cached against 3.13 s uncached, which is **+0.43 s** and inside the noise of a fifteen
+  second `npm run build`. The **`[content]` line names the host** beside the dataset, and
+  that is the only place „was this build's content current?" can be answered after the
+  fact; `contentEndpoint()` asks the client's own `getUrl()` rather than restating the
+  rule that turns the flag into a hostname. **Every script reads the same host through
+  `queryUrl` in `scripts/seed-compare.mjs`** — `scripts/sanity-read-check.mjs` wrote its
+  own URL against the cached one, which could make it report `EMPTY` for a document that
+  was in the dataset, the single verdict it exists to tell apart from a broken query.
+  `test/endpoint.test.ts` fails on the cached hostname appearing anywhere under `src/` or
+  `scripts/`, **prose included**, for `test/seo.test.ts`'s reason; say „the cached host"
+  instead.
+
+  **A post-deploy check comparing the published bytes against the dataset was weighed and
+  declined.** It would have caught this one, and the ordering objection is real: the
+  dataset legitimately moves between a build and a check, so the naive comparison goes red
+  on Mina's ordinary evening edit — the loudest possible false alarm, since MUSE-21's
+  response to a failed deploy is an assigned issue. The honest version needs each
+  document's `_rev` captured at build time *plus* the build's start instant, so that „we
+  read a superseded revision" (fatal) can be told from „she edited after we read" (fine) —
+  a new build artefact and a new workflow job, to detect a failure the type pin above now
+  makes structurally unreachable, and one that **cannot be exercised at all** without a
+  content-write token this project deliberately does not have (MUSE-21, MUSE-45). A gate
+  nobody can test is a gate that rots, and this repository has three recorded instances of
+  exactly that. The proportionate half shipped instead: the log now names the endpoint, so
+  a stale deploy is diagnosable after the fact from the build log alone.
 - **The seed lives in `content/`, not in `sanity/`, and that is load-bearing** (MUSE-45).
   `scripts/check-sanity.mjs` hashes every file under `sanity/` with **no extension
   filter** — the MUSE-19 rule — and the fingerprint it produces means one thing: *the
