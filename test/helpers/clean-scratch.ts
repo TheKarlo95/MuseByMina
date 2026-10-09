@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { SCRATCH } from './scratch';
+import { scratchRoots } from './scratch';
 
 /**
  * How old a build directory has to be before this is allowed to delete it.
@@ -36,22 +36,56 @@ const STALE_AFTER_MS = 60 * 60 * 1000;
  * `SCRATCH` the last shared mutable path in the design, which is why it is also the last
  * one that can destroy anything: it can't.
  *
- * Only the entries directly under `SCRATCH` are considered — the output directories and
- * cache roots `claimOutDir` and `cacheDirFor` mint — so this never walks into a build.
+ * Only the entries directly under a scratch root are considered — the output directories
+ * and cache roots `claimOutDir` and `cacheDirFor` mint — so this never walks into a build.
+ *
+ * **And it is every scratch root in the checkout, not just this worktree's** (MUSE-79).
+ * The policy above is unchanged and so is the age; what was wrong was the *reach*. One
+ * worktree per ticket means a run in one of them never looked at the others, and a
+ * worktree whose pull request merged is never run in again — so its builds were never
+ * reached by anything, and 30,061 of them filled the disk until a run died with ENOSPC.
+ * Age is still the only discriminator, which is what makes the wider scope safe: another
+ * agent's *live* build is minutes old wherever it lives, and nothing here can see it.
+ * `scratchRoots()` is where the roots come from, and it is in `scratch.ts` because that
+ * file is the only one allowed to know the path.
+ *
+ * The first run after this lands has a backlog to clear and can take a while; every run
+ * after it has at most an hour's worth.
  */
 export default function setup(): void {
-  if (!existsSync(SCRATCH)) return;
+  prune();
+}
 
+/**
+ * The prune itself, over every scratch root under `repository`.
+ *
+ * Separate from the default export because `globalSetup` is **called with vitest's own
+ * context object** as its first argument: a `base` parameter on `setup` would be handed a
+ * `GlobalSetupContext` on every real run and prune whatever that stringified to. This
+ * takes the argument instead, so `test/isolation.test.ts` can point the whole thing at a
+ * tree of its own and watch a second worktree's stale build go.
+ */
+export function prune(repository?: string): void {
   const cutoff = Date.now() - STALE_AFTER_MS;
-  for (const entry of readdirSync(SCRATCH)) {
-    const path = join(SCRATCH, entry);
+
+  for (const root of scratchRoots(repository)) {
+    if (!existsSync(root)) continue;
+    let entries: string[];
     try {
-      if (statSync(path).mtimeMs > cutoff) continue;
-      rmSync(path, { recursive: true, force: true });
+      entries = readdirSync(root);
     } catch {
-      // Another run pruning the same leftovers got there first. Housekeeping is not
-      // something to fail a run over, and the whole point of the threshold is that
-      // whatever it does reach is nobody's.
+      continue; // Another run's sweep took the root itself between those two calls.
+    }
+    for (const entry of entries) {
+      const path = join(root, entry);
+      try {
+        if (statSync(path).mtimeMs > cutoff) continue;
+        rmSync(path, { recursive: true, force: true });
+      } catch {
+        // Another run pruning the same leftovers got there first. Housekeeping is not
+        // something to fail a run over, and the whole point of the threshold is that
+        // whatever it does reach is nobody's.
+      }
     }
   }
 }

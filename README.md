@@ -34,6 +34,8 @@ npm run ds         # design-system compliance
 npm run a11y       # axe on every page, both themes (serves dist itself)
 npm run shots      # screenshots of all theme states → /tmp/muse-shots
 npm run ux:schedule  # /schedule: responsive shift, keyboard, filters
+npm run worktrees:sweep   # which per-ticket worktrees are reclaimable; removes nothing
+npm run worktrees:sweep -- --remove   # …and reclaim them
 
 npm run sanity:types   # re-extract the schema + regenerate types — commit the result
 npm run sanity:check   # the fast staleness gate that `npm run build` runs first
@@ -42,6 +44,45 @@ npm run sanity:dev     # the Studio locally, http://localhost:3333
 npm run sanity:build   # bundle the Studio into .sanity/studio — what CI runs
 npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
 ```
+
+**Build output is pruned by age, and the worktrees are swept by hand** (MUSE-79). `npm
+test` performs sixty-eight real builds, and before this each one's output sat in
+`node_modules/.muse-test-builds/` in **the worktree it ran in** until something ran there
+again — which, for a worktree whose ticket merged, is never. Measured when the ticket was
+filed: 30,061 stale build directories across 43 worktrees, 16 GB, none of them younger
+than the one-hour age at which the prune was already allowed to delete them, and a run
+that died with `ENOSPC`. The `globalSetup` now prunes every scratch root under the
+checkout rather than only its own. **The rule is unchanged and the reach is wider**: age
+is the discriminator, because a build another agent is writing this second is minutes old
+wherever it lives and a lock or a pid file would be a coordination problem where there is
+none (MUSE-34).
+
+A worktree is the other half of that cost — each one carries its own `node_modules`, and
+117 of those existed — and it is **deliberately not swept automatically**. An agent's
+worktree is indistinguishable from an abandoned one between two tool calls, so
+`npm run worktrees:sweep` prints a verdict per worktree and removes nothing until it is
+run again with `--remove`. It removes one only when its pull request is **merged**, its
+tree is **clean**, and its tip commit exists somewhere other than that directory; it calls
+`git worktree remove` without `--force`, so git re-checks the tree and has the last word.
+The signal is the pull request's state and never the commit graph: this repository
+squash-merges, so a merged branch is never an ancestor of `main` and
+`git merge-base --is-ancestor` calls every merged worktree unmerged.
+
+**The per-worktree `node_modules` stays, and that was checked rather than assumed.** It is
+653 MB apiece and the obvious saving, and all three of the following were measured on this
+tree. **`node_modules/.vite` is the vitest process's own dependency cache** — it is there
+after a run, holding `deps` and `vitest` — and `BUILD_CACHE_DIR` cannot move it, because
+that variable is read by `astro.config.mjs` for a *child* build and the runner itself is
+started with it unset; so a shared tree would put two agents' concurrent runs back on one
+`deps` directory, which Vite's optimiser commits to by renaming aside and **deleting**.
+That is MUSE-34's race across worktrees instead of within one. Second, `SCRATCH` lives
+inside `node_modules` and MUSE-41 requires it to be under the project root: a symlinked
+`node_modules` satisfies `prerenderStagingDir`'s string test and resolves somewhere else
+entirely, so every build in every worktree would stage into one `.prerender/` with
+content-hashed filenames — exit 0, `Complete!`, and a page linking assets another build
+renamed away. Third, `package-lock.json` differs between branches (MUSE-58 changed it), so
+one installed tree is not even the right answer to "what does this checkout depend on".
+The worktree sweep is therefore the whole of the `node_modules` answer.
 
 **None of the three browser gates needs a server, and none of them will attach to one.**
 Run `npm run build`, then run the gate: it serves `dist` from an in-process host on a port

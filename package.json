@@ -19,6 +19,7 @@
     "format": "prettier --write",
     "format:check": "node scripts/check-format.mjs",
     "ux:schedule": "node scripts/schedule-ux.mjs",
+    "worktrees:sweep": "node scripts/sweep-worktrees.mjs",
     "sanity:types": "sanity schema extract --path sanity/schema.json --enforce-required-fields --force && sanity typegen generate && node scripts/stamp-sanity.mjs",
     "sanity:check": "node scripts/check-sanity.mjs",
     "sanity:read": "node scripts/sanity-read-check.mjs",
