@@ -54,14 +54,17 @@ const EXITS: Record<Locale, { heading: string; lede: string; cta: string }> = {
 ---
 
 {/* Not indexable: the host serves this body for any unknown path, so it has no URL of
-    its own to declare a canonical for. `localeTwin={false}` is the separate fact that
-    there is no `/en/404/` — see both props on BaseLayout (MUSE-38). */}
+    its own to declare a canonical for. `localeTwins={[]}` is the separate fact that
+    there is no `/404/` *or* `/en/404/` a switcher could point at — see both props on
+    BaseLayout (MUSE-38). It spelled `localeTwin={false}` until MUSE-26 generalised the
+    prop to a set of locales; this page is still the only one with no twin in any of
+    them, and an empty list says that more exactly than a boolean did. */}
 <BaseLayout
   locale="hr"
   title="Stranica nije pronađena · Page not found"
   description="Tražena stranica ne postoji. · The page you asked for does not exist."
   indexable={false}
-  localeTwin={false}
+  localeTwins={[]}
 >
   <section class="wrap">
     <p class="eyebrow">404</p>
