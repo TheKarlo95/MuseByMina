@@ -74,7 +74,22 @@ const site = await openSiteOrExit({ routes: targets });
 const browser = await launchChecks();
 let failures = 0;
 
+/**
+ * Results axe could not decide — reported, never failed on (MUSE-75).
+ *
+ * `incomplete` is axe saying *I could not tell*, most often a contrast ratio it cannot
+ * compute because the ground is an image or a gradient. Failing on it would make the gate
+ * red for four decorative `aria-hidden` elements that are correct; saying nothing about it
+ * is the half of the over-promise that remains once the tag filter is gone. So the run
+ * prints a count and the rule names, and a reader of a green run can see what "clean"
+ * did and did not cover.
+ */
+let notes = 0;
+/** @type {Set<string>} */
+const undecided = new Set();
+
 console.log(`pages   ${targets.length} from the build, both themes`);
+console.log(`rules   every rule axe-core enables by default — no tag filter (MUSE-75)`);
 
 for (const target of targets) {
   for (const scheme of ['dark', 'light']) {
@@ -114,9 +129,34 @@ for (const target of targets) {
     }
     await page.evaluate(() => document.fonts.ready);
 
-    const { violations } = await new AxeBuilder({ page })
-      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
-      .analyze();
+    /**
+     * **Every rule axe runs by default — there is no tag filter** (MUSE-75).
+     *
+     * This read `.withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])`, and
+     * `heading-order` is tagged `cat.semantics best-practice`. So `/pricing/` shipped
+     * `h1 Cjenik` → `h3 Jedan mjesec` in both locales — design system §11.8 by name, a
+     * real axe finding on a live page — and the gate whose job is to catch exactly that
+     * reported every page clean in both themes. A hand-written list of the standards
+     * worth checking is this board's signature defect (MUSE-55's route list, MUSE-74's
+     * font list), and this one had the extra property that *the gate's name over-promised
+     * while the list under-delivered*: "accessibility: pass" meant "no WCAG A/AA
+     * violation", which is not what anybody reads it as.
+     *
+     * **The noise this costs was measured before it was adopted, not assumed.** The
+     * unfiltered run over all 16 pages × both themes found exactly one rule — this one,
+     * on the two `/pricing` pages — and nothing else at any impact. So including
+     * `best-practice` costs zero today, and the day it costs something it will be
+     * reporting a real defect of the same kind.
+     *
+     * No `withTags` at all rather than the old list plus `'best-practice'`: a filter is a
+     * list to keep current, and when axe adds `wcag22aa` or a new category the version
+     * bump should widen what this sees, not silently not-widen it. Rules axe ships
+     * **disabled** (`experimental`, `color-contrast-enhanced`/AAA) stay off, which is the
+     * right default — those are opt-in by design rather than by our omission.
+     */
+    const { violations, incomplete } = await new AxeBuilder({ page }).analyze();
+    notes += incomplete.length;
+    for (const rule of incomplete) undecided.add(rule.id);
 
     // The page that was audited, not the route that was asked for (MUSE-48): a reader of
     // this log can see which language each line is about without re-running anything. The
@@ -143,8 +183,23 @@ for (const target of targets) {
 
 await browser.close();
 await site.close();
+
+// What a green run does *not* mean, said where somebody reading a green run sees it.
+if (notes) {
+  console.log(
+    `\nnotes   ${notes} incomplete result(s) axe could not decide — ${[...undecided].sort().join(', ')}`,
+  );
+  console.log(
+    `        Not failures and not audited: axe reports these when it cannot compute the`,
+  );
+  console.log(
+    `        answer itself (a contrast ratio over an image or a gradient, typically).`,
+  );
+}
 if (failures) {
   console.log(`\n${failures} violation(s) total`);
   process.exit(1);
 }
-console.log(`\nAll ${targets.length} pages clean in both themes.`);
+console.log(
+  `\nAll ${targets.length} pages clean in both themes, against every rule axe enables by default.`,
+);

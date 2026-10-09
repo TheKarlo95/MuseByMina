@@ -443,10 +443,14 @@ describe('AC1: what a class costs, what packages exist, and what each includes',
     });
 
     it(`${locale}: the package name is a heading, so the cards are navigable`, () => {
+      // `h2` since MUSE-75: the page's only other heading below the `h1` is the form's,
+      // so an `h3` here was a skipped level in both locales. The whole outline is pinned
+      // against `dist` further down — this one keeps the level pinned per rendered card,
+      // including the dataset shapes a seed cannot hold at once.
       for (const [index, doc] of TIERS.entries()) {
         const card = cards(normal[locale])[index]!;
         expect(card.html).toMatch(
-          new RegExp(`<h3\\b[^>]*>\\s*${expected(doc, locale).name}\\s*</h3>`),
+          new RegExp(`<h2\\b[^>]*>\\s*${expected(doc, locale).name}\\s*</h2>`),
         );
       }
     });
@@ -1027,6 +1031,78 @@ describe('MUSE-59: /pricing is a route this site serves', () => {
     expect(sitemaps.length, 'the build emitted no numbered sitemap').toBeGreaterThan(0);
     expect(sitemaps.map((file) => published.read(file)).join('')).toContain('/pricing/');
   });
+});
+
+/**
+ * **MUSE-75 — the heading outline, against `dist`, because the a11y gate could not see it.**
+ *
+ * The page shipped `h1 Cjenik` → `h3 Jedan mjesec`, with its only `h2` („Prijavi se")
+ * *below* the cards: a skipped level in both locales, which design system §11.8 forbids
+ * by name and which axe reports as `heading-order`. The interesting half is that
+ * `npm run a11y` **could not fail on it** — it filtered to `wcag2a`/`wcag2aa`/`wcag21a`/
+ * `wcag21aa` and `heading-order` is tagged `best-practice`, so a real axe-detected defect
+ * on a shipped page was invisible to the gate that exists to catch it. That filter is gone
+ * (`scripts/a11y.mjs`), which makes the browser gate the general guard.
+ *
+ * This is the specific one, and it is worth having beside it for two reasons: it runs in
+ * `npm test` with no browser, on the build this file already performs, and it names the
+ * page and the two levels rather than a CSS selector. The rule is stated over *every*
+ * built page rather than over `/pricing`, because a guard that only looks where the bug
+ * was is the shape this board keeps re-filing — and it costs nothing extra, since
+ * `published` is the whole site.
+ */
+describe('MUSE-75: no built page skips a heading level', () => {
+  /** `[level, text]` for every heading in a built page, in document order. */
+  function headings(html: string): [number, string][] {
+    return [...html.matchAll(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/g)].map((m) => [
+      Number(m[1]),
+      m[2]!.replace(/<[^>]*>/g, '').trim(),
+    ]);
+  }
+
+  it('finds headings on every page, so the rule below cannot pass vacuously', () => {
+    const bare = published
+      .htmlFiles()
+      .filter((page) => headings(published.read(page)).length === 0);
+    expect(bare).toEqual([]);
+  });
+
+  it('increases a level by one at a time, on every page of the site', () => {
+    const skips = published.htmlFiles().flatMap((page) => {
+      const found = headings(published.read(page));
+      const out: string[] = [];
+      let previous = 0;
+      for (const [level, text] of found) {
+        if (previous !== 0 && level > previous + 1) {
+          out.push(`${page}: h${previous} → h${level} at “${text}”`);
+        }
+        previous = level;
+      }
+      return out;
+    });
+    expect(
+      skips,
+      'design system §11.8: no skipped heading levels. axe calls this `heading-order` ' +
+        'and tags it best-practice, which is why the gate stayed green while /pricing ' +
+        'went h1 → h3 in both locales.',
+    ).toEqual([]);
+  });
+
+  /** The specific outline this ticket is about, named so a regression says which page. */
+  for (const locale of LOCALES) {
+    it(`${locale}: the price list sits at h2, between the page’s h1 and the form’s`, () => {
+      const found = headings(published.read(PRICING_PAGE[locale]));
+      const main = found.filter(([, text]) => text !== '');
+      expect(main[0]?.[0], 'the page’s own title is the h1').toBe(1);
+      for (const tier of seededTiers()) {
+        const name = (tier.name as Record<Locale, string>)[locale];
+        expect(
+          found.find(([, text]) => text === name)?.[0],
+          `${name} is a tier card’s heading`,
+        ).toBe(2);
+      }
+    });
+  }
 });
 
 describe('MUSE-59: every price on the page came out of the dataset', () => {
