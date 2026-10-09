@@ -273,8 +273,20 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   query string would hand the component a URL instead of the `ImageMetadata` `<Image>`
   needs. There is **no `public/`**: on the Pages sub-path a `public/favicon.ico`
   publishes under the base prefix while the bare probe goes to the *origin* root, so it
-  would answer nothing and cost MUSE-35's resolution bug. The share card is a separate
-  asset and a separate bullet, below.
+  would answer nothing and cost MUSE-35's resolution bug. **That argument stands and one
+  link was still missing** (MUSE-75): an unknown media feature is *false* rather than
+  ignored, so a UA that reads `media` but has no `prefers-color-scheme` ruled out both
+  branches and matched no icon at all. The default branch is the **opaque tile** — the
+  file the iOS entry already points at — because the four above need a `media` precisely
+  *because they are transparent*, and its 180 keeps the pair deterministic, since the
+  tie MUSE-40 avoided exists only between candidates of the same declared size. An apex
+  domain (MUSE-29) adds a root `favicon.ico` to this and nothing before it does.
+  **And the 16 is a smear at true size for the reason §12 implies**: the recipe
+  reproduces the committed files to three decimals, raising the gain makes it *worse*,
+  padding is a wash, and the only thing that works is cropping the dancer back — which
+  is a different mark at one size, so it is Mina's call and is raised rather than taken.
+  The measurements are beside `STROKE_GAIN`; do not re-run them. The share card is a
+  separate asset and a separate bullet, below.
 - **A shared link shows a picture, and `siteSettings.shareImage` is what decides which**
   (MUSE-69). `BaseLayout.astro` emitted `og:title`, `og:description` and `og:url` and no
   image, so every link in a WhatsApp group rendered as a bare line of text — and the CMS
@@ -314,6 +326,13 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   profile — a mirrored copy scores 0.22 on columns and 0.9999 on rows, so one axis alone
   passes it. `assetRefs` reads a `<meta>` image now, which is what gets the card resolved
   against `dist` under both deploy targets by `test/assets.test.ts` with no build added.
+
+  **`og:site_name` was absent until MUSE-75, so a scraper credited „github.io".** With no
+  such tag the publisher falls back to the host, which MUSE-29 would only have changed
+  into a different wrong answer. It is `settings.studioName`, off the same memoised read
+  the footer, the JSON-LD and the card use, and ungated for `og:image`'s reason. The
+  assertion with teeth is the one that rebuilds from an edited `studioName`: every
+  equality test passes with a literal in the layout.
 - `rootPath()`/`rootUrl()` in `src/lib/site.ts` are for files the build publishes at the
   deploy root — `robots.txt`, `llms.txt`, the sitemap — and for a future `CNAME`. They
   are **not** the way to reference a bundled asset; see the bullet above, and note that
@@ -485,6 +504,19 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   `test/browserlocale.test.ts` asserts the two arrivals get the same bytes, so the pin
   cannot quietly start selecting a language. `site.at(path)` is the only way to name a
   spelling that is not `pagePath`'s; `pagePath` is still the one place a slash is added.
+
+  **And it runs every rule axe enables by default — there is no tag filter** (MUSE-75).
+  It filtered to `wcag2a`/`wcag2aa`/`wcag21a`/`wcag21aa`, and `heading-order` is tagged
+  `best-practice`, so `/pricing/` shipping `h1` → `h3` in both locales was a real axe
+  finding on a live page that this gate structurally could not report — MUSE-55's defect
+  again, one layer in, with "accessibility: pass" meaning something narrower than it
+  reads as. The filter is **gone** rather than extended by a tag: a list of standards
+  worth checking is a list to keep current, and with none the next axe-core release
+  widens what this sees. The noise was measured before it was adopted — the unfiltered
+  run over 16 pages × both themes found that one rule and nothing else at any impact.
+  Rules axe ships disabled (experimental, AAA) stay disabled. What a green run still does
+  not cover is printed under it: `incomplete` results are reported as notes and never
+  failed on, because axe raises them when it cannot compute the answer itself.
 - **"Should a crawler index this" and "may this page route by language" are two props**
   (MUSE-38). `BaseLayout.astro` takes `indexable` and `localeTwin`, and neither is derived
   from the other — `const localeRouting = indexable;` is the regression, it reads as a

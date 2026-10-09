@@ -12,6 +12,7 @@ import {
   ICONS,
   MEASURED_MEAN_ALPHA,
   MIN_STROKE_RATIO,
+  TILE_FILE,
 } from '../src/lib/icon';
 import {
   APEX_DEPLOY,
@@ -91,8 +92,15 @@ function declaredSize(sizes: string): number {
   return Number(match[1]);
 }
 
-/** The tab icons — everything except the opaque iOS tile. */
-const TAB_ICONS = ICONS.filter((icon) => icon.rel === 'icon');
+/**
+ * The transparent mark — everything in the registry that is not the opaque tile.
+ *
+ * Keyed on the **file** rather than on `rel`, which is what it was until MUSE-75 added a
+ * scheme-less `rel="icon"` pointing at that same tile. Every rule below this line is
+ * about the mark: one brand colour, a shared alpha channel, more ink than the plain crop
+ * would carry. A tile satisfies none of them and is not supposed to.
+ */
+const TAB_ICONS = ICONS.filter((icon) => icon.file !== TILE_FILE);
 
 /* ------------------------------------------------------------------ *
  * 1. The mark is the supplied artwork, cropped — nothing drawn.
@@ -350,6 +358,48 @@ describe('MUSE-40 AC1: every page declares the studio mark, in both colour schem
           `the ${size} light and dark icons are the same file — one of the two themes ` +
             `is being shown a mark it cannot see (design system §11)`,
         ).not.toBe(dark[0]);
+      }
+    });
+
+    /**
+     * **MUSE-75: a UA that cannot evaluate `prefers-color-scheme` still has a candidate.**
+     *
+     * An unknown media feature is *false*, not ignored, so with both branches gated such
+     * a UA ruled out every `rel="icon"` on the page and showed nothing — the state
+     * MUSE-40 exists to end, for a smaller audience. The claim is stated over the markup
+     * rather than over the registry so that a change to either side has to agree with the
+     * other, and it has three parts, each of which is a different way to break it:
+     *
+     *   - **exactly one** scheme-less `rel="icon"` — two is the tie this avoids;
+     *   - its size is **not** one the scheme pair declares, so a 16 or 32 pixel tab
+     *     reaches for the right-coloured mark by size before any tie-break is consulted;
+     *   - it is the **opaque tile**, which is the whole reason it may go ungated: it is
+     *     legible on a light strip and a dark one, which no transparent variant is.
+     */
+    it(`offers one scheme-less icon, at a size the pair does not claim (${name})`, () => {
+      const target = build();
+      for (const page of target.htmlFiles()) {
+        const icons = iconLinks(target, page).filter((link) => link.key.startsWith('icon|'));
+        const ungated = icons.filter((link) => link.key.endsWith('|'));
+        expect(
+          ungated.map((link) => link.key),
+          `${page}: a UA with no prefers-color-scheme support matches no icon at all`,
+        ).toHaveLength(1);
+
+        const [, sizes] = ungated[0]!.key.split('|');
+        expect(
+          icons.filter((link) => link.key.split('|')[1] === sizes),
+          `${page}: the default shares a declared size with a scheme icon, so which one ` +
+            `a tab gets is the browser's tie-break rather than this registry's decision`,
+        ).toHaveLength(1);
+
+        const tile = target
+          .allFiles()
+          .find((file) => file.includes(TILE_FILE.replace(/\.png$/, '')));
+        expect(
+          ungated[0]!.href,
+          `${page}: the default branch must be the opaque tile`,
+        ).toContain(tile!.split('/').pop()!);
       }
     });
 

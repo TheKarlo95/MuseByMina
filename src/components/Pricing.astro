@@ -115,7 +115,23 @@ const packages = tiers.map((tier) => ({
               </p>
             )}
 
-            <h3 class="name">{tier.name[locale]}</h3>
+            {/*
+              `h2`, not the `h3` this shipped as (MUSE-75). The page went from its `h1`
+              straight to an `h3` on every card, with its only `h2` (`enrolHeading`)
+              *after* them — a skipped level in both locales, which is design system
+              §11.8 and which a screen-reader user navigating by heading hears as a
+              missing section. (A tier's name is `pricingTier.name`, so this note may not
+              quote one: `test/contentdrift.test.ts` reads comments too, correctly.)
+
+              A `h2` rather than a section heading over the list, because a tier *is* a
+              top-level section of a price list and the alternative is a word nobody at
+              the studio has chosen: „Paketi" would be invented copy on a page whose every
+              other string is either Mina's or in `PRICING_COPY` with a reason. §11.8 also
+              settles the thing that makes this look wrong — *display size never determines
+              heading level* — so `.name` keeps its own type scale and the markup says what
+              the outline is.
+            */}
+            <h2 class="name">{tier.name[locale]}</h2>
 
             {/*
               The price. `--font-display` at `display-m`, which bottoms out at 2.125rem —

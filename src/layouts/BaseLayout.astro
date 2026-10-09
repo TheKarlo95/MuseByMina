@@ -295,6 +295,19 @@ const cardUrl = new URL(card.src, Astro.site).href;
     }
 
     <meta property="og:type" content="website" />
+    {/* Who published this, in the words Mina chose (MUSE-75).
+
+        With no `og:site_name` a scraper has to guess, and what it guesses is the host:
+        a real unfurl of this site named the publisher **„github.io"**. The field is the
+        one piece of Open Graph that is about the studio rather than about the page, so
+        it comes off the same memoised `getSiteSettings()` the footer, the JSON-LD block
+        and the share card read — `settings.studioName`, already in the CMS and already
+        rendered in the footer's copyright line. A literal here would be a fifth surface
+        for an address-shaped field to drift on (MUSE-50).
+
+        Not gated on `indexable`, for `og:image`'s reason: the publisher's name is not a
+        claim about a URL, and the error page is the one page a dead shared link reaches. */}
+    <meta property="og:site_name" content={settings.studioName} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     {indexable && <meta property="og:url" content={canonical} />}
