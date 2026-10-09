@@ -518,17 +518,29 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   not cover is printed under it: `incomplete` results are reported as notes and never
   failed on, because axe raises them when it cannot compute the answer itself.
 - **"Should a crawler index this" and "may this page route by language" are two props**
-  (MUSE-38). `BaseLayout.astro` takes `indexable` and `localeTwin`, and neither is derived
+  (MUSE-38). `BaseLayout.astro` takes `indexable` and `localeTwins`, and neither is derived
   from the other — `const localeRouting = indexable;` is the regression, it reads as a
   tidy-up, and `test/nav.test.ts` pins its absence against the source as well as the
-  behaviour. `indexable` governs canonical, hreflang, `og:url`, JSON-LD and the sitemap.
-  `localeTwin` governs exactly two things: whether the switcher renders, and whether
-  `langInitScript` is handed a URL to navigate to. **`langInitScript` ships on every page**;
+  behaviour. `indexable` governs canonical, `og:url`, JSON-LD and the sitemap.
+  `localeTwins` governs the switcher, the URLs `langInitScript` is handed, **and the
+  hreflang cluster**. **`langInitScript` ships on every page**;
   `urlFor` answers `string | null` *per locale*, so "there is nowhere to send them" is a
   fact about each URL rather than a flag, and the one `go()` funnel enforces it. The error
-  page is the only `localeTwin={false}` page there is, and it reads `?lang=`, folds it and
+  page is `localeTwins={[]}`, and it reads `?lang=`, folds it and
   persists it like everywhere else — it just does not move anybody, because `/en/404/` is
   itself a 404.
+
+  **It was `localeTwin?: boolean` until MUSE-26 and the blog is what made a set
+  necessary.** A post may be written in one language, so „is there a twin" is one answer
+  *per locale* — which is the shape `urlFor` always had — and the hreflang cluster moved
+  onto the same function rather than being emitted for `LOCALES` unconditionally. **A
+  cluster of one is not emitted**: a lone `hreflang="hr-HR"` is not a self-reference
+  inside a group, it is a statement that the page is *for* Croatian speakers, which would
+  ask Google to withhold a post from the English search it answers. `@astrojs/sitemap`
+  takes that position on its own — `createGetI18nLinks`, `if (links.length <= 1) return
+  undefined` — so the page and the sitemap now agree **by rule** rather than by having
+  both locales for every route. A one-locale post is also the first live counterexample to
+  collapsing the two props: it is indexable and has no twin.
 
   **`404.astro` is bilingual, not client-side-selected.** One document serves both
   languages, and a bilingual body needs no mechanism, survives JavaScript being off and
@@ -604,9 +616,9 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   It used to answer the status and invent the body, so no browser suite in the repo could
   reach the error page at all and an all-Croatian 404 was only reproducible against the
   deployed site. Drive it with `test/helpers/preview.ts` and an unknown path.
-- **A test never chooses where it builds.** `npm test` performs **81 heavyweight
-  operations — 69 real `astro build`s, 4 `astro dev` servers and 8 browser launches —
-  across 30 of its 35 files**, in a pool of `availableParallelism() - 1` workers, which
+- **A test never chooses where it builds.** `npm test` performs **82 heavyweight
+  operations — 70 real `astro build`s, 4 `astro dev` servers and 8 browser launches —
+  across 31 of its 36 files**, in a pool of `availableParallelism() - 1` workers, which
   is 15 on a developer box and 3 on `ubuntu-latest`. (It said *"ten real `astro build`s
   in parallel workers"* until MUSE-68 counted; nothing had ever made that true, and
   `test/lockup.test.ts` reasoned from it.) `test/helpers/scratch.ts` mints a directory
@@ -1125,11 +1137,13 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   describe a page the site does not serve; `getProsePage(route)` indexes all of them and
   fails naming the route when there is none **or two**, with `minimum: 0` for
   `pagesByRoute`'s reason. Its body is an array of bilingual paragraphs and **not
-  `localeRichText`**: Portable Text is already in this schema and nothing renders it —
-  `post.body` is deliberately opaque `unknown[]` until a blog ticket picks a renderer — so
-  the first consumer would have to write one, and Mina would get headings, bold and links
+  Portable Text**: when MUSE-65 was written nothing on this site rendered it, so the first
+  consumer would have had to write a renderer, and Mina would get headings, bold and links
   inside a paragraph whose type scale the design system fixes anyway. `studioStory.story`
-  took the same decision and argues it at length. There is no image field, for the
+  took the same decision and argues it at length. **MUSE-26 wrote the renderer** — it is
+  `src/lib/portable-text.ts` and `post.body` is its only caller — and the decision here
+  stands for the second reason rather than the first: a page of prose the design system
+  sets at one scale has nothing to gain from an editor that can pick a different one. There is no image field, for the
   optional-field reason: no photography of this studio exists.
 
   One limit, stated rather than discovered: a `prosePage` for a route the site *does*
@@ -1252,6 +1266,94 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   Between the two writes the dataset is briefly inconsistent either way, and MUSE-21's
   cron can rebuild inside that window — import-first publishes four cards including the
   retired price, delete-first publishes a truthful page that is one rate short.
+- **`/blog` ships empty, and a post may be written in one language** (MUSE-26). Four
+  decisions, and the second is the one the ticket was really about.
+
+  **The empty state is the shipped state.** No `post` exists and nobody has written one,
+  so `getPosts({ minimum: 0 })` and `Blog.astro` say there is nothing — as the section's
+  own heading, with no list rendered at all, offering `/schedule` and `/contact` instead.
+  The copy is `BLOG_COPY` in **code, not the CMS**: „there are no posts" is a statement
+  about the dataset, and Mina cannot keep a field describing the dataset true because she
+  cannot see when it renders. It promises nothing either — „ništa za sada" is a claim
+  about a post nobody has written, which is MUSE-36 in a smaller font. **Do not seed a
+  post to furnish the page.**
+
+  **A post that exists in only one locale is hidden in the other, and one fact decides
+  it.** `post` carries up to two `postTranslation` objects — one per language, each with
+  its own title, lede and body — instead of three bilingual fields, and „published in
+  Croatian" is „`post.hr` exists". That one fact is what the index filters on, what
+  `getStaticPaths` filters on, what `localeTwins` is built from, and therefore what the
+  `hreflang` cluster and the switcher read; the sitemap drops a one-member alternate group
+  on its own. **All four agree because there is nothing for them to disagree about.** The
+  inversion is deliberate and it is the only place on the site it is right: everything
+  else bilingual is short, and **nobody writes eight hundred words twice** — a `required()`
+  English body can only be satisfied with a machine translation, which is a `required()`
+  field filled with fiction. Sanity validates a nested `required()` only when the parent
+  object is present, which was **measured against its real validator**, so a *half*
+  translated post is still refused naming the field. The one rule it cannot state —
+  „at least one of the two" — is `decodePost`'s, because `required()` has no one-of form
+  and `Rule.custom` is unobservable in a test. Listing the post in the other locale with a
+  „na hrvatskom" badge was the alternative and is argued down in `src/lib/blog.ts`: it
+  drops an English reader into a Croatian page whose switcher is correctly hidden.
+
+  **`src/lib/portable-text.ts` is the site's first and only Portable Text renderer**, and
+  `@portabletext/to-html` was declined with a measurement rather than on taste. It is in
+  the lockfile only as a transitive dependency of a devDependency, so taking it means a new
+  `dependencies` entry; and **four of its five unknown-construct defaults are silent** —
+  an unmapped block *style* renders as `<p>`, an unmapped list as `<ul>`, an unmapped mark
+  as a `<span>` — so getting a failure out of it means remembering five override slots,
+  which is the shape of defence this repository has watched fail three times. Here the
+  refusal is the default: every branch is exhaustive, the fall-through **throws naming the
+  construct, the block `_key`, the document and the three files a new rule goes in**, and
+  `PROSE_ELEMENTS` is derived from the same maps so `test/blog.test.ts` can require
+  `PostPage.astro` to style every element the renderer can emit. Two things in it that
+  look arbitrary and are not: the schema's `h3` style renders as **`<h2>`**, because a
+  post's `<h1>` is its title and `heading-order` is live in `npm run a11y` since MUSE-75;
+  and **validation happens before the empty-block skip**, because the other order silently
+  dropped an unmapped construct inside a block with no readable text — found by a test
+  asserting the refusal, not by one asserting the rendering.
+
+  That renderer is also the answer to „a stray image or a wide code block". Neither can
+  reach a page: the schema offers neither and the renderer stops the build on either,
+  which is stronger than a CSS rule about something nobody has seen. What CSS still has to
+  handle is a long unbroken token — a pasted URL as link text — and that is
+  `overflow-wrap: anywhere` inside a 68ch measure, measured at 390px with a 200-character
+  token in the fixture.
+
+  **The byline always says somebody.** A named `author` is the instructor; an empty one is
+  the **studio's own name**, off the same `getSiteSettings()` the footer and the JSON-LD
+  read, because „Ostavi prazno i objava je potpisana studijem" is the field's documented
+  default; a *deleted* one is a build failure naming the `_ref` (MUSE-49, and this is the
+  field that ticket is named after). So there is no „no byline" branch, and the `author`
+  /`authorRef` pair must stay a pair.
+
+  **A scheduled post appears at the next build, not at its publish instant**, and the
+  worst case is `MAX_WAIT_HOURS` — cited by name and never written as a number, which
+  `test/blog.test.ts` asserts. Note the asymmetry with `/events` and do not copy its shape:
+  an event must keep its page *after* it happens, so `ALL_EVENTS_QUERY` is clockless; a
+  post must not have one *before* it does, so `POSTS_QUERY` is the only query over `post`
+  and `getStaticPaths` uses it. No URL is lost by that — the filter only ever drops the
+  future.
+
+  Two smaller things. `post.coverImage` is **optional** (the `instructor.portrait`
+  decision: no photography of this studio exists, and a required cover can only be
+  satisfied with a stock photograph), and `/blog/<slug>/` has **no `page` document** — its
+  `<title>` is derived, so `test/routes.test.ts` and `test/seo.test.ts` carry
+  `/blog/[slug]` as a *template* rather than a page. `article` structured data is the
+  `BlogPosting` node `src/lib/structured-data.ts` adds to the one `@graph`
+  `BaseLayout.astro` emits; there is still exactly one `<script type="application/ld+json">`
+  on the site (MUSE-31), and a post hands its facts *up* rather than emitting a second.
+
+  **One thing this ticket could not fix and did not hide**: `EN_LATIN_EXT` in
+  `src/lib/fonts.ts` is keyed by route, and `/blog/<slug>` is the first route whose key is
+  *content*. So an English post containing a Croatian proper noun — „Ožegovića", an
+  instructor's name — wants `inter-400-600-latin-ext` and cannot be listed for it, and
+  `test/fonts.test.ts` cannot see it either, because no post is in the seed it measures.
+  Preloading the three subsets on every English post page was considered and rejected: the
+  rule there forbids **any** unused preload on an English page, and an entry measurement
+  does not support is exactly what that rule is about. It is MUSE-74's own stated residual
+  risk, now reachable from the CMS rather than only in principle, and it wants its own
+  ticket.
 - **The site makes no claim about what a first class costs** (MUSE-71). „Besplatni probni
   sat" / "Free trial class" was the header CTA on all fourteen pages in both locales, and
   the promise was repeated in the homepage `#trial` band, `/contact`'s eyebrow,
@@ -1424,12 +1526,19 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   executed, and a leaked draft `scheduleSlot` or `pricingTier` is a class or a price on the
   public site that nobody published.
 - **Bilingual values are two named fields**, `hr` and `en`, inside a `localeString` /
-  `localeText` / `localeRichText` object — not a field-level i18n plugin and not one
+  `localeText` object — not a field-level i18n plugin and not one
   document per locale. HR and EN share slugs and one document renders both, so the shape
   is `Record<Locale, string>`, both locales are separately `required()`, and a half
   translated string is a missing field an error can name. See the long note in
   `sanity/schemaTypes/objects/locale.ts` before changing this: it is hard to reverse once
   content exists.
+
+  **There was a third, `localeRichText`, and MUSE-26 deleted it** — see the `/blog` bullet
+  for the argument. The deletion makes the rule above *stronger* rather than narrower:
+  every bilingual value still requires both locales, with no carve-out, and the one type
+  that may be monolingual (`postTranslation`) is not a bilingual value at all. It is one
+  object per language, which is the inverse grouping, and it is the one place on this site
+  where the inverse is right.
 - **Enums are structure and stay in code.** `LEVELS`, `WEEKDAYS` and the route list are
   imported *into* the schema from `src/lib/schedule.ts` and `src/lib/pages.ts`
   (`sanity/schemaTypes/enums.ts`), so the Studio offers a fixed list and Mina cannot type
