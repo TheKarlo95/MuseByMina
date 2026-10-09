@@ -93,6 +93,56 @@ export const ICON_INK = { width: 461, height: 622 } as const;
  */
 export const STROKE_GAIN = 0.5;
 
+/**
+ * **The 16px icon is a smear, this is what was tried, and nothing here changed** (MUSE-75).
+ *
+ * Live QA reported the 16 as an indistinct blob with ink touching the top and bottom
+ * edges, against a 32 that reads cleanly. All of that is true. What follows is the
+ * measurement, so that the next person reaches for the right lever or for none.
+ *
+ * **It is not a generation defect.** The recipe in `logo/README.md` was re-run from
+ * `ICON_SOURCE` — crop, dilate the alpha by a disc of `STROKE_GAIN ÷ scale`, resample to
+ * the square's height, set RGB — and it reproduces the committed files: mean alpha
+ * **0.2913 against 0.2960** at 16 and **0.1955 against 0.1977** at 32, the residue being
+ * the resampler and the encoder. The implementation was validated independently against
+ * `muse-mark-white.png`, which involves no resampling at all and came back **0.1723
+ * against the 0.172** of `MASTHEAD_MEAN_ALPHA`. So MUSE-40 did what it says it did, and
+ * `STROKE_GAIN` is the number it measured.
+ *
+ * **Do not raise `STROKE_GAIN` at 16.** The ticket proposed a per-size override — the
+ * `k ÷ scale` parameterisation supports one — and it is the wrong direction, which is the
+ * one finding here worth keeping. Rendered at true size on real tab-strip greys, plum on
+ * the light pair and white on the dark pair:
+ *
+ * ```
+ * gain  ink height   mean α   at 16 CSS pixels
+ * 0.34        16      0.234   more open; the M's bowl is the clearest of the full-mark set
+ * 0.50        16      0.296   what ships
+ * 0.50        14      0.235   tidier magnified, indistinguishable from the above in a tab
+ * 0.50        12      0.200   the M is cramped and loses its left flourish
+ * 0.67        16      0.353   strokes merge; the flourish fuses into the bowl — worse
+ * ```
+ *
+ * **Vertical padding is a wash.** Ink height 14 inside the 16 box, with the gain carried
+ * over at the new scale, is visibly tidier at 10× and not distinguishable from what ships
+ * when both are drawn at 16 in a mock tab strip. It was not shipped for that reason: a
+ * regenerated binary, a moved `MEASURED_MEAN_ALPHA`, a changed `logo/README.md` table and
+ * no difference anyone can see is churn, and it would spend the one assertion
+ * (`MIN_STROKE_RATIO`) that currently reads simply.
+ *
+ * **The one thing that does work is a different mark**, and it is available as a *crop*
+ * rather than a redraw, which is the part MUSE-40 did not have: trimming the top ~150
+ * rows of `ICON_CROP` leaves the `M` filling the square with the dancer reduced to a
+ * single-pixel tick on its apex, and at 16 that reads as a script `M` where every variant
+ * above reads as a dense block. It is still **not shipped**, and not because of the
+ * provenance bar — because §12 specifies this mark as *dancer + `M`* and a 1× display
+ * would then show a different logo from a 2× one. §12 also sets `ICON_MIN_WIDTH`, so at
+ * 16 the design system has already run out of sanctioned guidance and the honest options
+ * are a simplified mark or the blur; choosing the first is Mina's call on her own brand,
+ * not a line to merge inside a defect fix. Raised with the renderings in MUSE-75's pull
+ * request. If it is approved it is a second crop constant and one more entry here.
+ */
+
 /** The ink the dilated tab icons actually carry, as mean alpha over the square. */
 export const MEASURED_MEAN_ALPHA = { 16: 0.296, 32: 0.198 } as const;
 

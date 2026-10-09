@@ -125,6 +125,17 @@ same *rendered* half-pixel per side. `STROKE_GAIN` in `src/lib/icon.ts` is that 
 `test/icon.test.ts` measures the committed files against what an undilated crop would
 have produced, so regenerating one without it is a red test rather than a quiet smudge.
 
+**The 16 is still a smear at true size, and raising its gain makes it worse** (MUSE-75).
+The table above was re-run from the supplied file and reproduces the committed icons —
+mean alpha 0.2913 against 0.2960 at 16, 0.1955 against 0.1977 at 32, and 0.1723 against
+`muse-mark-white.png`'s 0.172, which involves no resampling and so validates the
+reproduction on its own. So the blur is the mark at that size, not a mistake in making
+it. Candidates at 0.34, 0.5 and 0.67 of gain and at ink heights of 12, 14 and 16 were
+rendered at 16 CSS pixels on real tab-strip greys: 0.67 merges the flourish into the
+bowl, and 1px of vertical padding is tidier magnified and indistinguishable in a tab.
+The long version, including the one option that does work and why it was not taken
+alone, is the note beside `STROKE_GAIN` in `src/lib/icon.ts`.
+
 `muse-mark-white.png` is the same intervention at the masthead's size and is otherwise
 the plain crop — it is kept at the crop's own 461 × 622 because Astro emits the WebP from
 it, so the only thing done to the artwork here is the thickening. Its gain is **0.3 CSS
