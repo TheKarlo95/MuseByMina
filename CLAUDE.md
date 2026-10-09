@@ -509,6 +509,31 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   `aria-current` must either not be a link **or be a link to exactly where we already
   are**, and a footer entry for the current route is the second. It is also `/privacy/`'s
   only self-reference, which `test/nav.test.ts`'s orphan rule is calibrated against.
+- **`/privacy/` is a statutory document, so it stays in code — and the one fact that varies
+  is read off the form's own configuration** (MUSE-72). It had asserted, in both locales and
+  the present tense, that Formspark was the studio's processor under an Art. 28 agreement
+  and emailed the messages through, with `PUBLIC_FORM_ENDPOINT` unset for the life of the
+  project; that AZOP sat on Selska cesta, which it left in May 2025; and that enquiries are
+  kept twelve months and then move to „evidencija polaznika", neither of which anybody had
+  decided. Prose in a component cannot be watched, which is MUSE-50's argument — but
+  **moving a legal notice to the CMS was weighed and declined**, and the reasoning is
+  written out in `Privacy.astro`: AZOP's address has no second surface for a test to compare
+  it against in *either* home, so Sanity would buy editability at the price of review and
+  gain nothing; and a `required()` retention field can only be satisfied by inventing a
+  number, which is how this defect happened. What it got instead is a **dated provenance
+  comment** on the address (re-read `azop.hr` and move the date) and `FORM_HAS_PROCESSOR` in
+  `src/lib/forms.ts` — the same expression `TrialForm.astro` tests before it will `fetch` —
+  gating the recipient paragraph, so the notice and the form are one fact rather than two
+  copies. Art. 13(1)(e) takes *categories* of recipient, so the live paragraph names no
+  provider: an environment variable says somebody receives the data, never who, and a name
+  would be the next unwatched fact. **The guard is both directions** — endpoint unset must
+  name no processor, endpoint set must — proved against two real builds at the end of
+  `test/trialform.test.ts`, which is the one suite that already serves both states, so it
+  cost zero against `DECLARED`'s headroom. **Retention and whether student records exist are
+  Mina's decisions and still outstanding**; until she gives them the page says purpose
+  limitation and the erasure right and no number. `test/contact.test.ts` used to *demand*
+  the string `Formspark`, so the notice could only have been corrected by reddening a test —
+  worth remembering the next time an assertion pins a vendor's name.
 - **The host model serves the error page's *body* on a 404** (MUSE-38). `resolveRequest`
   returns `404.html` as the `file` on a 404 inside the deploy's prefix, the way GitHub Pages
   does; outside the prefix it returns no body, because that URL space is not ours (MUSE-8).
