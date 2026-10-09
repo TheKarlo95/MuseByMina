@@ -984,10 +984,28 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
     a new level is *inserted*, never appended. `LEVEL_PREREQUISITE.improver` is the one
     string on the site nobody has confirmed with Mina; it is marked as such in
     `src/lib/schedule.ts`.
-  - **There is no `STYLES`.** `['traditional','moderna','sensual']` was invented with the
-    rows and had shaped a filter, three homepage cards and a required `class.style` field.
-    `test/sanity.test.ts` asserts no field anywhere in the schema is named after a style,
-    so it cannot come back without the decision being made again.
+  - **There is no `STYLES`.** The three style names were invented with the rows and had
+    shaped a filter, three homepage cards and a required `class.style` field. The guard is
+    **the values, not the name** (MUSE-76): it used to match the English identifier
+    `style`, so renaming the field to `vrsta` — same type, same radio layout, same three
+    invented values — kept all 1177 tests green, and nothing else saw it either, because
+    `READ_CONTRACT` constrains which fields must *exist* per type and never the reverse.
+    `test/sanity.test.ts` now reads **`WITHDRAWN_OPTION_SETS`** in
+    `sanity/schemaTypes/enums.ts` — the one place in the *schema source* that is allowed
+    to hold the three strings, which is why the note in `src/lib/schedule.ts` points at it
+    rather than listing them — and fails on three things: a field whose *name* contains `style` or
+    `stil` (kept, because it gives the obvious case the clearest message), any fixed
+    `options.list` anywhere in the schema offering any of the *values* under any field
+    name on any type, and any mention of a value in the schema source at all — the last
+    one a text scan over the files the schema fingerprint already covers, because
+    `Rule.valid()` declares a closed set that no walk of `options` can see. So it cannot
+    come back silently; it can only come back with somebody deleting a registry entry and
+    saying who confirmed it. **That conversation is still owed**: the design brief
+    (`muse-design-system.md:24`, with „Tri stila. Jedan ritam." in its voice table) says
+    the studio *does* teach by those three styles, so MUSE-36 and the human-authored brand
+    spec disagree about the same fact. The site claims neither, which is the safe state,
+    but one of the two documents is misleading the next author. Ask Mina; do not quietly
+    correct either one.
   - **`instructors` is an array** on `class` and on `scheduleSlot`, and the override
     *replaces* rather than adds. Not for today's data — for lady styling, a confirmed
     coming class that Mina teaches alone. `formatNames` in `src/lib/schedule.ts` joins
