@@ -113,26 +113,45 @@ export const target = () => ({
 });
 
 /**
- * The named documents, read from the dataset.
+ * **The uncached read host — one spelling, for every script that reads the dataset.**
  *
- * The uncached API host, not `apicdn` — the one thing in this repo that wants it. The
- * build reads through the CDN on purpose (it is cheaper, and a published build only ever
- * wants published content, so a few seconds of lag costs nothing). A drift check is the
- * opposite: asked a minute after an import, the CDN answers with the previous content and
- * the check reports drift that no longer exists. For the release gate that is worse than
- * a missing check, because the fix for a red gate *is* an import and the gate would stay
- * red after it.
+ * The cached host is eventually consistent, so asked a minute after an import it answers
+ * with the previous content. For a drift check that is worse than no check at all: the
+ * fix for a red gate *is* an import, and the gate would stay red after it. These two
+ * scripts have read the uncached host since MUSE-20 for exactly that reason.
+ *
+ * It is a constant here rather than a literal at each call site because it was not one
+ * spelling: `scripts/sanity-read-check.mjs` wrote its own URL and reached for the cached
+ * host, which is how a run against a freshly seeded dataset could report EMPTY for
+ * documents that were there — "correct for an empty dataset" being the one verdict that
+ * script exists to tell apart from a broken query. It now builds its URL here. The build
+ * answers the same question in `src/lib/sanity/client.ts` and answers it the same way
+ * (MUSE-81); it cannot share this module, which is the `dist-origin.mjs` constraint —
+ * a `.mjs` script cannot import a `.ts` one — so the two are checked against each other
+ * by `test/endpoint.test.ts` instead of trusted to agree.
+ */
+export const API_HOST = 'api.sanity.io';
+
+/** A GROQ query and its parameters, as a URL against the uncached host. */
+export function queryUrl(query, params = {}, where = target()) {
+  const search = new URLSearchParams({ query });
+  for (const [key, value] of Object.entries(params)) {
+    search.set(`$${key}`, JSON.stringify(value));
+  }
+  return (
+    `https://${where.projectId}.${API_HOST}/v${where.apiVersion}/data/query/` +
+    `${where.dataset}?${search}`
+  );
+}
+
+/**
+ * The named documents, read from the dataset.
  *
  * Throws on anything other than a 200. Both callers decide for themselves what an
  * unreachable API means; they do not agree about it, so this must not decide for them.
  */
-export async function fetchLive(ids, { projectId, dataset, apiVersion } = target()) {
-  const query = '*[_id in $ids]';
-  const url =
-    `https://${projectId}.api.sanity.io/v${apiVersion}/data/query/${dataset}?` +
-    new URLSearchParams({ query, $ids: JSON.stringify(ids) });
-
-  const response = await fetch(url);
+export async function fetchLive(ids, where = target()) {
+  const response = await fetch(queryUrl('*[_id in $ids]', { ids }, where));
   if (!response.ok) {
     throw new Error(
       `Could not read the dataset: HTTP ${response.status}\n${await response.text()}`,

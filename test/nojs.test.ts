@@ -112,7 +112,11 @@ describe('the built site ships no JavaScript files and no CMS client', () => {
      */
     const markers = [
       '@sanity/client',
+      // Both read hosts. MUSE-81 moved the build onto the uncached one, so the cached
+      // spelling alone would no longer name the host this build actually talks to —
+      // and the client package carries both strings whichever one it is configured for.
       'apicdn.sanity.io',
+      'api.sanity.io',
       'q6fk9usq',
       '_type ==',
       'SANITY_PROJECT_ID',

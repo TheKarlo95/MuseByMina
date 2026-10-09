@@ -74,31 +74,61 @@ const CLIENT_CONFIG = {
   projectId: PROJECT_ID,
   dataset: DATASET,
   apiVersion: API_VERSION,
-    // The CDN is cheaper, and the build only ever wants published content, so it is the
-    // right default for a build that is *scheduled* or run by hand.
-    //
-    // **Harmless, and this comment used to say otherwise.** Up to MUSE-21 it read as a
-    // known defect, on the reasoning that MUSE-21 would land a publish webhook: a build
-    // fired at the instant of publish starts when the CDN is at its stalest, so the
-    // expected outcome was a green deploy that republished the pre-edit content and Mina
-    // pressing publish a second time. Measured while verifying MUSE-20, an edit took
-    // about a minute to show up on the cached host, which is why
-    // `scripts/sanity-seed-check.mjs` reads the uncached one.
-    //
-    // MUSE-21 shipped a **scheduled** rebuild instead and no webhook (`src/lib/rebuild.ts`
-    // has the decision). Nothing now starts a build near a publish: the gap between an
-    // edit and the build that picks it up is hours, not seconds, so the CDN is always warm
-    // by the time it is read. A minute of staleness cannot be observed by a run that is
-    // never less than an hour behind the edit, in the same way `--no-cdn` could not make
-    // the content any fresher than the last publish. So this is a plain cost saving with
-    // no trade-off attached, and the only thing that would make it wrong again is
-    // reviving the publish trigger.
-    useCdn: true,
-    // Drafts exist in the dataset and are readable because the dataset is public. A
-    // build must never render one — that is how an unfinished price reaches the web.
-    // `src/lib/sanity/fixture.ts` drops `drafts.` documents for the same reason, which is
-    // the half of this that an offline build can actually exercise.
-    perspective: 'published',
+  // **The uncached host. This is a correctness setting, not a performance one (MUSE-81).**
+  //
+  // The cached read host is *eventually consistent*: it is refreshed after a mutation,
+  // not synchronously with it. A build that starts inside that window reads the previous
+  // revision — and nothing downstream can tell. The query returns 200, every document is
+  // present, `decode.ts` has nothing to object to, `astro build` exits 0 and the deploy
+  // reports success. The output is simply one revision behind, which makes it the one
+  // content failure this project has no other defence against: every other one is loud.
+  //
+  // Observed:
+  //
+  //     10:12  an import of `content/seed.ndjson`, verified in the dataset
+  //     10:13  a `workflow_dispatch` rebuild — completed/success
+  //     10:14  the live page still serving the previous description
+  //     10:18  a second rebuild, no other change — correct
+  //
+  // **What it breaks is MUSE-21's promise, not somebody's manual procedure.** The cron
+  // fires at `20 1,7,13,19` and what Mina is promised is a *duration*, `MAX_WAIT_HOURS`
+  // in `src/lib/rebuild.ts`. An edit published shortly before one of those runs can be
+  // read pre-publish *by that run*, so it waits for the next one — six hours after she
+  // was told the maximum, with a green deploy in between, so `deploy.yml`'s failure
+  // alert never fires. The comment this replaces argued the opposite, that a scheduled
+  // rebuild is never close enough to a publish for the lag to matter. The flaw in it was
+  // reasoning about the *expected* gap between an edit and the next build when the thing
+  // being promised is the *worst* one.
+  //
+  // With the uncached host each read answers with the dataset as of the moment it is
+  // asked, and reads only ever move forward, so a build cannot publish a revision older
+  // than the dataset held when it started. (It can publish one *newer* — thirteen
+  // queries over a few seconds, and Mina could publish between the first and the last.
+  // That is a different thing and not worth machinery: no page goes stale, and the next
+  // scheduled build converges.)
+  //
+  // **Measured, because the cost is the whole of the argument.** Five *interleaved* pairs
+  // of real `astro build` runs, so the two configurations shared the machine's noise
+  // rather than taking turns with it: median **2.70 s cached against 3.13 s uncached**,
+  // the two spreads not overlapping. That is **+0.43 s** on an `npm run build` of
+  // fifteen-odd seconds, where it is inside the run-to-run noise, because `astro check`
+  // dominates the wall clock. (The per-query figure, for whoever next changes the query
+  // count: all thirteen sequentially, median of seven rounds, 294 ms against 648 ms —
+  // ~27 ms a query.) Four scheduled builds a day times thirteen queries is ~1,600
+  // requests a month. The read volume the CDN exists for is not this site's.
+  //
+  // `cacheMode: 'noStale'` is the other candidate and is declined. It is a *request*
+  // option rather than a config one, so its correctness would rest on every call site
+  // passing it instead of on the one object `sanitySource()` already describes; it buys
+  // the latency back only for objects the cache has not been told are stale; and it
+  // would leave two answers in this repository to "which host is fresh", when
+  // `scripts/seed-compare.mjs` has read the uncached one all along for this same reason.
+  useCdn: false,
+  // Drafts exist in the dataset and are readable because the dataset is public. A
+  // build must never render one — that is how an unfinished price reaches the web.
+  // `src/lib/sanity/fixture.ts` drops `drafts.` documents for the same reason, which is
+  // the half of this that an offline build can actually exercise.
+  perspective: 'published',
 } as const;
 
 let cached: SanityClient | undefined;
@@ -112,22 +142,70 @@ export function sanityClient(): SanityClient {
 /**
  * What the read path reports about itself, for build logs and for tests.
  *
- * `perspective` is typed as the literal `'published'` on purpose: it is the one setting
- * here whose loss is silent and expensive — the deploy would start publishing drafts with
- * every check still green — and no offline build can exercise it. So it is pinned twice,
- * at compile time by this type and at run time by `test/content.test.ts` asserting the
- * value `sanitySource()` returns.
+ * **Two of these are literal types rather than `string`/`boolean`, and both for the same
+ * reason: they are the settings whose loss is silent.** No offline build can exercise
+ * either, so a flipped value would ship with every check green — drafts on the public
+ * site for one, content one revision behind for the other. Each is therefore pinned
+ * twice: at compile time by this interface, which stops `CLIENT_CONFIG` assigning the
+ * other value, and at run time by a test reading what `sanitySource()` returns —
+ * `perspective` in `test/content.test.ts`, `useCdn` in `test/endpoint.test.ts`.
+ *
+ * `useCdn: false` is MUSE-81's half. It reads as a tuning knob, which is exactly why it
+ * is typed shut: see the long note on the property for why the cached host cannot be
+ * used by a build whose freshness somebody has been promised.
  */
 export interface SanitySource {
   projectId: string;
   dataset: string;
   apiVersion: string;
-  useCdn: boolean;
+  useCdn: false;
   perspective: 'published';
 }
 
 export function sanitySource(): SanitySource {
   return CLIENT_CONFIG;
+}
+
+/**
+ * Where a query is actually fetched from, **asked of the client rather than re-derived.**
+ *
+ * `useCdn` is a flag, not an address: the client turns it into one of two hosts, and only
+ * the client knows the rule (`apiHost`, `useProjectHostname` and the flag all feed it).
+ * A log line that restated the rule would be a second answer to the question it exists to
+ * answer — the MUSE-9 shape, two models of one thing drifting — and the one failure that
+ * matters here is precisely a build reading a host nobody intended. So this calls
+ * `getUrl()`, which is the same function the request path calls, with the same
+ * `canUseCdn` the request path passes for a data query.
+ */
+export interface ContentEndpoint {
+  /** The URL prefix a query is fetched from, as the client resolves it. */
+  url: string;
+  /** Whether that host is the eventually-consistent one. */
+  cached: boolean;
+}
+
+export function contentEndpoint(): ContentEndpoint {
+  const client = sanityClient();
+  const { useCdn } = client.config();
+  return { url: client.getUrl(`/data/query/${DATASET}`, useCdn), cached: useCdn };
+}
+
+/**
+ * What the build log says about the endpoint.
+ *
+ * Pure, and takes the endpoint rather than reading it, so both regimes are assertable
+ * offline — including the one this repository is not supposed to be in. A message that
+ * could only be produced by configuring the thing it warns about is a message nothing can
+ * check.
+ */
+export function endpointNote({ url, cached }: ContentEndpoint): string {
+  const { host } = new URL(url);
+  return cached
+    ? `${host} — CACHED, and that host is eventually consistent: this build may have read ` +
+        `a revision the dataset had already replaced, and will publish it with every ` +
+        `check green (MUSE-81).`
+    : `${host} — uncached, so the content is what the dataset held when this build asked ` +
+        `for it.`;
 }
 
 let announced = false;
@@ -150,6 +228,12 @@ let announced = false;
  * assertable from outside the process: `test/devcontent.test.ts` reads it off a real
  * `astro build` and a real `astro dev` rather than trusting a unit test about an
  * `import.meta` constant.
+ *
+ * **The endpoint clause is MUSE-81's half.** A stale deploy is green, so the log is the
+ * only place „was this build's content current?" can be answered after the fact — and it
+ * could not be, because the line named the dataset and never the host it was read from.
+ * That is the one fact about a finished build that is otherwise unrecoverable: the dataset
+ * will have moved on by the time anybody thinks to ask.
  */
 function announce(fixture: string | undefined): void {
   if (announced) return;
@@ -165,6 +249,7 @@ function announce(fixture: string | undefined): void {
   if (fixture === undefined) {
     console.log(
       `[content] live — project ${PROJECT_ID}, dataset ${DATASET}, api v${API_VERSION}\n` +
+        `[content] ${endpointNote(contentEndpoint())}\n` +
         caching,
     );
   } else {

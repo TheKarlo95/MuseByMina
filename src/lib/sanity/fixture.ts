@@ -73,13 +73,15 @@ import { requireQueryParameters } from './params';
  *     calls BROKEN is a divergence.
  *   - **Ask what the API does that evaluation does not.** Both entries above are exactly
  *     that: a perspective, and a request-validation step. Remaining candidates of the same
- *     shape, none currently reachable — dataset ACLs and document-level permissions,
- *     `useCdn` staleness, the API's query size and execution limits, and `API_VERSION`
- *     being a date while `groq-js` is a semver. The last pair is why `groq-js` is pinned
- *     to an exact version in `package.json`: it is the suite's only consumer of GROQ
- *     semantics, and a caret range would let a minor bump change what the tests believe
- *     GROQ means with no commit in between — the same argument that pins `API_VERSION`.
- *     `test/sanity.test.ts` asserts the pin.
+ *     shape, none currently reachable — dataset ACLs and document-level permissions, the
+ *     API's query size and execution limits, and `API_VERSION` being a date while
+ *     `groq-js` is a semver. `useCdn` staleness was on that list until MUSE-81, and was
+ *     never quite the same shape: it is the live path disagreeing with *itself* a minute
+ *     later, which evaluating the seed could not have shown you either way. The last pair
+ *     is why `groq-js` is pinned to an exact version in `package.json`: it is the suite's
+ *     only consumer of GROQ semantics, and a caret range would let a minor bump change
+ *     what the tests believe GROQ means with no commit in between — the same argument
+ *     that pins `API_VERSION`. `test/sanity.test.ts` asserts the pin.
  *
  * ---
  *
