@@ -1,5 +1,7 @@
 import { chromium } from 'playwright';
 
+import { recordHeavyOperation } from './heavy-census.mjs';
+
 /**
  * **How a browser check opens a page, and how it knows which page it opened.**
  *
@@ -178,6 +180,10 @@ export function describeMeasured({ url, locale, lang }) {
  * @returns {Promise<import('playwright').Browser>}
  */
 export function launchChecks(options) {
+  // On the run's concurrency meter beside every `astro build` (MUSE-68). A browser is not
+  // a build, and it is competing for the same cores — a budget that counted only builds
+  // would read as though it covered the problem.
+  recordHeavyOperation('browser');
   return chromium.launch(options);
 }
 

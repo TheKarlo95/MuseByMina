@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { recordHeavyOperation } from '../../scripts/heavy-census.mjs';
+
 import { fetchMeasuredPage } from './measured';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
@@ -153,6 +155,7 @@ const VITEST_LEAKS = [
  * message happened to pick.
  */
 export function astroBuild(env: NodeJS.ProcessEnv, hint?: string): string {
+  recordHeavyOperation('build');
   const outDir = claimOutDir(hint);
 
   const childEnv: NodeJS.ProcessEnv = { ...process.env };
@@ -205,6 +208,7 @@ export function astroBuildOutside(hint?: string): {
   status: number | null;
   output: string;
 } {
+  recordHeavyOperation('build');
   const outDir = mkdtempSync(join(tmpdir(), `muse-outside-${label(hint) || 'suite'}-`));
 
   const childEnv: NodeJS.ProcessEnv = { ...process.env };
@@ -403,6 +407,7 @@ export async function astroDev(
   hint?: string,
   { pagesRender = true }: { pagesRender?: boolean } = {},
 ): Promise<DevServer> {
+  recordHeavyOperation('dev');
   const cacheDir = claimOutDir(hint);
 
   const childEnv: NodeJS.ProcessEnv = { ...process.env };

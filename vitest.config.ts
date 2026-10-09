@@ -1,3 +1,5 @@
+import { availableParallelism } from 'node:os';
+
 import { getViteConfig } from 'astro/config';
 import type { TestUserConfig } from 'vitest/config';
 
@@ -33,8 +35,33 @@ const test: TestUserConfig = {
   // own (MUSE-17). It prunes *by age* rather than emptying the root, so a second vitest in
   // this checkout cannot delete this one's builds — see the file (MUSE-34), and
   // `test/isolation.test.ts`, which asserts both halves of that against a real run.
-  globalSetup: ['test/helpers/clean-scratch.ts'],
-  // `fileParallelism` stays on. The suite launches ten real `astro build` runs and
+  globalSetup: [
+    'test/helpers/clean-scratch.ts',
+    // Opens the run's concurrency census, before any worker exists so every one of them
+    // inherits the path to it (MUSE-68). See `test/helpers/concurrency.ts`.
+    'test/helpers/concurrency.ts',
+  ],
+  /**
+   * **How many files run at once — stated here, because nothing stated it before.**
+   *
+   * This is exactly the number vitest would resolve on its own, written down (MUSE-68).
+   * `CLAUDE.md` asserted "ten parallel workers" and `test/lockup.test.ts` reasoned from it;
+   * the real answer was `availableParallelism() - 1`, which is **fifteen** on the machine
+   * the suite was measured on and **three** on `ubuntu-latest`, so the sentence was true
+   * nowhere, and the concurrency total had no stated pool to be read against.
+   *
+   * Deliberately the same formula and therefore no change in behaviour — the point is that
+   * the pool size now has one home, so `test/helpers/concurrency-reporter.ts` can print it
+   * beside what the run cost rather than keeping a second copy of vitest's default.
+   *
+   * **Lowering it buys the browser suites nothing, and that was measured rather than
+   * assumed.** Pinned to ten on a sixteen-core box the suite ran 95/92/96 s against
+   * 96/101/98/99 s at fifteen — neutral — and MUSE-68's middle-click flake still appeared
+   * in 1 of those 3 runs, with the same error. So there is no pool size to tune here; see
+   * the measurement table in `test/helpers/concurrency.ts`.
+   */
+  maxWorkers: Math.max(availableParallelism() - 1, 1),
+  // `fileParallelism` stays on. The suite launches sixty-odd real `astro build` runs and
   // serialising the files would roughly triple the wall clock; with the output
   // directories minted rather than named, parallel builds no longer share anything
   // mutable, so the speed costs no correctness. The fix is isolation, not a queue.
@@ -42,7 +69,15 @@ const test: TestUserConfig = {
   // The default reporter calls the tests in a file whose `beforeAll` died "skipped".
   // That reading is how this bug survived three sightings, so a second reporter says
   // out loud that the file never ran.
-  reporters: ['default', './test/helpers/hook-failure-reporter.ts'],
+  //
+  // A third says what the run asked of the machine and fails it when that is too much
+  // (MUSE-68). It is a reporter and not a test because no test can see a count thirty-three
+  // files in ten workers are still writing.
+  reporters: [
+    'default',
+    './test/helpers/hook-failure-reporter.ts',
+    './test/helpers/concurrency-reporter.ts',
+  ],
   // The SEO suite shells out to two real `astro build` runs.
   testTimeout: 60_000,
   hookTimeout: 240_000,
