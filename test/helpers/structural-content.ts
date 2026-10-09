@@ -1196,6 +1196,57 @@ export const EVENT_RENDER_PAST: FixtureDoc = eventDoc('Three', {
 
 /** The three, plus everything a real `astro build` of the whole site needs. */
 export const EVENTS_RENDERED: FixtureDoc[] = [
+  SITE_SETTINGS_DOC,
+  ...PAGE_DOCS,
+  ...PROSE_PAGE_DOCS,
+  STUDIO_STORY_DOC,
+  INSTRUCTOR_A,
+  INSTRUCTOR_B,
+  CLASS_ONE,
+  SLOT_ONE,
+  TIER_ONE,
+  EVENT_RENDER_SOON,
+  EVENT_RENDER_LATER,
+  EVENT_RENDER_PAST,
+];
+
+/**
+ * The same three events with **every string moved** — MUSE-50's instrument.
+ *
+ * Comparing a rendered page to the fixture it just read asserts nothing: every equality
+ * test passes while a literal in the component still happens to match. So the suite renders
+ * twice, against two datasets that share no string, and demands the first set's words
+ * appear nowhere in the second rendering. That is the only assertion a hardcoded venue, a
+ * hardcoded date or a hardcoded title fails.
+ */
+export const EVENTS_REWRITTEN: FixtureDoc[] = [
+  EVENT_RENDER_SOON,
+  EVENT_RENDER_LATER,
+  EVENT_RENDER_PAST,
+].map((doc) => ({
+  ...doc,
+  title: { _type: 'localeString', hr: `Preimenovan ${doc._id} HR`, en: `Renamed ${doc._id} EN` },
+  venue: `Preseljeno ${doc._id}`,
+  description: {
+    _type: 'localeText',
+    hr: `Prepisan opis ${doc._id} HR.`,
+    en: `Rewritten description ${doc._id} EN.`,
+  },
+}));
+
+/**
+ * An event slugged `archive`, which is the URL `/events/archive/` already answers.
+ *
+ * Astro gives the static route priority, so this builds a page nothing can reach —
+ * published, invisible, and no error anywhere. `assertEventSlugs` is what turns it into a
+ * named build failure, and this is the row it is pointed at.
+ */
+export const EVENT_RESERVED_SLUG: FixtureDoc = eventDoc('Reserved', {
+  slug: 'archive',
+  eventType: 'party',
+  startsAt: fromRenderClock(14 * DAY),
+});
+
 /* ------------------------------------------------------------------ posts (MUSE-26) */
 
 /**
@@ -1395,14 +1446,6 @@ export const POSTS_RENDERED: FixtureDoc[] = [
   CLASS_ONE,
   SLOT_ONE,
   TIER_ONE,
-  EVENT_RENDER_SOON,
-  EVENT_RENDER_LATER,
-  EVENT_RENDER_PAST,
-];
-
-/**
- * The same three events with **every string moved** — MUSE-50's instrument.
-
   POST_RENDER_BOTH,
   POST_RENDER_HR_ONLY,
   POST_RENDER_EN_ONLY,
@@ -1415,37 +1458,6 @@ export const POSTS_RENDERED: FixtureDoc[] = [
  * Comparing a rendered page to the fixture it just read asserts nothing: every equality
  * test passes while a literal in the component still happens to match. So the suite renders
  * twice, against two datasets that share no string, and demands the first set's words
- * appear nowhere in the second rendering. That is the only assertion a hardcoded venue, a
- * hardcoded date or a hardcoded title fails.
- */
-export const EVENTS_REWRITTEN: FixtureDoc[] = [
-  EVENT_RENDER_SOON,
-  EVENT_RENDER_LATER,
-  EVENT_RENDER_PAST,
-].map((doc) => ({
-  ...doc,
-  title: { _type: 'localeString', hr: `Preimenovan ${doc._id} HR`, en: `Renamed ${doc._id} EN` },
-  venue: `Preseljeno ${doc._id}`,
-  description: {
-    _type: 'localeText',
-    hr: `Prepisan opis ${doc._id} HR.`,
-    en: `Rewritten description ${doc._id} EN.`,
-  },
-}));
-
-/**
- * An event slugged `archive`, which is the URL `/events/archive/` already answers.
- *
- * Astro gives the static route priority, so this builds a page nothing can reach —
- * published, invisible, and no error anywhere. `assertEventSlugs` is what turns it into a
- * named build failure, and this is the row it is pointed at.
- */
-export const EVENT_RESERVED_SLUG: FixtureDoc = eventDoc('Reserved', {
-  slug: 'archive',
-  eventType: 'party',
-  startsAt: fromRenderClock(14 * DAY),
-});
-
  * appear nowhere in the second rendering. That is the only assertion a hardcoded title, a
  * hardcoded summary or a hardcoded paragraph fails.
  */

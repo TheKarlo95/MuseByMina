@@ -457,6 +457,10 @@
             },
             {
               "type": "string",
+              "value": "/blog"
+            },
+            {
+              "type": "string",
               "value": "/contact"
             },
             {
@@ -612,6 +616,10 @@
             {
               "type": "string",
               "value": "/aboutus"
+            },
+            {
+              "type": "string",
+              "value": "/blog"
             },
             {
               "type": "string",

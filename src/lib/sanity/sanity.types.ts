@@ -93,6 +93,7 @@ export type ProsePage = {
     | "/events/archive"
     | "/pricing"
     | "/aboutus"
+    | "/blog"
     | "/contact"
     | "/privacy";
   heading: LocaleString;
@@ -123,6 +124,7 @@ export type Page = {
     | "/events/archive"
     | "/pricing"
     | "/aboutus"
+    | "/blog"
     | "/contact"
     | "/privacy";
   name: LocaleString;
@@ -521,6 +523,7 @@ export type PAGES_QUERY_RESULT = Array<{
   route:
     | "/"
     | "/aboutus"
+    | "/blog"
     | "/contact"
     | "/events"
     | "/events/archive"
@@ -550,6 +553,7 @@ export type PROSE_PAGES_QUERY_RESULT = Array<{
   route:
     | "/"
     | "/aboutus"
+    | "/blog"
     | "/contact"
     | "/events"
     | "/events/archive"

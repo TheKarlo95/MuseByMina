@@ -298,21 +298,23 @@ export function flag(doc: unknown, path: string, where: Where, fallback: boolean
 /**
  * A `datetime` field, held to the one spelling the site compares and formats (MUSE-26).
  *
- * `text()` alone was not enough once `/blog` started rendering `publishedAt`. Two
- * different silent failures sit behind a loose datetime, and neither is a missing field:
+ * `text()` alone was not enough once `/events` and `/blog` started rendering one
+ * (MUSE-24, MUSE-26). Two different silent failures sit behind a loose datetime, and
+ * neither is a missing field:
  *
- *   - **`Intl` renders an unparseable date as the literal words "Invalid Date"**, which on
- *     a post is a byline reading „Invalid Date". `src/lib/dates.ts` refuses it too, but by
- *     then the value is already in a page's frontmatter; the decoder's job is that nothing
- *     malformed reaches a component at all, and this is the field path the error should
- *     name.
- *   - **„is this published yet" is decided by comparing strings.** `POSTS_QUERY` compares
- *     `publishedAt` against `$now` in GROQ, where both sides are strings, and `$now` is
- *     always `Date#toISOString`'s `…Z` spelling. A value carrying a local offset
- *     (`…+02:00`) is the same instant and a different string, so it would sort into the
- *     wrong half — a post hidden for two hours after it was due, or shown two hours early.
- *     That cannot be caught downstream, because the comparison has already happened by the
- *     time a page sees the row.
+ *   - **`Intl` renders an unparseable date as the literal words "Invalid Date"** — on an
+ *     event card that is a date chip reading „Invalid Date" at 40px, on a post it is the
+ *     byline. `src/lib/dates.ts` refuses it too, but by then the value is already in a
+ *     page's frontmatter; the decoder's job is that nothing malformed reaches a component
+ *     at all, and this is the field path the error should name.
+ *   - **„upcoming" and „published yet" are both decided by comparing strings.**
+ *     `EVENTS_QUERY`, `PAST_EVENTS_QUERY` and `POSTS_QUERY` compare against `$now` in
+ *     GROQ, where both sides are strings, and `$now` is always `Date#toISOString`'s `…Z`
+ *     spelling. A value carrying a local offset (`…+02:00`) is the same instant and a
+ *     different string, so it sorts into the wrong half — an event in the archive while
+ *     it is still to come, a post hidden for two hours after it was due. That cannot be
+ *     caught downstream, because the comparison has already happened by the time a page
+ *     sees the row.
  *
  * `isIsoInstant` is the same predicate `src/lib/dates.ts` formats through, imported rather
  * than restated: two spellings of „what counts as a datetime here" is the shape of defect
@@ -889,50 +891,6 @@ function localisedMember(
     fail(here, 'an object with `hr` and `en`', entry);
   }
   return { hr: text(entry, 'hr', here), en: text(entry, 'en', here) };
-}
-
-/**
- * A `datetime` field, held to the one spelling the site compares and formats (MUSE-24).
- *
- * `text()` alone was not enough once `/events` started rendering these. Two different
- * silent failures sit behind a loose datetime, and neither is a missing field:
- *
- *   - **`Intl` renders an unparseable date as the literal words "Invalid Date"**, which on
- *     an event card is a date chip reading „Invalid Date" at 40px. `src/lib/dates.ts`
- *     refuses it too, but by then the value is already in a page's frontmatter; the
- *     decoder's job is that nothing malformed reaches a component at all, and this is the
- *     field path the error should name.
- *   - **„upcoming" is decided by comparing strings.** `EVENTS_QUERY` and
- *     `PAST_EVENTS_QUERY` compare `startsAt`/`endsAt` against `$now` in GROQ, where both
- *     sides are strings, and `$now` is always `Date#toISOString`'s `…Z` spelling. A value
- *     carrying a local offset (`…+02:00`) is the same instant and a different string, so it
- *     would sort into the wrong half of the partition — an event in the archive while it is
- *     still to come. That cannot be caught downstream, because the comparison has already
- *     happened by the time a page sees the row.
- *
- * `isIsoInstant` is the same predicate `src/lib/dates.ts` formats through, imported rather
- * than restated: two spellings of „what counts as a datetime here" is the shape of defect
- * this directory exists to prevent.
- */
-function instantAt(
-  doc: unknown,
-  path: string,
-  where: Where,
-  required: boolean,
-): string | undefined {
-  const value = required
-    ? text(doc, path, where)
-    : optionalText(doc, path, where);
-  if (value === undefined) return undefined;
-  if (!isIsoInstant(value)) {
-    fail(
-      at(where, path),
-      'a UTC ISO instant like `2026-08-13T19:00:00.000Z` — the spelling Sanity stores a ' +
-        '`datetime` in, and the only one the upcoming/past split can compare',
-      value,
-    );
-  }
-  return value;
 }
 
 export interface StudioEvent {

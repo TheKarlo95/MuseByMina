@@ -271,6 +271,7 @@ export const DECLARED: ReadonlyMap<string, { ops: number; why: string }> = new M
         'one build against a dataset holding events — `getStaticPaths`, the URL through ' +
         'the host model, and the emitted CSS are the three things Astro’s container API ' +
         'structurally cannot see, and no existing build has an event in it (MUSE-24)',
+    },
   ],
   [
     'test/blog.test.ts',

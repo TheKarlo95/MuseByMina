@@ -1,5 +1,5 @@
 import { localeUrl, type Locale } from './i18n';
-import { ROUTES } from './pages';
+import { reservedChildSlugs } from './pages';
 
 /**
  * **`/events` — the parties and workshops, their detail pages, and the archive** (MUSE-24).
@@ -127,13 +127,13 @@ export function eventUrl(slug: string, locale: Locale): string {
  * last segment. `/events/archive` is the only one today and the list must never be written
  * out, for the reason `test/seo.test.ts` reads its page list off `src/pages/` — a
  * hand-maintained copy of „which pages exist" is the thing that goes stale.
+ *
+ * The derivation itself moved to `reservedChildSlugs` in `src/lib/pages.ts` with MUSE-26,
+ * because `/blog` needed the same one and two copies of „what is a direct child of this
+ * prefix" is the shape of duplication this reservation exists to prevent in `ROUTES`.
  */
 export function reservedEventSlugs(): string[] {
-  const prefix = `${EVENTS_ROUTE}/`;
-  return ROUTES.map(({ route }) => route)
-    .filter((route) => route.startsWith(prefix))
-    .map((route) => route.slice(prefix.length))
-    .filter((slug) => slug !== '' && !slug.includes('/'));
+  return reservedChildSlugs(EVENTS_ROUTE);
 }
 
 /** The least an event has to be for its URL to be decidable. */

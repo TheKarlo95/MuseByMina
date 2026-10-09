@@ -469,7 +469,8 @@ export async function getPastEvents({
  * risk; the diagnosis was.
  *
  * So the name is folded into the message here, in one place, for any future dynamic route
- * rather than for `/events/<slug>/` alone. `cause` is kept, so nothing is lost for a reader
+ * rather than for `/events/<slug>/` alone — `/blog/<slug>/` is the second caller
+ * (MUSE-26) and needed nothing but the import. `cause` is kept, so nothing is lost for a reader
  * who wants the original. `test/content.test.ts` is the guard and needed no new build: its
  * unreachable-API build now fails *through* this function, and still has to name the class.
  */
@@ -525,36 +526,6 @@ export async function getPosts({
 }: ListOptions & { now?: Date } = {}) {
   const rows = await runQuery<unknown>(POSTS_QUERY, { now: now.toISOString() });
   return requireDocuments(rows, 'post', decodePost, minimum);
-}
-
-/**
- * **A read performed inside `getStaticPaths`, with its error class kept in the log**
- * (MUSE-26).
- *
- * `./decode.ts` keeps three outcomes apart on purpose — unreachable, empty, malformed —
- * and what makes that reach a human is the error's **class name** in the build output.
- * Astro prints a *page render* failure as `SanityUnavailableError: …`, and a
- * `getStaticPaths` rejection as the message, the location and the stack with **no name at
- * all** (measured on Astro 7.3.6, `callGetStaticPaths` in `core/render/route-cache.js`).
- *
- * That matters more than it looks, because `getStaticPaths` runs **before any page
- * renders**: the moment a dynamic route exists it is the first read of the build, so it is
- * the one that fails during a Sanity outage — and the log for the single most likely
- * infrastructure failure on this project would have stopped saying which of the three it
- * was. `TRANSIENT_BUILD_FAILURE` survives either way, so MUSE-21's retry was never at
- * risk; the diagnosis was.
- *
- * So the name is folded into the message here, in one place, for any future dynamic route
- * rather than for `/blog/<slug>/` alone. `cause` is kept, so nothing is lost for a reader
- * who wants the original.
- */
-export async function readStaticPaths<T>(read: () => Promise<T>): Promise<T> {
-  try {
-    return await read();
-  } catch (cause) {
-    if (cause instanceof Error) throw new Error(`${cause.name}: ${cause.message}`, { cause });
-    throw cause;
-  }
 }
 
 export async function getFaqs({ minimum = 1 }: ListOptions = {}) {
