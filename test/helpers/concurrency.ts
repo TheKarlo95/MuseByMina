@@ -82,19 +82,23 @@ export { CENSUS_ENV, HEAVY_KINDS, recordHeavyOperation } from '../../scripts/hea
  * event "framenavigated"`, reported by `settleNewTab` as *"it is still at about:blank"*.
  * So three things are true at once and all three matter:
  *
- *   - **It is a resource timeout, and MUSE-61's fix holds.** That wait is on a real
- *     main-frame commit, which is what MUSE-61 established; nothing here is a correctness
- *     bug in a wait. What runs out is the twenty-second *budget* on it — the one class the
- *     note under `fixedSleeps` says no rule can see, because a timeout is a number.
+ *   - **It is not a resource timeout, and the twenty seconds were never the problem** —
+ *     corrected by MUSE-70, which fixed it. The event had already been lost: for a tab
+ *     Chromium opens and Playwright adopts afterwards, `page.url()` can stay
+ *     `about:blank` for the tab's whole life while the document sits loaded underneath,
+ *     so that wait could not have succeeded at any budget. The *rate* is still load
+ *     sensitive, which is why this table reads the way it does and why the ratchet below
+ *     is still worth having. MUSE-61's fix also holds — `settleMove` is untouched; see
+ *     `settleNewTab` in `test/helpers/browser-settle.ts` for the measurement.
  *   - **Adding work makes it worse**, and that is the ticket: 4 of 15 at 78 against 5 of 8
  *     at 79, in two independent measurements by two agents.
  *   - **There is no threshold at 78, 79, 80 or anywhere**, and that is why this is not a
  *     capacity line. 78 fails about one run in four and so does 80 — including on this
  *     branch, with the guard green and the total exactly as recorded. So a ceiling pinned at the tree's own total is a **ratchet**
  *     and nothing more: it makes growth deliberate, attributed and recorded. It does not
- *     make the suite reliable. The residual flake is a separate defect, reported in the
- *     PR body rather than fixed here, and the fix it points at is `settleNewTab`'s 20 s —
- *     not a build count.
+ *     make the suite reliable. The residual flake was a separate defect and MUSE-70 fixed
+ *     it in `settleNewTab` — **not by raising that 20 s**, which is where this note used to
+ *     point and would not have worked.
  *
  * So **the headroom is zero by construction**, and that is not a near-miss: it means every
  * change to the run's heavyweight total goes through `DECLARED` with a reason. A ticket

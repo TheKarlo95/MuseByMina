@@ -58,6 +58,17 @@ import type { Page } from 'playwright';
  * compared against the empty document. `settleCommit` and the two waits over it are the
  * answer, and the question they ask is always the same one: *has the thing I am about to
  * measure committed a document, as the API I will measure it through sees it.*
+ *
+ * ## And then: the right question asked of a record that cannot answer it (MUSE-70)
+ *
+ * The third turn of the same screw, and it is the sentence above taken seriously rather
+ * than an exception to it. For a tab Chromium opens and Playwright adopts afterwards,
+ * *the API MUSE-61 chose to measure through can be permanently wrong* — `page.url()` stays
+ * `about:blank` for the life of a tab that committed inside the adoption window — so the
+ * wait had nothing to wait for and spent its whole budget proving it. `settleNewTab` asks
+ * the document instead, and returns the answer so that the assertion reads the same
+ * record. See it for the measurements; the thing to carry away is that "which bookkeeping"
+ * is a question with a different answer for a new tab than for a page the test opened.
  */
 
 /** What the frame loop samples. */
@@ -279,19 +290,10 @@ export async function awaiting<T>(what: string, work: () => Promise<T>): Promise
 }
 
 /**
- * Is this URL the nothing a tab holds before it has committed a document of ours?
+ * Wait until this page's main frame has **committed** a URL that `is` accepts.
  *
- * `about:blank` is how a middle-clicked tab starts and `''` is what Playwright reports for
- * the instant before even that, so neither is somewhere the tab *went* — the same reading
- * `test/localeswitch.test.ts`'s navigation counter already takes.
- */
-const isBlankUrl = (url: string): boolean => url === '' || url.startsWith('about:');
-
-/**
- * Wait until this tab's main frame has **committed** a URL that `is` accepts.
- *
- * The one primitive behind the two waits below, and the whole of MUSE-61. Three things
- * about it are load-bearing:
+ * The primitive behind `settleMove`, and the whole of MUSE-61. Three things about it are
+ * load-bearing:
  *
  *   1. **It is a commit, not an event about a page object.** `context.waitForEvent('page')`
  *      resolves when the tab is *created*; in Chromium a middle-click creates it at
@@ -317,6 +319,11 @@ const isBlankUrl = (url: string): boolean => url === '' || url.startsWith('about
  * The current URL is read and the listener attached with no `await` between them, so a
  * commit cannot land in the gap and be missed: `framenavigated` is delivered from the
  * message loop, which cannot run inside a synchronous block.
+ *
+ * **Only for a page Playwright has owned since before it moved** — which is every caller
+ * it has, because `settleMove` is the same-tab form. A tab that Chromium opened and
+ * Playwright adopted afterwards can lose that event outright; see `settleNewTab`, which
+ * is why it no longer comes through here (MUSE-70).
  */
 async function settleCommit(
   page: Page,
@@ -335,32 +342,125 @@ async function settleCommit(
 }
 
 /**
- * Wait until a newly opened tab has committed its first real document, and loaded it.
+ * Wait until a newly opened tab holds a finished document of its own, and answer the URL
+ * **that document reports for itself**.
  *
  * For every `context.waitForEvent('page')` in the suite — a middle-click, an "open in new
  * tab". The tab arrives blank, so this is the gate that makes the assertions after it
  * assertions about the page the test named rather than about the empty document Chromium
  * opened (MUSE-61, and MUSE-48 one layer down).
  *
+ * ## Why it does not go through `settleCommit` (MUSE-70)
+ *
+ * It used to, and that was the last flake in the suite: about one full `npm test` in four
+ * went red here, on three tickets' branches that had touched no browser code. MUSE-61's
+ * wait is on a real main-frame commit and is right about *what* to wait for; what is wrong
+ * for a tab opened this way is *whose record of it* you can wait on.
+ *
+ * A page Playwright created is Playwright's before it navigates, so `framenavigated`
+ * reaches the client and `page.url()` follows it — `settleMove` and `landing()` in
+ * `test/localeswitch.test.ts` both rest on that, correctly. A tab Chromium opens on a
+ * middle-click is the other way round: it exists, and loads, while Playwright is still
+ * adopting it. **A tab whose first real document commits inside that window keeps
+ * `page.url() === 'about:blank'` for the rest of its life.** Measured, from one of the
+ * failing runs (the diagnostics are in MUSE-70's pull request):
+ *
+ *   ```
+ *      175ms  the context's `page` event — tab.url() is about:blank
+ *      237ms  the *tab* requests the destination's four font faces … 200, 200, 200, 200
+ *    20185ms  gave up waiting for framenavigated — tab.url() is still about:blank,
+ *             while the document's own location.href is …/schedule/?lang=hr
+ *   ```
+ *
+ * So the event that wait is watching for had already come and gone by 250 ms, and the
+ * twenty seconds were spent waiting for a signal that cannot arrive twice. **This is the
+ * reason the obvious fix was the wrong one**: raising the budget would have bought a
+ * slower failure at exactly the same rate, and a number raised because it was hit records
+ * nothing about why.
+ *
+ * ## So the document is asked, and the same answer is what gets judged
+ *
+ * `waitForFunction` runs in the page, by way of Playwright's *server-side* frame — which
+ * does know where it is, or `evaluate` could not have read the href above. So the
+ * condition and the value both come from the document under test, and MUSE-61's rule is
+ * what forces that rather than what it bends: **the wait must read what the assertion will
+ * read.** MUSE-61 moved the wait to the assertion's bookkeeping; here the only record that
+ * is reliably right is the document's, so the assertion moves to the wait's. The URL is
+ * returned rather than left to be fetched again, so there is one value and no second
+ * reading of a mirror that may be stale — and `middleClickOpens` hands the three tests a
+ * measurement rather than a `Page`, so `tab.url()` is not in scope to reach for.
+ *
+ * Two conditions, and both earn their place. **A non-blank `location.href`** is a document
+ * of ours rather than the empty one Chromium starts the tab at; `about:blank` is where a
+ * middle-clicked tab begins and `''` is the instant before even that, so neither is
+ * somewhere the tab *went*. **`readyState === 'complete'`** is the proof that it stayed:
+ * `langInitScript` (`src/lib/lang.ts`) is a blocking inline script in `<head>`, so a hop
+ * is decided before the body parses and therefore before this document could ever finish
+ * — the argument `settleNavigation` already makes, and the reason there is no second wait
+ * after this one. `waitForLoadState('load')` would be worse than redundant here: load
+ * state reaches the client over the same channel the URL does, so on this tab it is once
+ * again a gate that asserts nothing.
+ *
+ * The href is read *inside* the predicate, so what comes back is the URL at the instant
+ * the condition held rather than whatever the tab holds a round trip later.
+ *
+ * `timeout` stays at 20 s and is now sized against something. Click to "the tab reports a
+ * complete document", over 28 trials of the real middle-click: **524–1288 ms** on an idle
+ * box and **429–1704 ms** with twelve concurrent `astro build`s and a load average above
+ * 100. 20 s is about twelve times the worst of those, which is deliberately generous —
+ * `DEFAULTS.timeout` is only ever spent on the way to a failure, never on the way to a
+ * success.
+ *
  * Note what is *not* here: a wait on the new tab's `localStorage`. All three call sites had
  * one, as a stand-in for "the destination's script has run", and it was wrong twice over.
  * It is unnecessary — `langInitScript` is a blocking inline script in `<head>`, so a
- * document that reaches `readyState === 'complete'` has already run it, which is what
- * `settleNavigation` establishes. And it was *harmful*: `expect(await storedLang(tab))`
- * right after it could only fail by timing out, because the wait had already demanded the
- * thing the assertion then checked. Measured on the way in, it is also not even safe on its
- * own terms — on a tab still at `about:blank` the read raises `SecurityError` (the initial
- * empty document of a middle-clicked tab has an opaque origin), so that gate's two possible
- * verdicts were "the right answer by luck" and "an error naming nothing about language".
+ * document that reaches `readyState === 'complete'` has already run it, which is exactly
+ * what the second condition above establishes. And it was *harmful*: `expect(await
+ * storedLang(tab))` right after it could only fail by timing out, because the wait had
+ * already demanded the thing the assertion then checked. Measured on the way in, it is
+ * also not even safe on its own terms — on a tab still at `about:blank` the read raises
+ * `SecurityError` (the initial empty document of a middle-clicked tab has an opaque
+ * origin), so that gate's two possible verdicts were "the right answer by luck" and "an
+ * error naming nothing about language".
  */
 export async function settleNewTab(
   tab: Page,
   what: string,
   options: { timeout?: number } = {},
-): Promise<void> {
+): Promise<string> {
   const timeout = options.timeout ?? DEFAULTS.timeout;
-  await settleCommit(tab, (url) => !isBlankUrl(url), `${what} to commit a document`, timeout);
-  await settleNavigation(tab, what, { timeout });
+  let committed;
+  try {
+    committed = await tab.waitForFunction(
+      () => {
+        const here = location.href;
+        if (here === '' || here.startsWith('about:')) return null;
+        return document.readyState === 'complete' ? here : null;
+      },
+      undefined,
+      { timeout },
+    );
+  } catch (cause) {
+    // MUSE-54 AC3, and the one case the wait itself has to report: a tab that never got a
+    // document. `evaluate` rather than `tab.url()` for the reason above — on this tab that
+    // is the field that lies, and a failure reporting `about:blank` when the document says
+    // otherwise is how four tickets were sent after the wrong defect.
+    const seen = await tab
+      .evaluate(() => `${location.href} (readyState ${document.readyState})`)
+      .catch((error: unknown) => `nothing we could read — ${(error as Error).message}`);
+    throw new Error(
+      `gave up waiting for ${what} to hold a document of its own — it is at ${seen}`,
+      { cause },
+    );
+  }
+  const here = await committed.jsonValue();
+  if (here === null) {
+    // Unreachable: `waitForFunction` resolves only on a truthy value. Stated rather than
+    // asserted away with `!`, so that if Playwright ever changes its mind about that the
+    // impossible case names itself instead of returning an empty URL into an `expect`.
+    throw new Error(`${what} resolved its wait with no URL — Playwright contract changed`);
+  }
+  return here;
 }
 
 /**
