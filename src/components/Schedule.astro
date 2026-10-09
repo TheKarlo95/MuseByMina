@@ -106,7 +106,9 @@ const t = {
     gridCaption: 'Tjedni raspored — dani u stupcima, vrijeme u redovima.',
     empty: 'Nema termina za odabrani filter.',
     trialEyebrow: 'Prvi sat',
-    trialLede: 'Prvi sat je besplatan.',
+    // MUSE-71: this heading priced the first class at nothing, which the studio does not
+    // do. The brief's own model sentence (§1) is the invitation without the claim.
+    trialLede: 'Dođi na probni sat.',
   },
   en: {
     eyebrow: `Schedule · ${street}`,
@@ -124,7 +126,7 @@ const t = {
     gridCaption: 'Weekly schedule — days in columns, times in rows.',
     empty: 'No classes match the selected filter.',
     trialEyebrow: 'First class',
-    trialLede: 'Your first class is free.',
+    trialLede: 'Come to a trial class.',
   },
 }[locale];
 
