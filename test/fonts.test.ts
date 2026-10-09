@@ -55,9 +55,9 @@ import { servePages, type Host } from './helpers/serve';
  * human-readable banner is colour-coded — so the base came out `/MuseByMina/%1B[31m/`,
  * `astro dev` answered every page with the error page, and **no assertion below could
  * tell**: the error page loads the same stylesheet, declares the same six faces and, at
- * the time, carried the same two preloads. "Which faces did the CSS engine ask for" gave the right
- * answer about the wrong document, in the one suite whose whole reason to exist is seeing
- * what `dist` cannot.
+ * the time, carried the same two preloads. "Which faces did the CSS engine ask for" gave
+ * the right answer about the wrong document, in the one suite whose whole reason to exist
+ * is seeing what `dist` cannot.
  *
  * It was CI-only, deterministically: Astro 7 switches to JSON log lines when it detects an
  * agent, and in that form the next character is a backslash — which the class did exclude.
