@@ -10,13 +10,13 @@
     "sanity/schemaTypes/documents/prose.ts": "9d58ff2b83325381",
     "sanity/schemaTypes/documents/site.ts": "d8898e13d88a5f4a",
     "sanity/schemaTypes/documents/studio.ts": "c730bb35f819c5df",
-    "sanity/schemaTypes/enums.ts": "92cad84d23191a2e",
+    "sanity/schemaTypes/enums.ts": "7ec5773ece509073",
     "sanity/schemaTypes/index.ts": "41e09614645d8593",
     "sanity/schemaTypes/objects/image.ts": "dd5539802c1ad35e",
     "sanity/schemaTypes/objects/locale.ts": "7fd9bb26b8774d1b",
     "sanity/structure.ts": "7464b960d336ab93",
     "src/lib/pages.ts": "507a46beeb90422f",
     "src/lib/sanity/queries.ts": "dfe56e3f14ccd304",
-    "src/lib/schedule.ts": "a86a72df00f188d3"
+    "src/lib/schedule.ts": "325f13a8dcfeabe9"
   }
 }
