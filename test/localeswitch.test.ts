@@ -136,25 +136,137 @@ async function clickAndSettle(page: Page, selector: string): Promise<void> {
 }
 
 /**
- * Middle-click `selector` and hand back the tab it opened, once that tab holds a document.
+ * What a middle-clicked tab turned out to be: where it ended up, in what language, and
+ * what it remembered.
+ *
+ * The same shape `landing()` below answers for a copied address, and for the same reason —
+ * it is a *measurement* of the destination rather than a handle to it. Here that is also
+ * the fix for MUSE-70: Playwright's `page.url()` for a tab Chromium opened can be
+ * permanently `about:blank` (the mechanism and the measurements are at `settleNewTab`), so
+ * the three assertions below must not be able to reach it. They cannot — there is no
+ * `Page` in scope to read it off.
+ *
+ * `landing` carries a `navigations` count and this deliberately does not. That counter is
+ * `page.on('framenavigated')`, which is the very channel a late-adopted tab loses: it
+ * would read 0 for a tab that navigated perfectly well, so it is not a fact about the
+ * site. The copied-address case is where "exactly one hop" is asserted, and it can be,
+ * because that page was Playwright's before it moved.
+ */
+interface Opened {
+  /** Where the tab ended up, as its own document reports it. */
+  url: string;
+  htmlLang: string | null;
+  stored: string | null;
+}
+
+/**
+ * How many times Chromium is asked to open the tab, and how long each ask is given.
+ *
+ * **MUSE-70's second half, and the measurement is why there is a count rather than a bigger
+ * number.** The gesture is sometimes simply dropped. Instrumented inside a failing run, the
+ * page receives `pointerdown`, `mousedown`, `mouseup` and `auxclick`, all `button=1`, all
+ * on the switcher's own `<a>`, none default-prevented, at identical coordinates, with the
+ * link's box unmoved and its `href` correct and `target` absent — and Chromium opens no
+ * tab, ever. **Waiting longer was tried and does not work**: raised to 45 s, 4 of 5 full
+ * runs still failed here, each with the click itself finishing in 143–266 ms and no tab
+ * arriving in the remaining forty-four seconds.
+ *
+ * So the retry is what is left, and it is honest for one reason: *whether Chromium acts on
+ * a middle-click is not a fact about this site.* The markup half — that the entry is a
+ * plain `<a>` with an `href` and no `target` — is asserted separately and deterministically
+ * in the MUSE-33 block, so a switcher that stopped being a link fails there rather than
+ * here. A middle-click is also idempotent on the page performing it (it navigates nothing),
+ * so asking again costs a click and risks nothing. What this must never become is a retry
+ * around the *assertions*: a tab that arrives and cannot be measured is rethrown below.
+ *
+ * `TAB_BUDGET` covers both halves of one attempt, and each was measured on its own.
+ * `locator.click`'s actionability checks took **2.9–3.9 s** at
+ * `Emulation.setCPUThrottlingRate: 80` and 143–266 ms in the real failing runs; the `page`
+ * event then arrived within **1 ms** of the click returning, 42 of 42 trials, throttled and
+ * not. Twelve seconds is about three times the worst click ever measured here, and the loss
+ * note below records the click's own duration so the two halves can never be confused for
+ * each other. Three attempts bound the helper at 36 s, inside `testTimeout`'s 60 s, and
+ * cost nothing at all on the path where the first gesture lands.
+ */
+const TAB_ATTEMPTS = 3;
+const TAB_BUDGET = 12_000;
+
+/**
+ * Middle-click `selector` and measure the tab it opened, once that tab holds a document.
  *
  * The one place in the suite a new tab is taken delivery of (MUSE-61). It was three copies
  * of the same four lines, each gating on conditions a blank tab satisfies — and `tab.url()`
  * read against the empty document Chromium opens a middle-clicked tab at is how a pull
  * request touching no browser code went red. `settleNewTab` is the barrier; what it does
- * *not* do, and why the `localStorage` wait that used to be here is gone, is written out
- * at the helper.
+ * *not* do, why the `localStorage` wait that used to be here is gone, and why the URL now
+ * comes back from the gate rather than off the tab (MUSE-70) are all written out there.
+ *
+ * **The wait is subscribed before the gesture and that is deliberate** — a `page` event
+ * delivered while `click()` was still in flight would otherwise be missed, and Playwright
+ * delivers it from the message loop, which runs between two `await`s. The price is that
+ * the budget covers the click as well, which is why `TAB_BUDGET` is sized against both and
+ * why the loss note says how much of it the click took. An earlier cut subscribed
+ * *afterwards* so the budget measured only the tab, and claimed the gap was closed by
+ * reading `context.pages()` first; it was, but `const opened = already ?? …` is not a call
+ * expression, so `uncommittedTabs` stopped tracking the tab and MUSE-61's guard passed
+ * while asserting nothing. Checked by deleting the `settleNewTab` call and watching
+ * `test/isolation.test.ts` go red, which is the only way to tell that rule apart from a
+ * vacuous one.
  */
 async function middleClickOpens(
   page: Page,
   context: BrowserContext,
   selector: string,
-): Promise<Page> {
-  const opened = context.waitForEvent('page', { timeout: 15_000 });
-  await page.locator(selector).click({ button: 'middle' });
-  const tab = await opened;
-  await settleNewTab(tab, `the tab middle-clicking ${selector} opened`);
-  return tab;
+): Promise<Opened> {
+  const lost: string[] = [];
+  for (let attempt = 1; attempt <= TAB_ATTEMPTS; attempt += 1) {
+    const opened = context.waitForEvent('page', { timeout: TAB_BUDGET });
+    // Park a handler on it before the click. The promise is deliberately created first so
+    // no event can be missed, which means its budget can expire while `click()` is still
+    // in flight — and a rejection nobody is awaiting yet is an *unhandled* one, which
+    // crashes the worker instead of failing the test. Demonstrated with the budget set to
+    // 1 ms: the process dies at this line before the click returns. The `await` below is
+    // still what reads the outcome.
+    void opened.catch(() => undefined);
+    const asked = Date.now();
+    await page.locator(selector).click({ button: 'middle' });
+    const clicked = Date.now() - asked;
+
+    let arrived = false;
+    try {
+      const tab = await opened;
+      arrived = true;
+      if (attempt > 1) {
+        // Said out loud rather than absorbed. A dropped gesture is the browser's, not the
+        // site's, so it must not fail the run — but a *rate* of them is worth seeing, and
+        // a retry nobody can observe is how the next person concludes there is nothing
+        // here to find (MUSE-70).
+        console.error(
+          `MUSE-70: Chromium dropped ${lost.length} middle-click(s) on ${selector} ` +
+            `before opening the tab — ${lost.join('; ')}`,
+        );
+      }
+      const url = await settleNewTab(tab, `the tab middle-clicking ${selector} opened`);
+      return {
+        url,
+        htmlLang: await tab.getAttribute('html', 'lang'),
+        stored: await storedLang(tab),
+      };
+    } catch (cause) {
+      // A tab we were given and could not measure is a failure of the thing under test.
+      // Only the browser never producing one is retried.
+      if (arrived) throw cause;
+      lost.push(`${attempt}: the click took ${clicked}ms, no tab in the ${TAB_BUDGET}ms`);
+    }
+  }
+  throw new Error(
+    `Chromium opened no tab for ${TAB_ATTEMPTS} middle-clicks on ${selector} ` +
+      `(${lost.join('; ')}). MUSE-70 measured each gesture arriving at the link with ` +
+      `auxclick firing undefaulted, so read a run of these as the browser dropping them ` +
+      `rather than as a slow machine — and if the click durations above are close to the ` +
+      `budget it is the machine after all. That the entry is still a plain link is ` +
+      `asserted in the MUSE-33 block, so it is not what this is telling you.`,
+  );
 }
 
 interface Geometry {
@@ -637,6 +749,13 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
     const { page, close } = await visit(urlFor('/en', TRIAL), { locale: FOREIGN_LOCALE });
     try {
       expect(await switchHref(page, 'hr')).toBe(`${pagePath('/')}?${LANG_PARAM}=hr${TRIAL}`);
+      // And it is a *plain* link, which is the site-owned half of "a middle-click opens
+      // it in a tab": `target` or `download` on it would change what the browser does
+      // with the gesture, and the middle-click case below could then only report that as
+      // Chromium declining to open a tab (MUSE-70). Checked here because it is a fact
+      // about the markup and so costs no browser tab to establish.
+      expect(await page.getAttribute(switchTo('hr'), 'target')).toBe(null);
+      expect(await page.getAttribute(switchTo('hr'), 'download')).toBe(null);
       // The English entry is where the visitor already is, so it is not a link to carry
       // anything — the durability claim is about the language they are *not* reading
       // (MUSE-39). The same href seen from the other side is asserted below.
@@ -670,10 +789,10 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
       const tab = await middleClickOpens(page, context, switchTo('hr'));
 
       // Croatian, not bounced to `/en/` by the homepage redirect.
-      expect(tab.url()).toBe(urlFor('/', `?${LANG_PARAM}=hr${TRIAL}`));
-      expect(await tab.getAttribute('html', 'lang')).toBe('hr-HR');
+      expect(tab.url).toBe(urlFor('/', `?${LANG_PARAM}=hr${TRIAL}`));
+      expect(tab.htmlLang).toBe('hr-HR');
       // And the choice is now recorded, by the link rather than by a handler.
-      expect(await storedLang(tab)).toBe('hr');
+      expect(tab.stored).toBe('hr');
     } finally {
       await close();
     }
@@ -686,11 +805,11 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
     try {
       const tab = await middleClickOpens(page, context, switchTo('en'));
 
-      expect(tab.url()).toBe(urlFor('/en', `?${LANG_PARAM}=en${TRIAL}`));
-      expect(await tab.getAttribute('html', 'lang')).toBe('en');
+      expect(tab.url).toBe(urlFor('/en', `?${LANG_PARAM}=en${TRIAL}`));
+      expect(tab.htmlLang).toBe('en');
       // `/en/` ran no language script before MUSE-33, so a tab opened here displayed
       // English and remembered nothing — and the next plain `/` went Croatian.
-      expect(await storedLang(tab)).toBe('en');
+      expect(tab.stored).toBe('en');
     } finally {
       await close();
     }
@@ -856,12 +975,14 @@ describe('the entry for the locale you are reading is inert (MUSE-39)', () => {
 
       const tab = await middleClickOpens(page, context, switchTo('hr'));
 
-      // MUSE-61's failing line. The comparison is the judge and the wait above is only the
-      // proof that there is a document to judge — which is why `?lang=` going missing
-      // reads as „expected `?lang=hr`, received nothing" rather than as a timeout.
-      expect(tab.url()).toBe(urlFor('/schedule', `?${LANG_PARAM}=hr`));
-      expect(await tab.getAttribute('html', 'lang')).toBe('hr-HR');
-      expect(await storedLang(tab)).toBe('hr');
+      // MUSE-61's failing line, and MUSE-70's. The comparison is the judge and the gate is
+      // only the proof that there is a document to judge — which is why `?lang=` going
+      // missing reads as „expected `?lang=hr`, received nothing" rather than as a timeout.
+      // Proved both times by building with the parameter dropped; the failure names the
+      // URL it got.
+      expect(tab.url).toBe(urlFor('/schedule', `?${LANG_PARAM}=hr`));
+      expect(tab.htmlLang).toBe('hr-HR');
+      expect(tab.stored).toBe('hr');
     } finally {
       await close();
     }

@@ -586,7 +586,9 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   **And the total is now metered, because adding to it breaks a different file**
   (MUSE-68). MUSE-67 gave a new `describe` a build of its own and
   `test/localeswitch.test.ts` went red — `page.waitForEvent: Timeout 20000ms exceeded
-  while waiting for event "framenavigated"`, a correct wait that never got CPU. Measured
+  while waiting for event "framenavigated"`, read at the time as a correct wait that never
+  got CPU. It was a correct wait on an event that had already been lost; MUSE-70 has the
+  measurement, and the load sensitivity below is real either way. Measured
   across two agents: **4 of 15 runs fail at 78 operations and 5 of 8 at 79.** So the
   count is the thing to watch and **the count is measured, not read off the source**: a
   scan for `astroBuild`/`astroDev` call sites undercounts by about a fifth, because the
@@ -733,6 +735,27 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   line asserts made that assertion unfailable except by timeout. `uncommittedTabs` keeps
   the shape out, and the suite takes delivery of a new tab in exactly one helper so that
   name-scoped rule has one binding to watch rather than three.
+
+  **For a tab Chromium opened, `page.url()` is not that bookkeeping — it is a mirror that
+  can be permanently wrong** (MUSE-70), and that was the last flake in the suite: about one
+  full `npm test` in four, on branches that had touched no browser code, and three tickets
+  were reported red for it innocently. A tab Playwright adopts *after* Chromium opened it
+  keeps `page.url() === 'about:blank'` **for the rest of its life** when its first document
+  commits inside the adoption window. Measured in the failing run: the tab requested the
+  destination's four fonts 60 ms after the `page` event and answered 200 to all of them,
+  and twenty seconds later `page.url()` was still `about:blank` while the document's own
+  `location.href` was the destination. So the event MUSE-61's wait watches for had come and
+  gone, and **raising the 20 s — the obvious fix, and the one the ticket was filed asking
+  for — would have bought a slower failure at the same rate.** `settleNewTab` therefore
+  asks the document (`waitForFunction`: a non-blank `location.href`, then `readyState ===
+  'complete'`) and **returns the URL it established**, so the assertion reads the record the
+  wait read — MUSE-61's rule applied, not bent. `middleClickOpens` hands the three tests
+  that URL, the `<html lang>` and the stored language rather than a `Page`, which is what
+  makes the stale mirror unreachable rather than merely discouraged. `settleCommit` and
+  `settleMove` are **unchanged and still right**: a page the test opened is Playwright's
+  before it navigates. The 20 s is now sized against a measurement recorded beside it —
+  click to a complete document is 524–1288 ms idle, 429–1704 ms at a load average above
+  100, over 28 trials.
 
 - **The formatting convention is stated in `prettier.config.mjs`, and `prettier --write`
   over the tree is still wrong** (MUSE-58). Nothing stated it before, and Prettier's
