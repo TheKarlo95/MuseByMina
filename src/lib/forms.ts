@@ -36,6 +36,34 @@ import { LEVELS, LEVEL_NAME, type Level } from './schedule';
 export const FORM_ENDPOINT: string = (import.meta.env.PUBLIC_FORM_ENDPOINT ?? '').trim();
 
 /**
+ * **Does a submission leave this site for somebody else?** — the one fact the privacy
+ * notice and the form have to agree on (MUSE-72).
+ *
+ * The same expression `TrialForm.astro`'s script tests before it will `fetch`, given a name
+ * so that the notice and the form read one thing rather than two copies of it. That is the
+ * whole mechanism: `Privacy.astro` renders its processor paragraph **iff** this is true, so
+ * "the notice describes a data flow that does not exist" stops being a state the build can
+ * be in.
+ *
+ * It was that state. The notice said, in the present tense and in both locales, that
+ * Formspark acted as the studio's processor, that a DPA was in place and that Formspark
+ * emailed the messages through — with `PUBLIC_FORM_ENDPOINT` unset since the project began
+ * and MUSE-12 recording that the form has never delivered anything. Three assertions, none
+ * of them true, in a statutory document, for the life of the project, with every test file
+ * green. Nothing was watching the claim because nothing *could*: the claim was prose and
+ * the fact was configuration.
+ *
+ * Note what the notice deliberately does **not** take from here: the provider's name. Art.
+ * 13(1)(e) takes "the recipients **or categories of recipient**", and a category — *the
+ * external service that delivers the form* — is the only honest description derivable from
+ * a URL in an environment variable, since nothing in this repository knows who is on the
+ * other end of one. A name would be a second unwatched fact, which is this ticket, and it
+ * would go stale the day the provider changes. As a category the notice needs no edit when
+ * that happens.
+ */
+export const FORM_HAS_PROCESSOR: boolean = FORM_ENDPOINT !== '';
+
+/**
  * The fields every page's form has, and the keys into `labels`, `hints`, `required`
  * and `format`.
  *
@@ -274,7 +302,20 @@ export interface FormCopy {
    * Ends in a colon: the studio email address follows it as a link.
    */
   failOffline: string;
-  /** What happens to the data — GDPR Art. 13, in one sentence, beside the fields. */
+  /**
+   * What happens to the data — GDPR Art. 13, in one sentence, beside the fields.
+   *
+   * It used to end "…and no sharing with anyone beyond the service that delivers the
+   * form" (MUSE-72). There is no such service — `FORM_HAS_PROCESSOR` above is false as
+   * this ships — so the line named a recipient that does not exist, in the one place a
+   * visitor reads *while typing their phone number in*.
+   *
+   * It is now true in **both** configurations and says nothing about recipients at all,
+   * which is deliberate rather than lazy: the notice's recipient paragraph is conditional
+   * on the endpoint, and a summary beside the fields that tried to track that condition
+   * would be a third copy of it. One sentence on purpose and a link for the rest is
+   * exactly what Art. 13's layered-notice guidance asks for.
+   */
   privacy: string;
   privacyLink: string;
   honeypotLabel: string;
@@ -339,7 +380,7 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
     failOffline:
       'Izgleda da trenutno nema internetske veze. Tvoji odgovori su ostali u obrascu — provjeri vezu i pošalji ponovno. Možeš nam i pisati na:',
     privacy:
-      'Ime, e-mail i broj telefona koristimo samo da ti odgovorimo i dogovorimo termin. Ne šaljemo newsletter i ne dijelimo ih ni s kim osim s uslugom koja prenosi obrazac.',
+      'Ime, e-mail i broj telefona koristimo samo da ti odgovorimo i dogovorimo termin. Ne šaljemo newsletter. Što se s podacima točno događa, piše u izjavi o privatnosti.',
     privacyLink: 'Izjava o privatnosti',
     honeypotLabel: 'Ostavi ovo polje prazno',
     noscript:
@@ -390,7 +431,7 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
     failOffline:
       'You appear to be offline. Your answers are still in the form — check your connection and send again. You can also write to us at:',
     privacy:
-      'We use your name, email and phone only to reply and arrange a time. No newsletter, and no sharing with anyone beyond the service that delivers the form.',
+      'We use your name, email and phone only to reply and arrange a time. No newsletter. Exactly what happens to the data is in the privacy notice.',
     privacyLink: 'Privacy notice',
     honeypotLabel: 'Leave this field empty',
     noscript:
