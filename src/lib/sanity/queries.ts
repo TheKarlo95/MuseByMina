@@ -349,18 +349,42 @@ export const GALLERY_QUERY = defineQuery(`
  *
  * `authorRef` is what separates the two. A `_ref` with no value is a deleted instructor;
  * no `_ref` at all is a post the studio signs. See the note at the top of this file.
+ *
+ * ---------------------------------------------------------------------------------
+ * **`hr` and `en` are projected as objects, not as two halves of three fields**
+ * (MUSE-26). A post is published in the locales whose translation object exists, so
+ * `hr{...}` answering `null` is the fact „this post is not in Croatian" — not a missing
+ * field. `sanity/schemaTypes/objects/locale.ts` argues the shape; `decodePost` is where
+ * `null` on both is refused.
+ *
+ * **There is exactly one query over `post`, and `/blog/<slug>/` uses it too.** The
+ * temptation after MUSE-24 is a clockless `ALL_POSTS_QUERY` beside this one, the way
+ * `ALL_EVENTS_QUERY` sits beside `EVENTS_QUERY` — and it would be wrong here, because the
+ * asymmetry between the two document types runs the other way:
+ *
+ *   - an **event** must keep its page after it happens, so the page set may not depend on
+ *     the clock, and the clock is only ever used to decide *which list* it is on;
+ *   - a **post** must not have a page *before* it happens. `publishedAt <= $now` is the
+ *     whole of what the Studio field promises Mina („tako se tekst može pripremiti
+ *     unaprijed"), and a second clockless reader behind `getStaticPaths` would publish the
+ *     draft at a URL while the index still hid it — the leak being exactly the thing the
+ *     field exists to prevent.
+ *
+ * And no URL is lost by it: the filter only ever drops the *future*, and a published date
+ * does not come back. So the set of URLs this emits grows and never shrinks, which is the
+ * property `ALL_EVENTS_QUERY` had to be written for and this gets for free.
+ * ---------------------------------------------------------------------------------
  */
 export const POSTS_QUERY = defineQuery(`
   *[_type == "post" && publishedAt <= $now] | order(publishedAt desc){
     _id,
     "slug": slug.current,
-    title{ hr, en },
     publishedAt,
-    excerpt{ hr, en },
     "author": author->name,
     "authorRef": author._ref,
     coverImage{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop },
-    body{ hr, en }
+    hr{ title, excerpt, body },
+    en{ title, excerpt, body }
   }
 `);
 

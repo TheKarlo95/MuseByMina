@@ -287,17 +287,59 @@ type PostRow = POSTS_QUERY_RESULT[number];
 const _postFields: [
   Guaranteed<PostRow, '_id'>,
   Guaranteed<PostRow, 'slug'>,
-  Guaranteed<PostRow, 'title'>,
   Guaranteed<PostRow, 'publishedAt'>,
-  Guaranteed<PostRow, 'excerpt'>,
-  Guaranteed<PostRow, 'body'>,
-] = [true, true, true, true, true, true];
+] = [true, true, true];
 
 export type AssertPostAuthorOptional = OptionalIn<PostRow, 'author'>;
 export type AssertPostProjectsAuthorRef = RefProjected<PostRow, 'authorRef', string | null>;
 
 const _postAuthorOptional: AssertPostAuthorOptional = true;
 const _postAuthorRef: AssertPostProjectsAuthorRef = true;
+
+/**
+ * **Both translations are optional, and `coverImage` is too** (MUSE-26).
+ *
+ * The three `Guaranteed` lines above are what is true of a post *whatever language it is
+ * in*: it has an id, a permanent slug and a date. Everything a reader reads is per
+ * locale, and **a locale may be absent** — that is the answer to the ticket's hardest
+ * question, and `OptionalIn` is how it is stated at compile time rather than discovered
+ * in a page.
+ *
+ * Asserting them *as* optional rather than leaving them unasserted is `instagram`'s
+ * reason: delete `hr{...}` from the projection and the generated type simply stops having
+ * the key, so nothing in the type layer notices while `/blog/` quietly lists nothing.
+ *
+ * `AssertPostTranslationsMatch` is the one with teeth beyond absence. The two objects are
+ * projected verbatim in `./queries.ts` — there are no GROQ fragments here — so the risk is
+ * not that one is wrong, it is that **one drifts from the other**: an `en{title, body}`
+ * missing `excerpt` would publish an English index of cards with no summary while the
+ * Croatian one was fine. Stated as an identity, the two move together or not at all.
+ */
+export type AssertPostCroatianOptional = OptionalIn<PostRow, 'hr'>;
+export type AssertPostEnglishOptional = OptionalIn<PostRow, 'en'>;
+export type AssertPostCoverImageOptional = OptionalIn<PostRow, 'coverImage'>;
+export type AssertPostTranslationsMatch = Same<PostRow['hr'], PostRow['en']>;
+
+const _postCroatianOptional: AssertPostCroatianOptional = true;
+const _postEnglishOptional: AssertPostEnglishOptional = true;
+const _postCoverImageOptional: AssertPostCoverImageOptional = true;
+const _postTranslationsMatch: AssertPostTranslationsMatch = true;
+
+/**
+ * And a translation that is present carries all three fields.
+ *
+ * `OptionalIn<PostRow, 'hr'>` only says the object may be absent; it says nothing about
+ * what is in one. `NonNullable` strips the „not written in this language" case and the
+ * three `Guaranteed` lines then hold against the fields themselves — so a typo in
+ * `hr{title, excrpt, body}` is a compile error naming `excerpt` rather than an index of
+ * cards with nothing under the heading.
+ */
+type PostText = NonNullable<PostRow['hr']>;
+const _postTextFields: [
+  Guaranteed<PostText, 'title'>,
+  Guaranteed<PostText, 'excerpt'>,
+  Guaranteed<PostText, 'body'>,
+] = [true, true, true];
 
 /**
  * The origin story's fields: the two `/aboutus` cannot render without, and the date it
@@ -521,11 +563,19 @@ export const SCHEMA_ASSERTIONS = Object.freeze({
   eventTicketUrlOptional: _eventTicketUrlOptional,
   pastEventsMatchEvents: _pastEventsMatch,
   allEventsMatchEvents: _allEventsMatch,
+  // A post may exist in one language only (MUSE-26), so each translation is asserted
+  // *as* optional — and the two are asserted identical, because the risk is one of them
+  // drifting from the other rather than either being wrong on its own.
+  postCroatianOptional: _postCroatianOptional,
+  postEnglishOptional: _postEnglishOptional,
+  postCoverImageOptional: _postCoverImageOptional,
+  postTranslationsMatch: _postTranslationsMatch,
   fields: Object.freeze({
     scheduleSlot: _slotFields,
     class: _classFields,
     instructor: _instructorFields,
     post: _postFields,
+    postTranslation: _postTextFields,
     event: _eventFields,
     pricingTier: _tierFields,
     faq: _faqFields,

@@ -154,11 +154,9 @@ export type Post = {
   _createdAt: string;
   _updatedAt: string;
   _rev: string;
-  title: LocaleString;
   slug: Slug;
   publishedAt: string;
-  excerpt: LocaleText;
-  coverImage: {
+  coverImage?: {
     asset?: SanityImageAssetReference;
     media?: unknown;
     hotspot?: SanityImageHotspot;
@@ -166,31 +164,16 @@ export type Post = {
     alt: LocaleString;
     _type: "image";
   };
-  body: LocaleRichText;
   author?: InstructorReference;
+  hr?: PostTranslation;
+  en?: PostTranslation;
 };
 
-export type LocaleRichText = {
-  _type: "localeRichText";
-  hr: Array<{
-    children?: Array<{
-      marks?: Array<string>;
-      text?: string;
-      _type: "span";
-      _key: string;
-    }>;
-    style?: "normal" | "h3" | "blockquote";
-    listItem?: "bullet";
-    markDefs?: Array<{
-      href: string;
-      _type: "link";
-      _key: string;
-    }>;
-    level?: number;
-    _type: "block";
-    _key: string;
-  }>;
-  en: Array<{
+export type PostTranslation = {
+  _type: "postTranslation";
+  title: string;
+  excerpt: string;
+  body: Array<{
     children?: Array<{
       marks?: Array<string>;
       text?: string;
@@ -475,7 +458,7 @@ export type AllSanitySchemaTypes =
   | Faq
   | InstructorReference
   | Post
-  | LocaleRichText
+  | PostTranslation
   | Slug
   | GalleryImage
   | Event
@@ -819,19 +802,11 @@ export type GALLERY_QUERY_RESULT = Array<{
 
 // Source: src/lib/sanity/queries.ts
 // Variable: POSTS_QUERY
-// Query: *[_type == "post" && publishedAt <= $now] | order(publishedAt desc){    _id,    "slug": slug.current,    title{ hr, en },    publishedAt,    excerpt{ hr, en },    "author": author->name,    "authorRef": author._ref,    coverImage{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop },    body{ hr, en }  }
+// Query: *[_type == "post" && publishedAt <= $now] | order(publishedAt desc){    _id,    "slug": slug.current,    publishedAt,    "author": author->name,    "authorRef": author._ref,    coverImage{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop },    hr{ title, excerpt, body },    en{ title, excerpt, body }  }
 export type POSTS_QUERY_RESULT = Array<{
   _id: string;
   slug: string;
-  title: {
-    hr: string;
-    en: string;
-  };
   publishedAt: string;
-  excerpt: {
-    hr: string;
-    en: string;
-  };
   author: string | null;
   authorRef: string | null;
   coverImage: {
@@ -842,9 +817,11 @@ export type POSTS_QUERY_RESULT = Array<{
     };
     hotspot: SanityImageHotspot | null;
     crop: SanityImageCrop | null;
-  };
-  body: {
-    hr: Array<{
+  } | null;
+  hr: {
+    title: string;
+    excerpt: string;
+    body: Array<{
       children?: Array<{
         marks?: Array<string>;
         text?: string;
@@ -862,7 +839,11 @@ export type POSTS_QUERY_RESULT = Array<{
       _type: "block";
       _key: string;
     }>;
-    en: Array<{
+  } | null;
+  en: {
+    title: string;
+    excerpt: string;
+    body: Array<{
       children?: Array<{
         marks?: Array<string>;
         text?: string;
@@ -880,7 +861,7 @@ export type POSTS_QUERY_RESULT = Array<{
       _type: "block";
       _key: string;
     }>;
-  };
+  } | null;
 }>;
 
 // Source: src/lib/sanity/queries.ts

@@ -48,24 +48,56 @@ export const galleryImage = defineType({
   preview: { select: { title: 'caption.hr', media: 'image', subtitle: 'takenAt' } },
 });
 
+/**
+ * **A blog post: one document, one slug, one date — and one translation per language it
+ * is written in** (MUSE-26).
+ *
+ * The per-locale grouping is argued at length beside `postTranslation` in
+ * `sanity/schemaTypes/objects/locale.ts`; read that before changing the shape. The short
+ * version: a post is the first content type on this site that will not exist in both
+ * languages in practice, so the text is grouped per locale and a language left empty is a
+ * language the post is not published in.
+ *
+ * Everything that is **not** text stays one value for the whole post, because it is one
+ * post: the slug (so the two renderings share a URL shape, CLAUDE.md), `publishedAt` (so
+ * the two indexes order identically), the cover image and the author.
+ */
 export const post = defineType({
   name: 'post',
   title: 'Objava',
   type: 'document',
-  description: 'Tekst na blogu — najave, osvrti, savjeti.',
+  description:
+    'Tekst na blogu — najave, osvrti, savjeti. Ispuni jezike na kojima je napisan; ' +
+    'prazan jezik se ne objavljuje.',
   fields: [
-    defineField({
-      name: 'title',
-      title: 'Naslov',
-      type: 'localeString',
-      validation: (Rule) => Rule.required(),
-    }),
     defineField({
       name: 'slug',
       title: 'Adresa (slug)',
       type: 'slug',
-      description: 'Zadnji dio adrese. Oba jezika dijele isti slug.',
-      options: { source: 'title.hr', maxLength: 96 },
+      description:
+        'Zadnji dio adrese, npr. /blog/sto-obuci-na-prvi-sat. Oba jezika dijele isti ' +
+        'slug. Adresa je trajna — nemoj je mijenjati nakon što je objava podijeljena.',
+      options: {
+        /**
+         * The Croatian title, or the English one if there is no Croatian text.
+         *
+         * A function rather than `'hr.title'`, for the reason PR-shaped experience with
+         * `event` found: a post written only in English has no `hr.title`, and a string
+         * source would silently suggest nothing — leaving Mina to type a slug by hand on
+         * the one field whose value is permanent. The fallback keeps the generated slug
+         * available in both directions.
+         */
+        source: (doc) => {
+          const text = doc as {
+            hr?: { title?: unknown };
+            en?: { title?: unknown };
+          };
+          const hr = text.hr?.title;
+          const en = text.en?.title;
+          return String((typeof hr === 'string' && hr) || (typeof en === 'string' && en) || '');
+        },
+        maxLength: 96,
+      },
       validation: (Rule) => Rule.required().error('Slug je obavezan.'),
     }),
     defineField({
@@ -73,29 +105,27 @@ export const post = defineType({
       title: 'Datum objave',
       type: 'datetime',
       description:
-        'Objave s datumom u budućnosti se ne prikazuju — tako se tekst može pripremiti unaprijed.',
+        'Objave s datumom u budućnosti se ne prikazuju — tako se tekst može pripremiti ' +
+        'unaprijed. Stranica se gradi po rasporedu, pa se objava pojavi na prvoj ' +
+        'izgradnji nakon tog datuma, ne u tu minutu.',
       validation: (Rule) => Rule.required().error('Datum objave je obavezan.'),
     }),
-    defineField({
-      name: 'excerpt',
-      title: 'Kratki uvod',
-      type: 'localeText',
-      description:
-        'Jedna do dvije rečenice. Prikazuje se na popisu objava i kao opis stranice ' +
-        'kad se link dijeli.',
-      validation: (Rule) => Rule.required(),
-    }),
+    /**
+     * **Optional, which is a decision** (MUSE-26, and the same one as
+     * `instructor.portrait`). No photography of this studio exists, so a required cover
+     * image means the first post Mina writes cannot be published without a stock
+     * photograph — a `required()` field satisfiable only by fiction, which is MUSE-36.
+     * `PostPage.astro` and the index card both read "no cover" as a layout rather than a
+     * gap.
+     */
     imageField({
       name: 'coverImage',
       title: 'Naslovna slika',
       ratio: '16:9',
-      purpose: 'Slika na popisu objava i na vrhu teksta.',
-    }),
-    defineField({
-      name: 'body',
-      title: 'Tekst',
-      type: 'localeRichText',
-      validation: (Rule) => Rule.required(),
+      purpose:
+        'Neobavezno. Slika na popisu objava i na vrhu teksta. Bez nje objava izgleda ' +
+        'kao tekst, što je u redu.',
+      required: false,
     }),
     defineField({
       name: 'author',
@@ -103,6 +133,19 @@ export const post = defineType({
       type: 'reference',
       to: [{ type: 'instructor' }],
       description: 'Ostavi prazno i objava je potpisana studijem.',
+    }),
+    // Croatian first, because Croatian sets the layout (design system §10).
+    defineField({
+      name: 'hr',
+      title: 'Hrvatski',
+      type: 'postTranslation',
+      description: 'Ostavi prazno ako objava nije napisana na hrvatskom.',
+    }),
+    defineField({
+      name: 'en',
+      title: 'Engleski',
+      type: 'postTranslation',
+      description: 'Ostavi prazno ako objava nije napisana na engleskom.',
     }),
   ],
   orderings: [
@@ -112,13 +155,41 @@ export const post = defineType({
       by: [{ field: 'publishedAt', direction: 'desc' }],
     },
   ],
+  /**
+   * The list row, and the one place the "at least one language" rule reaches Mina before
+   * the build does.
+   *
+   * Sanity cannot express "one of these two objects is required" — `required()` has no
+   * one-of form and `Rule.custom` is unobservable in a test (`enums.ts`) — so
+   * `decodePost` is what refuses it. A post with neither language filled in would
+   * otherwise look like an ordinary row here; `BEZ TEKSTA` is in capitals for the reason
+   * the build log's `FIXTURE` is.
+   */
   preview: {
-    select: { title: 'title.hr', date: 'publishedAt', media: 'coverImage' },
-    prepare: ({ title, date, media }) => ({
-      title: String(title ?? 'Objava bez naslova'),
-      subtitle: typeof date === 'string' ? date.slice(0, 10) : 'bez datuma',
-      media,
-    }),
+    select: {
+      hrTitle: 'hr.title',
+      enTitle: 'en.title',
+      date: 'publishedAt',
+      media: 'coverImage',
+    },
+    prepare: ({ hrTitle, enTitle, date, media }) => {
+      const languages = [
+        typeof hrTitle === 'string' && hrTitle.trim() !== '' ? 'HR' : undefined,
+        typeof enTitle === 'string' && enTitle.trim() !== '' ? 'EN' : undefined,
+      ].filter((tag): tag is string => tag !== undefined);
+      const title =
+        (typeof hrTitle === 'string' && hrTitle) ||
+        (typeof enTitle === 'string' && enTitle) ||
+        'Objava bez naslova';
+      const when = typeof date === 'string' ? date.slice(0, 10) : 'bez datuma';
+
+      return {
+        title: String(title),
+        subtitle:
+          languages.length === 0 ? `${when} · BEZ TEKSTA` : `${when} · ${languages.join(' · ')}`,
+        media,
+      };
+    },
   },
 });
 

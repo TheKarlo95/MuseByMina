@@ -5,7 +5,7 @@ import { event, pricingTier } from './documents/offering';
 import { faq, galleryImage, post } from './documents/media';
 import { prosePage } from './documents/prose';
 import { page, siteSettings } from './documents/site';
-import { localeRichText, localeString, localeText } from './objects/locale';
+import { localeString, localeText, postTranslation } from './objects/locale';
 
 /**
  * Every type the Studio knows about, in one array.
@@ -18,7 +18,9 @@ export const schemaTypes: SchemaTypeDefinition[] = [
   // Shared objects first; documents reference them by name.
   localeString,
   localeText,
-  localeRichText,
+  // One post in one language. Not a bilingual object — see the long note beside it, and
+  // MUSE-26's answer to „what happens to a post that exists in only one locale".
+  postTranslation,
 
   // The studio
   studioStory,

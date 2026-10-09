@@ -117,6 +117,7 @@ export type {
   Instructor,
   PageMetaDoc,
   Post,
+  PostTranslation,
   PricingTier,
   ProsePage,
   ProseSection,
@@ -502,12 +503,58 @@ export async function getGallery({ minimum = 1 }: ListOptions = {}) {
   return requireDocuments(rows, 'galleryImage', decodeGalleryImage, minimum);
 }
 
+/**
+ * **Published posts, newest first — `/blog/` and every `/blog/<slug>/`** (MUSE-26).
+ *
+ * One reader for both, which is deliberate and is where this departs from `/events`:
+ * `POSTS_QUERY` is the only query over `post`, so the index and `getStaticPaths` cannot
+ * disagree about which posts exist. `src/lib/sanity/queries.ts` has the argument for why
+ * there is no clockless twin here — the short version is that a post must not have a URL
+ * before its `publishedAt`, which is the whole of what the Studio field promises.
+ *
+ * `now` is a parameter so two builds of one commit at one instant agree (MUSE-20), and so
+ * that a page can hand the same instant to everything it renders.
+ *
+ * **Not memoised**, for `getStudioStory`'s reason: `test/projections.test.ts` swaps the
+ * fixture per test, and a memoised reader silently answers the second test from the
+ * first's dataset. The cost is one query per locale per build.
+ */
 export async function getPosts({
   minimum = 1,
   now = new Date(),
 }: ListOptions & { now?: Date } = {}) {
   const rows = await runQuery<unknown>(POSTS_QUERY, { now: now.toISOString() });
   return requireDocuments(rows, 'post', decodePost, minimum);
+}
+
+/**
+ * **A read performed inside `getStaticPaths`, with its error class kept in the log**
+ * (MUSE-26).
+ *
+ * `./decode.ts` keeps three outcomes apart on purpose — unreachable, empty, malformed —
+ * and what makes that reach a human is the error's **class name** in the build output.
+ * Astro prints a *page render* failure as `SanityUnavailableError: …`, and a
+ * `getStaticPaths` rejection as the message, the location and the stack with **no name at
+ * all** (measured on Astro 7.3.6, `callGetStaticPaths` in `core/render/route-cache.js`).
+ *
+ * That matters more than it looks, because `getStaticPaths` runs **before any page
+ * renders**: the moment a dynamic route exists it is the first read of the build, so it is
+ * the one that fails during a Sanity outage — and the log for the single most likely
+ * infrastructure failure on this project would have stopped saying which of the three it
+ * was. `TRANSIENT_BUILD_FAILURE` survives either way, so MUSE-21's retry was never at
+ * risk; the diagnosis was.
+ *
+ * So the name is folded into the message here, in one place, for any future dynamic route
+ * rather than for `/blog/<slug>/` alone. `cause` is kept, so nothing is lost for a reader
+ * who wants the original.
+ */
+export async function readStaticPaths<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (cause) {
+    if (cause instanceof Error) throw new Error(`${cause.name}: ${cause.message}`, { cause });
+    throw cause;
+  }
 }
 
 export async function getFaqs({ minimum = 1 }: ListOptions = {}) {

@@ -295,6 +295,44 @@ export function flag(doc: unknown, path: string, where: Where, fallback: boolean
   return value;
 }
 
+/**
+ * A `datetime` field, held to the one spelling the site compares and formats (MUSE-26).
+ *
+ * `text()` alone was not enough once `/blog` started rendering `publishedAt`. Two
+ * different silent failures sit behind a loose datetime, and neither is a missing field:
+ *
+ *   - **`Intl` renders an unparseable date as the literal words "Invalid Date"**, which on
+ *     a post is a byline reading „Invalid Date". `src/lib/dates.ts` refuses it too, but by
+ *     then the value is already in a page's frontmatter; the decoder's job is that nothing
+ *     malformed reaches a component at all, and this is the field path the error should
+ *     name.
+ *   - **„is this published yet" is decided by comparing strings.** `POSTS_QUERY` compares
+ *     `publishedAt` against `$now` in GROQ, where both sides are strings, and `$now` is
+ *     always `Date#toISOString`'s `…Z` spelling. A value carrying a local offset
+ *     (`…+02:00`) is the same instant and a different string, so it would sort into the
+ *     wrong half — a post hidden for two hours after it was due, or shown two hours early.
+ *     That cannot be caught downstream, because the comparison has already happened by the
+ *     time a page sees the row.
+ *
+ * `isIsoInstant` is the same predicate `src/lib/dates.ts` formats through, imported rather
+ * than restated: two spellings of „what counts as a datetime here" is the shape of defect
+ * this directory exists to prevent.
+ */
+function instantAt(doc: unknown, path: string, where: Where, required: boolean): string | undefined {
+  const value = required ? text(doc, path, where) : optionalText(doc, path, where);
+  if (value === undefined) return undefined;
+  if (!isIsoInstant(value)) {
+    fail(
+      at(where, path),
+      'a UTC ISO instant like `2026-08-13T19:00:00.000Z` — the spelling Sanity stores a ' +
+        '`datetime` in, and the only one a string comparison against `$now` can be ' +
+        'trusted with',
+      value,
+    );
+  }
+  return value;
+}
+
 /** One of a closed set — the structure half of the content/structure split. */
 export function oneOf<T extends string>(
   doc: unknown,
@@ -950,51 +988,135 @@ export function decodeGalleryImage(row: unknown): GalleryImage {
   };
 }
 
+/**
+ * One post in one language — the three fields that are written per locale (MUSE-26).
+ *
+ * `body` stays `unknown[]` here on purpose, and that is a division of labour rather than
+ * laziness: this module's job is that **every block is an object carrying a `_type`**, so
+ * a projection that lost the array or a row holding a bare string fails naming the
+ * document and the index. Which `_type`s are *allowed* is the renderer's question, and
+ * `src/lib/portable-text.ts` answers it by failing on anything it has no rule for —
+ * naming the unmapped construct, the block and the document. Two checks, two different
+ * facts, each where the fact is known.
+ */
+export interface PostTranslation {
+  title: string;
+  excerpt: string;
+  /** Portable Text. Rendered by `src/lib/portable-text.ts`, which owns the block map. */
+  body: unknown[];
+}
+
 export interface Post {
   id: string;
   slug: string;
-  title: Record<Locale, string>;
   publishedAt: string;
-  excerpt: Record<Locale, string>;
   /**
    * The instructor who wrote it, if a person did.
    *
    * Optional, and it stays optional: the Studio field reads „Ostavi prazno i objava je
    * potpisana studijem", so a post with no author is signed by the studio and renders
-   * without a byline. **`undefined` here therefore means exactly one thing** — nobody was
-   * named. It used to mean two, the second being "the instructor who wrote it has been
-   * deleted", which published the post unsigned and said nothing (MUSE-49). That case is
-   * now a build failure naming the post, the field and the deleted instructor; see
-   * `optionalReferencedText`.
+   * with the studio's own name as the byline. **`undefined` here therefore means exactly
+   * one thing** — nobody was named. It used to mean two, the second being "the instructor
+   * who wrote it has been deleted", which published the post unsigned and said nothing
+   * (MUSE-49). That case is now a build failure naming the post, the field and the
+   * deleted instructor; see `optionalReferencedText`.
    */
   author?: string;
-  coverImage: ImageRef;
-  /** Portable Text, per locale. Rendered by whatever the blog ticket picks; opaque here. */
-  body: Record<Locale, unknown[]>;
+  /**
+   * Optional since MUSE-26, which is the `instructor.portrait` decision: no photography
+   * of this studio exists, so a required cover could only be satisfied with a stock
+   * photograph.
+   */
+  coverImage?: ImageRef;
+  /**
+   * The languages this post is written in, and the text of each.
+   *
+   * A locale that is absent here is a locale the post **is not published in**: it is not
+   * on that index, it has no page at that URL, and the other locale's page declares no
+   * `hreflang` alternate pointing at it. One fact, read in four places. See
+   * `sanity/schemaTypes/objects/locale.ts` for why the grouping is per locale, and
+   * `src/lib/blog.ts` for what each of those four places does with it.
+   */
+  text: Partial<Record<Locale, PostTranslation>>;
+}
+
+/**
+ * One translation, or `undefined` for a language the post is not written in.
+ *
+ * The three fields are `required()` *inside* `postTranslation`, so Sanity already refuses
+ * a half-filled one in the Studio. This is the build-side half of the same rule, and it
+ * is not redundant: `npm run sanity:seed` imports NDJSON straight into the dataset
+ * without going through a single Studio validator, which is how a document that no editor
+ * could have created gets in.
+ */
+function postTranslation(
+  row: unknown,
+  locale: Locale,
+  where: Where,
+): PostTranslation | undefined {
+  const value = read(row, locale);
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object') {
+    fail(at(where, locale), 'the text of the post in this language, or nothing at all', value);
+  }
+
+  const here = at(where, locale);
+  const blocks = read(value, 'body');
+  if (!Array.isArray(blocks) || blocks.length === 0) {
+    fail(at(here, 'body'), 'at least one paragraph of text', blocks);
+  }
+  blocks.forEach((block, index) => {
+    if (typeof block !== 'object' || block === null || typeof read(block, '_type') !== 'string') {
+      fail(
+        at(here, `body[${index}]`),
+        'a Portable Text block — an object with a `_type`. Which types are allowed is ' +
+          '`src/lib/portable-text.ts`, which fails naming any it has no rule for',
+        block,
+      );
+    }
+  });
+
+  return {
+    title: text(value, 'title', here),
+    excerpt: text(value, 'excerpt', here),
+    body: blocks as unknown[],
+  };
 }
 
 export function decodePost(row: unknown): Post {
   const where = frame(row, 'post');
-  const body = read(row, 'body');
-  const hr = read(body, 'hr');
-  const en = read(body, 'en');
-  for (const [locale, blocks] of [
-    ['hr', hr],
-    ['en', en],
-  ] as const) {
-    if (!Array.isArray(blocks) || blocks.length === 0) {
-      fail(at(where, `body.${locale}`), 'at least one paragraph of text', blocks);
-    }
+  const text_ = {
+    hr: postTranslation(row, 'hr', where),
+    en: postTranslation(row, 'en', where),
+  };
+
+  /**
+   * **The one rule the Studio cannot state, so the build does** (MUSE-26).
+   *
+   * `required()` has no "one of these two" form and `Rule.custom` is skipped unless the
+   * validation run is handed a client (`sanity/schemaTypes/enums.ts`), so a post with
+   * neither language filled in is publishable in the Studio. It renders nowhere — no
+   * index lists it, no URL resolves to it — which makes it precisely the silent nothing
+   * this module exists to refuse, so it stops the build naming the document rather than
+   * being a row that quietly does not exist.
+   */
+  if (text_.hr === undefined && text_.en === undefined) {
+    fail(
+      where,
+      'the text of the post in at least one language — fill in `hr`, `en`, or both. A ' +
+        'post with neither is published nowhere: it is on no index, has no URL of its ' +
+        'own and is in no sitemap',
+      { hr: read(row, 'hr'), en: read(row, 'en') },
+    );
   }
+
   return {
     id: where.id,
     slug: text(row, 'slug', where),
-    title: localised(row, 'title', where),
-    publishedAt: text(row, 'publishedAt', where),
-    excerpt: localised(row, 'excerpt', where),
+    publishedAt: instantAt(row, 'publishedAt', where, true)!,
     author: optionalReferencedText(row, 'author', 'authorRef', where),
-    coverImage: image(row, 'coverImage', where),
-    body: { hr: hr as unknown[], en: en as unknown[] },
+    coverImage: optionalImage(row, 'coverImage', where),
+    text: text_,
   };
 }
 
