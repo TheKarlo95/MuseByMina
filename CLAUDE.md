@@ -1017,8 +1017,11 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   commercial promise needs no decision from the studio; **adding one does.**
 
   The guard is one rule in `test/helpers/offer-claims.ts` applied at two levels, and both
-  are load-bearing. `test/offerclaims.test.ts` reads `src/`, `sanity/` and the seed as
-  plain text, so a failure names a `file:line`; `test/content.test.ts` applies the same
+  are load-bearing. **It holds two retired claims, not one** — MUSE-80 added the response
+  time below — so each needle carries its own `ticket` and `untrue`, and the failure
+  states the one that fired. A third belongs here too rather than in a second mechanism.
+  `test/offerclaims.test.ts` reads `src/`, `sanity/` and the seed as plain text, so a
+  failure names a `file:line`; `test/content.test.ts` applies the same
   needles to `dist`, because a claim *composed* at render time appears in no source file
   and on every page (MUSE-50) — demonstrated, and caught only there. It uses the build
   that suite already performs: the heavyweight budget has zero headroom. The needles test
@@ -1033,6 +1036,40 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   `page.description` was correctly classified and correctly in the CMS, which is the hole
   this came through, and no test closes it. And the CTA label is still a code literal:
   moving it into `siteSettings` is a schema change and its own ticket.
+- **The site promises no response time** (MUSE-80). „Javljamo se u roku od jednog radnog
+  dana…" / "We reply within one working day…" was in `src/lib/forms.ts` twice per locale —
+  the sent-confirmation body and the `<noscript>` ask — and in `page-contact.description`,
+  so also in `/contact`'s `<meta name="description">` and its two `llms.txt` lines. It
+  traces to `92f3554`, MUSE-7's implementation commit, whose description never mentions
+  one. A **service level** is stronger than marketing copy and enforceable against the
+  studio, and it was published beside a form that has **never delivered a message**
+  (`PUBLIC_FORM_ENDPOINT` is unset, MUSE-12) — so the clock was promised to start on a
+  submission that was never transmitted. Gone, and **nothing replaced it**: "within a few
+  days" and "as soon as we can" are the same defect with a different value. If Mina sets
+  one it is hers to set and it belongs in the CMS, which is a needle removed from
+  `RETIRED_CLAIMS` with her name beside it.
+
+  **The needle's boundary is the unit, and it is not an exemption.** `/privacy` promises
+  an answer „u roku od mjesec dana" / "within one month" in both locales — a reply verb
+  and a stated period, which no adjacency can tell apart from the retired claim. That is
+  the GDPR's own deadline for a data-subject request (Art. 12(3)): law rather than a
+  promise, true, and it stays. So the needles match a period in **hours, days or weeks and
+  never in months** — note that Croatian spells a month as „mjesec dana", so the unit
+  alone cannot carry the distinction and the pattern refuses „mjesec" at the one position
+  it can appear. Both `/privacy` lines are pinned in `INNOCENT` and asserted *not* to
+  match, so the boundary is tested from both sides. A bare period is not a needle either:
+  „working day" is in `src/lib/rebuild.ts` about the cron spacing and "within six hours"
+  twice about the rebuild cadence, which is why a reply verb is required beside it.
+  `INNOCENT` spans `src/` **and** `sanity/` for that reason — MUSE-71 read only `src/` and
+  the nearest miss lives in `sanity/badges.ts`.
+- **„Dvoja vrata, ne šest." is `Home.astro`'s own line, not the design brief's** (MUSE-80).
+  Four comments — two in `src/components/Home.astro`, two in `test/home.test.ts` — cited
+  the brief for it. The brief contains no „vrata", no "door" and no "not six"; its only
+  six is the six signature devices in §6. The words stayed, because they claim nothing
+  about the studio and they are in the register §1 asks for; the attribution went. **A
+  fabricated citation is worse than fabricated copy**, because the next author trusts it
+  rather than opening the file — which is exactly what happened here, three times after
+  the first.
 - **An optional field is a decision, not laziness.** `instructor.portrait`,
   `instructor.instagram`, `instructor.bio`, `class.description`, `class.image`,
   `siteSettings.phone` and `openingHours` are optional because no real value exists for
