@@ -2,8 +2,11 @@ import type { Locale } from '../i18n';
 import type { ClassEntry, Level, Weekday } from '../schedule';
 import type { PageMetaDoc, ScheduleEntry } from './decode';
 import type {
+  ALL_EVENTS_QUERY_RESULT,
   CLASSES_QUERY_RESULT,
+  EVENTS_QUERY_RESULT,
   FAQS_QUERY_RESULT,
+  PAST_EVENTS_QUERY_RESULT,
   INSTRUCTORS_QUERY_RESULT,
   PAGES_QUERY_RESULT,
   POSTS_QUERY_RESULT,
@@ -366,6 +369,65 @@ const _tierFields: [
   Guaranteed<TierRow, 'featured'>,
 ] = [true, true, true, true, true];
 
+/**
+ * **The three event queries, and why all three are asserted rather than one** (MUSE-24).
+ *
+ * `event` had no compile-time assertions at all until this ticket, which was correct while
+ * nothing rendered it and is not now: `/events/`, `/events/archive/` and
+ * `/events/<slug>/` read eight fields apiece, and a typo in one projection is a card with a
+ * hole in it and an `astro check` that passes.
+ *
+ * All three row types are pinned, and the pinning is `Same<>` between them rather than three
+ * copies of one list. The queries repeat their projection verbatim — `./queries.ts` explains
+ * why there are no GROQ fragments here — so the risk is not that one of them is wrong in
+ * isolation; it is that **one of them drifts from the other two**, which is how an event
+ * acquires a detail page whose venue is blank while the card above it is fine. Stating it as
+ * an identity makes the three move together or not at all.
+ *
+ * `endsAt` is on the `OptionalIn` list and not on `Guaranteed`, because „kraj nije
+ * objavljen" is what the Studio field offers and a required end could only be satisfied by
+ * inventing one. `lineup` and `ticketUrl` are optional for the same reason — an event with
+ * no announced guests and no ticket link is an ordinary event — and `decodeEvent` answers
+ * the first with `[]`, which is precisely the silent fallback `test/projections.test.ts`
+ * exists to catch.
+ *
+ * No `RefProjected` lines: `event` dereferences nothing, so MUSE-49's pair rule has no
+ * subject here. The day an event references an instructor, it does.
+ */
+type EventRow = EVENTS_QUERY_RESULT[number];
+const _eventFields: [
+  Guaranteed<EventRow, '_id'>,
+  Guaranteed<EventRow, 'slug'>,
+  Guaranteed<EventRow, 'title'>,
+  Guaranteed<EventRow, 'eventType'>,
+  Guaranteed<EventRow, 'startsAt'>,
+  Guaranteed<EventRow, 'venue'>,
+  Guaranteed<EventRow, 'description'>,
+  Guaranteed<EventRow, 'image'>,
+] = [true, true, true, true, true, true, true, true];
+
+export type AssertEventEndsAtOptional = OptionalIn<EventRow, 'endsAt'>;
+export type AssertEventLineupOptional = OptionalIn<EventRow, 'lineup'>;
+export type AssertEventTicketUrlOptional = OptionalIn<EventRow, 'ticketUrl'>;
+
+const _eventEndsAtOptional: AssertEventEndsAtOptional = true;
+const _eventLineupOptional: AssertEventLineupOptional = true;
+const _eventTicketUrlOptional: AssertEventTicketUrlOptional = true;
+
+/**
+ * The archive and the detail pages read the same row as the index.
+ *
+ * `Same<>` in both directions, so a field added to one projection and not the others is a
+ * compile error naming the query rather than a page that quietly renders less. It is also
+ * what makes `getStaticPaths` able to hand `EventPage.astro` a row from
+ * `ALL_EVENTS_QUERY` while `Events.astro` hands it one from `EVENTS_QUERY`.
+ */
+export type AssertPastEventsMatchEvents = Same<PAST_EVENTS_QUERY_RESULT[number], EventRow>;
+export type AssertAllEventsMatchEvents = Same<ALL_EVENTS_QUERY_RESULT[number], EventRow>;
+
+const _pastEventsMatch: AssertPastEventsMatchEvents = true;
+const _allEventsMatch: AssertAllEventsMatchEvents = true;
+
 type FaqRow = FAQS_QUERY_RESULT[number];
 const _faqFields: [
   Guaranteed<FaqRow, '_id'>,
@@ -454,11 +516,17 @@ export const SCHEMA_ASSERTIONS = Object.freeze({
   classInstructorRefs: _classInstructorRefs,
   postAuthorOptional: _postAuthorOptional,
   postAuthorRef: _postAuthorRef,
+  eventEndsAtOptional: _eventEndsAtOptional,
+  eventLineupOptional: _eventLineupOptional,
+  eventTicketUrlOptional: _eventTicketUrlOptional,
+  pastEventsMatchEvents: _pastEventsMatch,
+  allEventsMatchEvents: _allEventsMatch,
   fields: Object.freeze({
     scheduleSlot: _slotFields,
     class: _classFields,
     instructor: _instructorFields,
     post: _postFields,
+    event: _eventFields,
     pricingTier: _tierFields,
     faq: _faqFields,
     page: _pageFields,

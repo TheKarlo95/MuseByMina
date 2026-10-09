@@ -1,0 +1,63 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import EventPage from '../../components/EventPage.astro';
+import { assertEventSlugs, eventMetaDescription, eventMetaTitle } from '../../lib/events';
+import {
+  getAllEvents,
+  getSiteSettings,
+  readStaticPaths,
+  type StudioEvent,
+} from '../../lib/sanity';
+
+/**
+ * **One page per `event` document, on no clock — which is what makes the URL permanent.**
+ *
+ * `getAllEvents` takes no `$now`, deliberately: the set of pages a build emits may not
+ * depend on the instant the build started, or an archived event's URL would stop resolving
+ * in the build after it passed. `src/lib/sanity/queries.ts` has the argument.
+ *
+ * `assertEventSlugs` is the half that can fail. Astro gives the static `archive.astro` next
+ * to this file priority over `[slug]`, so an event slugged `archive` builds a page nothing
+ * can reach — published, invisible, no error anywhere. The reserved list is derived from
+ * `ROUTES`, so it is right the day a second static child of `/events` is routed.
+ *
+ * This route is deliberately **not** in `ROUTES` and has no `page` document: a `page`
+ * document exists per route, and the routes the Studio may describe are `ROUTES` — one per
+ * event would be a second document saying again what the `event` already says. So the
+ * `<title>` and the description are derived from the event, and
+ * `test/routes.test.ts`/`test/seo.test.ts` carry `/events/[slug]` as a template rather than
+ * a page, which is what it is.
+ */
+export async function getStaticPaths() {
+  // `readStaticPaths` is there for the error, not for the read: Astro prints a
+  // `getStaticPaths` rejection without the error's class name, and `getStaticPaths` is the
+  // first read of the build — so a Sanity outage would otherwise stop saying which of
+  // `decode.ts`'s three outcomes it was. See the note on it in `src/lib/sanity/index.ts`.
+  return readStaticPaths(async () => {
+    const events = await getAllEvents();
+    assertEventSlugs(events);
+    return events.map((event) => ({ params: { slug: event.slug }, props: { event } }));
+  });
+}
+
+const { event } = Astro.props as { event: StudioEvent };
+
+/**
+ * The build's instant, for „has this event passed". Within one build this and the index's
+ * are milliseconds apart; the window either of them is ever wrong by is `MAX_WAIT_HOURS`
+ * (`src/lib/rebuild.ts`), so the gap between two `new Date()` calls is not a thing that can
+ * make the page and the listing say different things.
+ */
+const now = new Date();
+
+/** The studio's name, from the same `siteSettings` the footer and the JSON-LD render. */
+const settings = await getSiteSettings();
+---
+
+<BaseLayout
+  locale="hr"
+  title={eventMetaTitle(event.title.hr, settings.studioName)}
+  description={eventMetaDescription(event.description.hr)}
+>
+  <EventPage locale="hr" event={event} now={now} />
+</BaseLayout>

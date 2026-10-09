@@ -604,9 +604,9 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   It used to answer the status and invent the body, so no browser suite in the repo could
   reach the error page at all and an all-Croatian 404 was only reproducible against the
   deployed site. Drive it with `test/helpers/preview.ts` and an unknown path.
-- **A test never chooses where it builds.** `npm test` performs **80 heavyweight
-  operations — 68 real `astro build`s, 4 `astro dev` servers and 8 browser launches —
-  across 29 of its 34 files**, in a pool of `availableParallelism() - 1` workers, which
+- **A test never chooses where it builds.** `npm test` performs **81 heavyweight
+  operations — 69 real `astro build`s, 4 `astro dev` servers and 8 browser launches —
+  across 30 of its 35 files**, in a pool of `availableParallelism() - 1` workers, which
   is 15 on a developer box and 3 on `ubuntu-latest`. (It said *"ten real `astro build`s
   in parallel workers"* until MUSE-68 counted; nothing had ever made that true, and
   `test/lockup.test.ts` reasoned from it.) `test/helpers/scratch.ts` mints a directory
@@ -622,8 +622,11 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   while waiting for event "framenavigated"`, read at the time as a correct wait that never
   got CPU. It was a correct wait on an event that had already been lost; MUSE-70 has the
   measurement, and the load sensitivity below is real either way. Measured
-  across two agents: **4 of 15 runs fail at 78 operations and 5 of 8 at 79.** So the
-  count is the thing to watch and **the count is measured, not read off the source**: a
+  across two agents: **4 of 15 runs fail at 78 operations and 5 of 8 at 79** — every one
+  of them the middle-click MUSE-70 then fixed, so the table's post-MUSE-70 row (MUSE-24:
+  5 runs at 81, 0 failures) says that defect is still fixed and **not** that there is
+  headroom. So the count is the thing to watch and **the count is measured, not read off
+  the source**: a
   scan for `astroBuild`/`astroDev` call sites undercounts by about a fifth, because the
   heavyweight helpers wrap each other (`startPreview` → `buildPreview` → `astroBuild`)
   and a rule stated against a callee — the only kind `source-guard.ts` may state — sees
@@ -641,7 +644,11 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   measurement table above `BUDGET` before changing either number, and do not raise it
   quietly. MUSE-69 is the worked example: its two builds took the run to 80, the guard
   exited 1 on 34 green files naming `test/share.test.ts`, and the entry and the number
-  moved together with the measurement. The worker count is deliberately **not** the
+  moved together with the measurement. MUSE-24 is the second and took it to 81, for
+  **one** build: `/events` needs a dataset with an event in it and no build in the tree has
+  ever had one, while the other sixty tests in that file are Astro container renders and
+  cost nothing. That split is the thing to copy — the container sees markup, and a build is
+  for `getStaticPaths`, a URL and the emitted CSS. The worker count is deliberately **not** the
   divisor: the pool is 15 here and 3 in CI, so dividing
   by it would pass on a laptop and fail on a runner, and pinning it to 10 was measured
   neutral on wall clock and still flaked.
@@ -1150,6 +1157,70 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   panel and in the footer's quick list. `test/nav.test.ts` was already written as a
   conditional on `MORE_NAV` rather than as "there is no More button", so the disclosure is
   held to its own criteria the day it comes back.
+- **`/events` ships empty, and being honest about that is the page** (MUSE-24). There are
+  no `event` documents and nobody has given us any; `getEvents` supports `minimum: 0`, so
+  an events page with nothing on it is a legitimate page rather than a broken one — which
+  is the whole reason this one could be built while `/gallery` and the trust pages cannot.
+  The empty state says „Nema objavljenih događaja.", renders **no list and no section
+  heading** (an empty grid reads as a page that failed to load), offers `/schedule` and
+  `/contact`, and says nothing at all about past events. Its words are `EVENT_COPY` in
+  `src/lib/events.ts` and are deliberately **not** in the CMS: „there are no events" is a
+  statement about the dataset, and Mina cannot keep a field describing the dataset true
+  because she cannot see when it renders. No invented event anywhere — not in the seed, not
+  „to show the layout"; the fixtures are `EVENTS_RENDERED` under `test/`.
+
+  **Three queries over one document type, and the third is the point.** `EVENTS_QUERY` and
+  `PAST_EVENTS_QUERY` are **exact complements** given the same `$now`, so every event is on
+  exactly one page; they are written out rather than negated, because `endsAt >= $now` over
+  an absent `endsAt` is `null` in GROQ and `!null` is `null`, so `!(upcoming)` would drop
+  every event with no announced end from *both* lists. `ALL_EVENTS_QUERY` takes **no
+  clock** and is what `getStaticPaths` reads: which pages a build emits may not depend on
+  when it ran, or an archived event's URL would stop resolving. The partition, and that
+  `hasPassed` — the sentence „Ovaj je događaj prošao." on the detail page — agrees with it
+  row for row, are `test/projections.test.ts`.
+
+  **The transition is a build, and the window is `MAX_WAIT_HOURS`.** Nothing moves until
+  something builds; what builds is a push and MUSE-21's cron, so an event that finished
+  just after a run can sit in the upcoming list for very nearly the largest gap between
+  runs. Accepted: the alternative is a second answer to the same question in JavaScript on
+  a page whose most important reader is a crawler, it is wrong in the harmless direction
+  (last night's party, with last night's date printed on it), the detail page says so in
+  words, and **no URL depends on it**. The number is cited by name and never written out —
+  `test/events.test.ts` fails on an hour count in those files, for the reason MUSE-21
+  promises a duration and not a clock time. Nothing on the page is stamped with a build
+  time, which would break MUSE-20's byte-identical criterion.
+
+  **The slug is permanent, so the Studio prefixes the year.** `/events/<slug>/` is the
+  document's stored slug — not derived from the date at build time, because a derived URL
+  moves when Mina corrects a typo and an archive URL that moves is one that 404s for
+  everyone who ever linked it. `source: 'title.hr'` alone collides with a repeat annual
+  event and leaves her inventing `noc-bachate-2` as that edition's permanent address, so
+  the source is a function giving `2026-noc-bachate`. **`archive` is refused**: Astro gives
+  a static segment priority, so an event slugged that would build a page nothing can reach.
+  `reservedEventSlugs()` reads the children of `/events` off `ROUTES` rather than listing
+  them, and `assertEventSlugs` fails the build naming the event, the slug and the route it
+  collides with. It is a build guard and not a Studio one on purpose — `Rule.custom` is the
+  only instrument Sanity offers for this, and `enums.ts` records that a custom rule is
+  skipped without a client, so it would be real in the Studio and unobservable in a test.
+
+  Four smaller things that are easy to undo. **`/events/[slug]` is a template, not a
+  page** — it is in `NOT_A_ROUTE`/`NOT_A_PAGE` with the reason, it has no `ROUTES` entry
+  and no `page` document (its `<title>` is derived from the event), and it is in the
+  **sitemap** and deliberately not in `llms.txt`, which is a short index of the site's
+  sections and links the sitemap for the rest. **`getStaticPaths` runs before any page
+  renders**, so it is the first read of the build and the one a Sanity outage hits — and
+  Astro prints a `getStaticPaths` rejection *without* the error's class name, which would
+  have quietly removed `SanityUnavailableError` from the one log that tells `decode.ts`'s
+  three outcomes apart; `readStaticPaths` in `src/lib/sanity/index.ts` folds it back in and
+  `test/content.test.ts`'s unreachable-API build is the guard. **`/events/archive` is in no
+  nav list** — a site-wide „Arhiva" entry would advertise past events on every page of a
+  site that has never held one, so it is reached from `/events/`, unconditionally — which
+  makes it the first page here whose route the footer does not list, and
+  `test/nav.test.ts`'s `aria-current` block is now a partition on „does the footer list
+  this section" rather than a claim about every page. And **`src/lib/events.ts` is schema
+  source**: the schema imports `EVENT_TYPES`/`EVENT_TYPE_NAME` out of it, so it is in
+  `check-sanity.mjs`'s `SOURCES` *and* in `studio.yml`'s `paths:` — two lists, asserted
+  equal, and no third.
 - **`/pricing` publishes the studio's three rates, and that is the whole rate card**
   (MUSE-73). 55 € regular monthly, 40 € student monthly, 20 € drop-in — confirmed by the
   owner on 2026-10-09, in those words, after being asked for the complete card.

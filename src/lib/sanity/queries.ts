@@ -249,14 +249,71 @@ export const PRICING_QUERY = defineQuery(`
 `);
 
 /**
- * Events, soonest first, past ones dropped.
+ * **Three queries over one document type, because `/events` asks three questions**
+ * (MUSE-24).
  *
- * `$now` is passed in rather than using GROQ's `now()` so the build is reproducible:
- * two builds of the same commit at the same `$now` produce byte-identical pages, which
- * is what makes `test/seo.test.ts`-style output comparison meaningful.
+ *     EVENTS_QUERY        what is coming        → /events/
+ *     PAST_EVENTS_QUERY   what has been         → /events/archive/
+ *     ALL_EVENTS_QUERY    which pages exist     → /events/<slug>/
+ *
+ * The first two are **exact complements** and are handed the same `$now`, so every event is
+ * on exactly one of the two pages — never both, and never neither. Written out rather than
+ * negated: `endsAt >= $now` over an absent `endsAt` is `null` in GROQ, and `!null` is `null`
+ * rather than `true`, so `!(the upcoming filter)` would quietly drop every event with no
+ * announced end from the archive as well as from the index. Both spellings therefore branch
+ * on the same `defined(endsAt)` and `test/projections.test.ts` asserts the partition against
+ * rows on both sides of the boundary.
+ *
+ * `$now` is passed in rather than using GROQ's `now()` so the build is reproducible: two
+ * builds of the same commit at the same `$now` produce byte-identical pages, which is what
+ * makes `test/seo.test.ts`-style output comparison meaningful. A query that references it
+ * and is not given it is refused before it runs (`./params.ts`, MUSE-51).
+ *
+ * **`ALL_EVENTS_QUERY` takes no clock, and that is the point of it.** `getStaticPaths` asks
+ * which detail pages the build emits, and the answer may not depend on the instant the build
+ * started: an archived event whose URL stopped resolving would be the one failure this
+ * ticket exists to prevent. Deriving the path set from the other two would make permanence
+ * contingent on the partition holding, which is a property a test can check rather than one
+ * the code guarantees. This way the URL exists whatever either filter does.
+ *
+ * The orders differ and each is the reading order of its own page: soonest first for what is
+ * coming — „what is next" is the top of that list — and most recent first for the archive,
+ * where the last thing that happened is what a reader is looking for.
  */
 export const EVENTS_QUERY = defineQuery(`
   *[_type == "event" && (!defined(endsAt) && startsAt >= $now || endsAt >= $now)] | order(startsAt asc){
+    _id,
+    "slug": slug.current,
+    title{ hr, en },
+    eventType,
+    startsAt,
+    endsAt,
+    venue,
+    description{ hr, en },
+    lineup,
+    ticketUrl,
+    image{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop }
+  }
+`);
+
+export const PAST_EVENTS_QUERY = defineQuery(`
+  *[_type == "event" && (defined(endsAt) && endsAt < $now || !defined(endsAt) && startsAt < $now)] | order(startsAt desc){
+    _id,
+    "slug": slug.current,
+    title{ hr, en },
+    eventType,
+    startsAt,
+    endsAt,
+    venue,
+    description{ hr, en },
+    lineup,
+    ticketUrl,
+    image{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop }
+  }
+`);
+
+export const ALL_EVENTS_QUERY = defineQuery(`
+  *[_type == "event"] | order(startsAt desc){
     _id,
     "slug": slug.current,
     title{ hr, en },

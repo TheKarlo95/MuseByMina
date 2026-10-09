@@ -1211,9 +1211,14 @@ describe('MUSE-73: three rates, confirmed by the owner, and no others', () => {
 describe('MUSE-59: /pricing is a route this site serves', () => {
   it('declares the route where a reader meets it, not at the end', () => {
     // Between the timetable and the contact page: what is on, what it costs, how to come.
+    //
+    // „Immediately after `/schedule`" until MUSE-24, which put `/events` and its archive
+    // between them — also „what is on", in its one-off shape. The adjacency was an
+    // accident of a seven-route list; what this test is for is the sentence above it, and
+    // that is what it now says.
     const order = ROUTES.map(({ route }) => route);
     expect(order).toContain('/pricing');
-    expect(order.indexOf('/pricing')).toBe(order.indexOf('/schedule') + 1);
+    expect(order.indexOf('/pricing')).toBeGreaterThan(order.indexOf('/schedule'));
     expect(order.indexOf('/pricing')).toBeLessThan(order.indexOf('/contact'));
   });
 

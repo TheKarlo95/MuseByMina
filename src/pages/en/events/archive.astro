@@ -1,0 +1,16 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import EventsArchive from '../../../components/EventsArchive.astro';
+import { EVENTS_ARCHIVE_ROUTE } from '../../../lib/events';
+import { getPage, getPastEvents } from '../../../lib/sanity';
+
+const now = new Date();
+const [meta, past] = await Promise.all([
+  getPage(EVENTS_ARCHIVE_ROUTE),
+  getPastEvents({ now }),
+]);
+---
+
+<BaseLayout locale="en" title={meta.title.en} description={meta.description.en}>
+  <EventsArchive locale="en" past={past} />
+</BaseLayout>

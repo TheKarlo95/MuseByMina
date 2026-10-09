@@ -441,6 +441,14 @@
             },
             {
               "type": "string",
+              "value": "/events"
+            },
+            {
+              "type": "string",
+              "value": "/events/archive"
+            },
+            {
+              "type": "string",
               "value": "/pricing"
             },
             {
@@ -588,6 +596,14 @@
             {
               "type": "string",
               "value": "/schedule"
+            },
+            {
+              "type": "string",
+              "value": "/events"
+            },
+            {
+              "type": "string",
+              "value": "/events/archive"
             },
             {
               "type": "string",

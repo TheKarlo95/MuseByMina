@@ -1,0 +1,192 @@
+---
+import { EVENTS_ROUTE, EVENT_COPY } from '../lib/events';
+import { localeUrl, type Locale } from '../lib/i18n';
+import type { StudioEvent } from '../lib/sanity';
+import EventCard from './EventCard.astro';
+
+/**
+ * `/events/archive` — the permanent record (MUSE-24).
+ *
+ * The one thing both reference studios get wrong is that a past event is *deleted*: the
+ * Facebook post stays and the page does not, so a party that happened is proof that
+ * evaporated. World Bachata Meet Up gets this right with a per-edition archive, and the
+ * point of copying it is not nostalgia — it is that a studio with four years of parties
+ * behind it has four years of search surface and social proof, and an archived page is the
+ * only durable form either takes.
+ *
+ * Which is why **the URL is the promise, not this page**. An event's `/events/<slug>/` is
+ * built from `getAllEvents`, which takes no clock, so it resolves identically whether the
+ * event is ahead or behind us; this page is an index of the ones behind us, and it moving
+ * an entry has no effect on anybody's bookmark. The slug decision that makes that safe —
+ * stored, year-prefixed, never derived from the date at build time — is written out in
+ * `src/lib/events.ts`.
+ *
+ * **The empty state is honest about the mechanism rather than about a plan.** „Arhiva je
+ * prazna." plus one sentence saying that an event moves here once it has passed and keeps
+ * its address. No „provjeri kasnije", no promise that anything is coming: nobody has
+ * announced an event, so the only true thing to say is how this page works.
+ */
+interface Props {
+  locale: Locale;
+  /**
+   * The past events, from `getPastEvents({ now })`, most recent first. No default.
+   *
+   * The same `now` the index's `getEvents` was given — the two filters are exact
+   * complements, so one instant is what makes them a partition rather than two readings.
+   */
+  past: StudioEvent[];
+}
+
+const { locale, past } = Astro.props;
+const t = EVENT_COPY[locale];
+---
+
+<section class="hero">
+  <p class="eyebrow">{t.archiveEyebrow}</p>
+  <h1 class="display">{t.archiveHeading}</h1>
+  <p class="lede">{t.archiveLede}</p>
+</section>
+
+{
+  past.length > 0 ? (
+    <section class="band">
+      <div class="wrap">
+        <ul class="list">
+          {past.map((event) => (
+            <li class="item">
+              <EventCard locale={locale} event={event} heading="h2" />
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  ) : (
+    <section class="band">
+      <div class="wrap">
+        <h2 class="emptyH">{t.archiveEmptyHeading}</h2>
+        <p class="emptyP">{t.archiveEmptyBody}</p>
+      </div>
+    </section>
+  )
+}
+
+<section class="section">
+  <div class="wrap">
+    <a class="back" href={localeUrl(EVENTS_ROUTE, locale)}>{t.toEvents}</a>
+  </div>
+</section>
+
+<style>
+  .hero {
+    max-width: 1280px;
+    margin-inline: auto;
+    padding: var(--space-8) var(--space-5) var(--space-6);
+  }
+  .band {
+    padding: var(--space-7) var(--space-5) var(--space-8);
+    background: var(--surface-sunken);
+  }
+  .section {
+    padding: var(--space-6) var(--space-5) var(--space-7);
+  }
+  @media (min-width: 768px) {
+    .hero {
+      padding: var(--space-10) var(--space-7) var(--space-7);
+    }
+    .band {
+      padding: var(--space-8) var(--space-7) var(--space-10);
+    }
+    .section {
+      padding: var(--space-7) var(--space-7) var(--space-8);
+    }
+  }
+  .wrap {
+    max-width: 1280px;
+    margin-inline: auto;
+  }
+
+  .eyebrow {
+    font-family: var(--font-label);
+    font-weight: 300;
+    font-size: 0.75rem;
+    letter-spacing: 0.32em;
+    /* Č Ć Ž Š carry marks above the cap line — 1.4 is the floor in Croatian (§4.6). */
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  /* Cormorant, so never below 26px — `clamp()`'s first value is the floor (§4). */
+  .display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.75rem, 8vw, 5.5rem);
+    line-height: 0.96;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin-block-start: var(--space-4);
+  }
+
+  .lede {
+    margin-block-start: var(--space-5);
+    font-size: 1.125rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+    max-width: 62ch;
+  }
+
+  .list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-5);
+    list-style: none;
+  }
+  @media (min-width: 768px) {
+    .list {
+      grid-template-columns: repeat(2, 1fr);
+      gap: var(--space-6);
+    }
+  }
+  @media (min-width: 1280px) {
+    .list {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+  .item {
+    display: flex;
+    min-width: 0;
+  }
+  .item > :global(*) {
+    width: 100%;
+  }
+
+  /* display-s, clamped at Cormorant's 26px floor (§4). */
+  .emptyH {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(1.625rem, 3vw, 2.125rem);
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .emptyP {
+    margin-block-start: var(--space-4);
+    font-size: 1.0625rem;
+    line-height: 1.7;
+    color: var(--text-muted);
+  }
+
+  .back {
+    display: inline-flex;
+    align-items: center;
+    /* 44px is the §8 touch target. */
+    min-height: 44px;
+    font-family: var(--font-label);
+    font-size: 0.8125rem;
+    letter-spacing: 0.2em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+    text-underline-offset: 4px;
+  }
+</style>

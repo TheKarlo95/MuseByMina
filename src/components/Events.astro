@@ -1,0 +1,247 @@
+---
+import { EVENTS_ARCHIVE_ROUTE, EVENT_COPY } from '../lib/events';
+import { localeUrl, type Locale } from '../lib/i18n';
+import type { StudioEvent } from '../lib/sanity';
+import EventCard from './EventCard.astro';
+
+/**
+ * `/events` — what is coming, or a page that says plainly that nothing is (MUSE-24).
+ *
+ * ---------------------------------------------------------------------------------
+ * **The empty state is the state this page ships in, so it was designed first.**
+ *
+ * There are no `event` documents in the dataset and nobody has given us any. That is the
+ * whole reason this ticket was unblocked while `/gallery` and the trust pages are not:
+ * `getEvents` supports `minimum: 0`, so an events page with nothing on it is a legitimate
+ * page rather than a broken one — *provided* it is honest about being empty.
+ *
+ * So no invented events, anywhere: not in `content/seed.ndjson`, not as an example, not
+ * „to show the layout". MUSE-36 published thirteen invented classes and two instructors who
+ * do not work at the studio and it was live for the life of the project; a party with a
+ * date and a venue is the same mistake with a time on it. The fixtures this page is
+ * developed against live under `test/`, the way `test/helpers/structural-content.ts` does.
+ *
+ * Three things the empty block does, and one it does not:
+ *
+ *   - it **says there is nothing**, in one sentence, as a heading rather than as a note;
+ *   - it **renders no list** — not an empty grid, not a heading over nothing, because a
+ *     section header with no rows reads as a page that failed to load;
+ *   - it **offers somewhere to go**: the weekly schedule, which is what the studio
+ *     actually runs, and the contact page;
+ *   - it says **nothing about past events**. The archive link below is a navigational
+ *     affordance in its own right, not a consolation — and the archive is equally honest
+ *     when it is empty.
+ *
+ * The words are `EVENT_COPY` in `src/lib/events.ts`, in code rather than in the CMS, and
+ * the argument for that is written out there: „there are no events" is a statement about
+ * the dataset, and Mina cannot keep a CMS field describing the dataset true because she
+ * cannot see when it renders.
+ *
+ * **The archive link renders unconditionally**, which is a decision rather than an
+ * oversight. Showing it only when the archive has something in it would make
+ * `/events/archive/` a page nothing links to in exactly the state the site ships in —
+ * `test/nav.test.ts`'s orphan rule, and more to the point a permanent record with no
+ * permanent door. A link to a section is not a claim that the section is full.
+ * ---------------------------------------------------------------------------------
+ */
+interface Props {
+  locale: Locale;
+  /**
+   * The upcoming events, from `getEvents({ minimum: 0, now })`. No default.
+   *
+   * A prop with no default for `Schedule.astro`'s reason (MUSE-36): a default is what makes
+   * it possible to render a page before anyone has asked the studio what is on it. And
+   * `now` is passed in alongside at the page wrapper so that this page and the archive
+   * partition one instant rather than two — see `getPastEvents`.
+   */
+  upcoming: StudioEvent[];
+}
+
+const { locale, upcoming } = Astro.props;
+const t = EVENT_COPY[locale];
+---
+
+<section class="hero">
+  <p class="eyebrow">{t.eyebrow}</p>
+  <h1 class="display">{t.heading}</h1>
+  <p class="lede">{t.lede}</p>
+</section>
+
+{
+  upcoming.length > 0 ? (
+    <section class="band">
+      <div class="wrap">
+        <h2 class="sectionH">{t.upcoming}</h2>
+        <ul class="list">
+          {upcoming.map((event) => (
+            <li class="item">
+              <EventCard locale={locale} event={event} heading="h3" />
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  ) : (
+    <section class="band">
+      <div class="wrap">
+        <h2 class="emptyH">{t.emptyHeading}</h2>
+        <p class="emptyP">{t.emptyBody}</p>
+        <p class="exits">
+          <a class="exit" href={localeUrl('/schedule', locale)}>{t.toSchedule}</a>
+          <a class="exit" href={localeUrl('/contact', locale)}>{t.toContact}</a>
+        </p>
+      </div>
+    </section>
+  )
+}
+
+<section class="section">
+  <div class="wrap">
+    <a class="archive" href={localeUrl(EVENTS_ARCHIVE_ROUTE, locale)}>{t.archive}</a>
+  </div>
+</section>
+
+<style>
+  /* §3 section rhythm: canvas, then one contrasting surface. Not alternating. */
+  .hero {
+    max-width: 1280px;
+    margin-inline: auto;
+    padding: var(--space-8) var(--space-5) var(--space-6);
+  }
+  .band {
+    padding: var(--space-7) var(--space-5) var(--space-8);
+    background: var(--surface-sunken);
+  }
+  .section {
+    padding: var(--space-6) var(--space-5) var(--space-7);
+  }
+  @media (min-width: 768px) {
+    .hero {
+      padding: var(--space-10) var(--space-7) var(--space-7);
+    }
+    .band {
+      padding: var(--space-8) var(--space-7) var(--space-10);
+    }
+    .section {
+      padding: var(--space-7) var(--space-7) var(--space-8);
+    }
+  }
+  .wrap {
+    max-width: 1280px;
+    margin-inline: auto;
+  }
+
+  .eyebrow {
+    font-family: var(--font-label);
+    font-weight: 300;
+    font-size: 0.75rem;
+    letter-spacing: 0.32em;
+    /* Č Ć Ž Š carry marks above the cap line — 1.4 is the floor in Croatian (§4.6). */
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  /* Cormorant, so never below 26px — `clamp()`'s first value is the floor (§4). */
+  .display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.75rem, 8vw, 5.5rem);
+    line-height: 0.96;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin-block-start: var(--space-4);
+  }
+
+  .lede {
+    margin-block-start: var(--space-5);
+    font-size: 1.125rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+    /* §5: a measure rather than a width, so Croatian — 20–25% longer than English — reflows
+       instead of being clipped (§10). */
+    max-width: 62ch;
+  }
+
+  .sectionH {
+    font-family: var(--font-label);
+    font-weight: 400;
+    font-size: 0.75rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  /*
+    One column until there is room for more. The narrow case is the *absence* of a
+    multi-column rule rather than a breakpoint somebody has to pick correctly, which is what
+    keeps 390px free of horizontal overflow whatever the Croatian titles do.
+  */
+  .list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-5);
+    margin-block-start: var(--space-6);
+    list-style: none;
+  }
+  @media (min-width: 768px) {
+    .list {
+      grid-template-columns: repeat(2, 1fr);
+      gap: var(--space-6);
+    }
+  }
+  @media (min-width: 1280px) {
+    .list {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+  .item {
+    display: flex;
+    min-width: 0;
+  }
+  .item > :global(*) {
+    width: 100%;
+  }
+
+  /* --- the empty state (§7.2's empty-table wording, applied to a list) --- */
+  /*
+    display-s, clamped at Cormorant's 26px floor — the smallest display size there is (§4).
+    A sentence rather than a label: this is the page's answer to the question the visitor
+    arrived with, so it is set at the size an answer is set at.
+  */
+  .emptyH {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(1.625rem, 3vw, 2.125rem);
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .emptyP {
+    margin-block-start: var(--space-4);
+    font-size: 1.0625rem;
+    line-height: 1.7;
+    color: var(--text-muted);
+  }
+  .exits {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-5);
+    margin-block-start: var(--space-6);
+  }
+  .exit,
+  .archive {
+    display: inline-flex;
+    align-items: center;
+    /* 44px is the §8 touch target. */
+    min-height: 44px;
+    font-family: var(--font-label);
+    font-size: 0.8125rem;
+    letter-spacing: 0.2em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+    text-underline-offset: 4px;
+  }
+</style>

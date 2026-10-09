@@ -35,13 +35,23 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PAGES_DIR = join(ROOT, 'src/pages');
 
 /**
- * Error routes are deliberately not indexable and are not "pages" for SEO.
+ * Entries under `src/pages/` that are not a "page" for SEO, keyed by locale-independent
+ * route — so `/404` and `/en/404` are both excluded. Hardcoding the literal paths would
+ * make adding `src/pages/en/404.astro` unsatisfiable: the page exists, but
+ * `@astrojs/sitemap` is right to leave it out.
  *
- * Keyed by locale-independent route, so `/404` and `/en/404` are both excluded. Hardcoding
- * the literal paths would make adding `src/pages/en/404.astro` unsatisfiable: the page
- * exists, but `@astrojs/sitemap` is right to leave it out.
+ * `/events/[slug]` is here for a different reason and it is not about indexing (MUSE-24).
+ * It is a **template**, not a page: the pages it produces are one per `event` document, so
+ * they are content rather than structure. Every one of them *is* indexed — it declares a
+ * canonical, carries its hreflang pair and appears in the sitemap, which
+ * `test/events.test.ts` asserts against a build that holds events — but it has no entry in
+ * `ROUTES`, no `page` document and therefore no `llms.txt` line. That partition is
+ * deliberate: `llms.txt` is a short index of the site's sections and says so by linking the
+ * sitemap under „Machine-readable", while the sitemap is the surface designed for a page
+ * set that grows with the content. Listing a line per event would also make this file's set
+ * equality a claim about the dataset rather than about the page registry.
  */
-const NOT_A_PAGE = new Set(['/404']);
+const NOT_A_PAGE = new Set(['/404', '/events/[slug]']);
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {

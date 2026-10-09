@@ -257,6 +257,26 @@ const ADDED_AFTER_THE_MIGRATION: { route: string; ticket: string; because: strin
       'about the dance or read off the timetable.',
   },
   {
+    route: '/events',
+    ticket: 'MUSE-24',
+    because:
+      'The events index. `/events` was in the navigation and 404ed (MUSE-13), and the ' +
+      'page could only be built once it was clear that an events page with **no events** ' +
+      'is a legitimate page rather than a broken one — `getEvents` supports ' +
+      '`minimum: 0`. It ships empty, saying so in words, which is the state ' +
+      '`test/events.test.ts` asserts hardest; there is no frozen copy for it because the ' +
+      'site never published it.',
+  },
+  {
+    route: '/events/archive',
+    ticket: 'MUSE-24',
+    because:
+      'The permanent record of past events, and the first route this site serves that is ' +
+      'a *child* of another route. Both reference studios delete a past event, so the ' +
+      "archive is the whole of the ticket's SEO and social-proof argument; it ships empty " +
+      'too, and says so.',
+  },
+  {
     route: '/aboutus',
     ticket: 'MUSE-60',
     because:
@@ -532,7 +552,10 @@ describe('the migration is a committed artefact, not a Studio session', () => {
     expect([...byType.entries()].sort()).toEqual([
       ['class', 4],
       ['instructor', 2],
-      ['page', 7],
+      // Nine since MUSE-24: `/events` and `/events/archive`. **No `event` document**, and
+      // that is the point of the number — an events page with nothing on it is the state
+      // the site ships in, and seeding a party to furnish it is MUSE-36.
+      ['page', 9],
       ['pricingTier', 3],
       ['prosePage', 1],
       ['scheduleSlot', 4],
@@ -1039,7 +1062,16 @@ describe('AC4: empty, unreadable and unreachable stay three different answers', 
   });
 
   it('reports an unreachable API as infrastructure, naming project and dataset', () => {
-    // The live path, exercised for real — see the note in `beforeAll`.
+    /**
+     * The live path, exercised for real — see the note in `beforeAll`.
+     *
+     * **Since MUSE-24 this failure comes out of `getStaticPaths`**, because `/events/<slug>/`
+     * is a dynamic route and `getStaticPaths` runs before any page renders — so it is the
+     * first read of the build and therefore the one an outage hits. Astro prints a
+     * `getStaticPaths` rejection without the error's `name`, which would have quietly
+     * removed the class from this log; `readStaticPaths` in `src/lib/sanity/index.ts` folds
+     * it back into the message, and this assertion is what holds it there.
+     */
     expect(unreachableApi).toContain('SanityUnavailableError');
     expect(unreachableApi).toContain('muse20nosuchproject');
     expect(unreachableApi).toContain('nosuchdataset');

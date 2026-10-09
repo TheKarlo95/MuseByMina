@@ -61,8 +61,8 @@ export { CENSUS_ENV, HEAVY_KINDS, recordHeavyOperation } from '../../scripts/hea
 /**
  * **The recorded total, and a ratchet on it. Not a safety line — read this.**
  *
- * `80` is what this tree performs, measured — 68 `astro build`s, 4 `astro dev` servers
- * and 8 browser launches across 29 of the 34 files. It is **not** the point below which
+ * `81` is what this tree performs, measured — 69 `astro build`s, 4 `astro dev` servers
+ * and 8 browser launches across 30 of the 35 files. It is **not** the point below which
  * the suite is safe, and the number must never be described as though it were, because
  * the measurement says there is no such point:
  *
@@ -76,6 +76,7 @@ export { CENSUS_ENV, HEAVY_KINDS, recordHeavyOperation } from '../../scripts/hea
  * | **79** — MUSE-67's first cut | ~15 | 4 | 3 | MUSE-67 |
  * | **80** — `test/share.test.ts`, now merged | 15 | 4 | 1 | MUSE-69, its branch |
  * | **80** — this tree, rebased | 15 | 5 | 1 | MUSE-68, idle box |
+ * | **81** — `test/events.test.ts` | 15 | **5** | **0** | MUSE-24, idle box, after MUSE-70 |
  *
  * Every failure in that table is the same test and the same error: `test/localeswitch.
  * test.ts`'s middle-click, `page.waitForEvent: Timeout 20000ms exceeded while waiting for
@@ -112,6 +113,23 @@ export { CENSUS_ENV, HEAVY_KINDS, recordHeavyOperation } from '../../scripts/hea
  * and this number were then both moved **with the measurement that justifies them**, which
  * is the whole of the process this file is asking for.
  *
+ * **MUSE-24 is the second, and it is the first row of that table taken after MUSE-70.**
+ * `/events` needs one build whose dataset holds an event — `getStaticPaths`, the URL
+ * through the host model and the emitted stylesheet are the three things Astro's container
+ * API structurally cannot see, and no build in the tree has ever had an event in it. The
+ * rest of that suite's sixty-one tests are container renders and cost nothing, which is
+ * why the entry is 1 and not 3. Measured at 81: **5 runs, 0 failures**, on an idle box at a
+ * pool of 15.
+ *
+ * Read that `0` carefully, because it is the one number in this table that is *not*
+ * evidence about the flake. Every failure above is `test/localeswitch.test.ts`'s
+ * middle-click, and **MUSE-70 fixed it** — the wait was on an event that had already been
+ * lost, so it could not have succeeded at any budget. Five clean runs at 81 therefore say
+ * „the defect MUSE-70 fixed is still fixed", not „there is headroom above 80". The ratchet
+ * stays, and it stays for the reason it was built: the load sensitivity it was measured
+ * against was real, nothing has disproved it, and the next author to need an operation
+ * should have to say so here.
+ *
  * ## Why the worker count is not the divisor
  *
  * MUSE-68 asked for this number to be derived from the worker count, from the model *"ten
@@ -128,7 +146,7 @@ export { CENSUS_ENV, HEAVY_KINDS, recordHeavyOperation } from '../../scripts/hea
  * size is stated in `vitest.config.ts` so it has one home and the reporter can print it
  * beside this total; it is not in the arithmetic.
  */
-export const BUDGET = 80;
+export const BUDGET = 81;
 
 /**
  * Every test file that performs heavyweight work, and how much.
@@ -227,6 +245,16 @@ export const DECLARED: ReadonlyMap<string, { ops: number; why: string }> = new M
     { ops: 1, why: 'one build for the file (MUSE-67 — this is the hoist)' },
   ],
   ['test/nav.test.ts', { ops: 1, why: 'one build' }],
+  [
+    'test/events.test.ts',
+    {
+      ops: 1,
+      why:
+        'one build against a dataset holding events — `getStaticPaths`, the URL through ' +
+        'the host model, and the emitted CSS are the three things Astro’s container API ' +
+        'structurally cannot see, and no existing build has an event in it (MUSE-24)',
+    },
+  ],
   ['test/nojs.test.ts', { ops: 1, why: 'one build' }],
   ['test/schedule.test.ts', { ops: 1, why: 'one build' }],
 ]);

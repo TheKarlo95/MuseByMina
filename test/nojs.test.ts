@@ -146,17 +146,28 @@ describe('the built site ships no JavaScript files and no CMS client', () => {
     // rather than a list derived from `ROUTES` — the claim is "the build emitted these
     // and nothing else", and deriving it from the registry would make it agree with
     // itself.
+    //
+    // MUSE-24 added `/events` and `/events/archive` **and a dynamic template**,
+    // `src/pages/events/[slug].astro`, which is the first entry under `src/pages/` that
+    // emits a page set rather than a page. It emits **none** here, and that is the state
+    // the site ships in: there are no `event` documents in `content/seed.ndjson`, so this
+    // list is still exhaustive. The assertion below is what says so out loud — a detail
+    // page appearing in this build would mean an invented event had reached the seed.
     expect(build.htmlFiles()).toEqual([
       '404.html',
       'aboutus/index.html',
       'contact/index.html',
       'en/aboutus/index.html',
       'en/contact/index.html',
+      'en/events/archive/index.html',
+      'en/events/index.html',
       'en/index.html',
       'en/pricing/index.html',
       'en/privacy/index.html',
       'en/schedule/index.html',
       'en/whatisbachata/index.html',
+      'events/archive/index.html',
+      'events/index.html',
       'index.html',
       'pricing/index.html',
       'privacy/index.html',
@@ -164,5 +175,15 @@ describe('the built site ships no JavaScript files and no CMS client', () => {
       // MUSE-65's `/whatisbachata`, with the `prosePage` document that makes it buildable.
       'whatisbachata/index.html',
     ]);
+  });
+
+  it('emits no event detail page, because the dataset holds no event (MUSE-24)', () => {
+    // The other half of the list above, stated as the thing it means rather than left
+    // implicit in an enumeration. `/events/<slug>/` is one page per `event` document; the
+    // seed has none, and inventing one to make the page look furnished is MUSE-36.
+    const details = build
+      .htmlFiles()
+      .filter((file) => /(?:^|^en\/)events\/(?!archive\/)[^/]+\/index\.html$/.test(file));
+    expect(details, 'the committed seed has grown an event').toEqual([]);
   });
 });

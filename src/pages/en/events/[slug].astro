@@ -1,0 +1,41 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import EventPage from '../../../components/EventPage.astro';
+import { assertEventSlugs, eventMetaDescription, eventMetaTitle } from '../../../lib/events';
+import {
+  getAllEvents,
+  getSiteSettings,
+  readStaticPaths,
+  type StudioEvent,
+} from '../../../lib/sanity';
+
+/**
+ * The English twin. It has to generate **the same slug set** as the Croatian template —
+ * HR and EN share slugs (CLAUDE.md), so `BaseLayout`'s hreflang pair for `/events/<slug>/`
+ * names a URL this file is the only thing that builds. Both read `getAllEvents`, so the two
+ * sets are the same query rather than two lists that have to agree.
+ */
+export async function getStaticPaths() {
+  // `readStaticPaths` is there for the error, not for the read: Astro prints a
+  // `getStaticPaths` rejection without the error's class name, and `getStaticPaths` is the
+  // first read of the build — so a Sanity outage would otherwise stop saying which of
+  // `decode.ts`'s three outcomes it was. See the note on it in `src/lib/sanity/index.ts`.
+  return readStaticPaths(async () => {
+    const events = await getAllEvents();
+    assertEventSlugs(events);
+    return events.map((event) => ({ params: { slug: event.slug }, props: { event } }));
+  });
+}
+
+const { event } = Astro.props as { event: StudioEvent };
+const now = new Date();
+const settings = await getSiteSettings();
+---
+
+<BaseLayout
+  locale="en"
+  title={eventMetaTitle(event.title.en, settings.studioName)}
+  description={eventMetaDescription(event.description.en)}
+>
+  <EventPage locale="en" event={event} now={now} />
+</BaseLayout>

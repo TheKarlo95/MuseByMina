@@ -65,6 +65,19 @@ export const ROUTES: SiteRoute[] = [
   // the explanation before the schedule rather than after it.
   { route: '/whatisbachata', studioLabel: 'Što je bachata' },
   { route: '/schedule', studioLabel: 'Raspored' },
+  // What is on, in two shapes: the weekly timetable, then the one-off dates (MUSE-24).
+  // `/events/archive` sits immediately behind its own index rather than at the end of the
+  // list, because this order is the order `llms.txt` publishes and the order the Studio's
+  // dropdown offers — and a reader (or a crawler) meeting „past events" next to „events"
+  // is meeting them in the relationship they actually have.
+  //
+  // **`/events/archive` being a route here is what reserves the slug `archive`.**
+  // `reservedEventSlugs()` in `src/lib/events.ts` reads this list, so a second static
+  // child of `/events` reserves itself without anybody remembering to. Astro gives a
+  // static segment priority over a dynamic one, so an `event` document slugged `archive`
+  // would otherwise build a page nothing can reach.
+  { route: '/events', studioLabel: 'Događaji' },
+  { route: '/events/archive', studioLabel: 'Arhiva događaja' },
   // Inserted rather than appended (MUSE-59, MUSE-60): the order here is the order
   // `llms.txt` lists the site in and the order the Studio's dropdown offers, and it is the
   // order a reader meets the pages — what the dance is, what is on, what it costs, who

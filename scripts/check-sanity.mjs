@@ -39,11 +39,21 @@ const GENERATED_TYPES = 'src/lib/sanity/sanity.types.ts';
 /**
  * Everything the generated artefacts are derived from.
  *
- * `src/lib/schedule.ts` and `src/lib/pages.ts` are in here because the schema imports
- * its option lists from them — levels, weekdays, the route list. That is the
- * content-versus-structure decision made mechanical: the fourth level MUSE-36 added in
- * `schedule.ts` changed the Studio's dropdown and the generated string union, and this is
- * what made it invalidate the artefacts too.
+ * `src/lib/schedule.ts`, `src/lib/pages.ts` and `src/lib/events.ts` are in here because
+ * the schema imports its option lists from them — levels, weekdays, the route list, the
+ * event kinds. That is the content-versus-structure decision made mechanical: the fourth
+ * level MUSE-36 added in `schedule.ts` changed the Studio's dropdown and the generated
+ * string union, and this is what made it invalidate the artefacts too.
+ *
+ * **The list is per file and not `src/lib/**`, so importing a *new* module into the schema
+ * means editing two lists**, and `src/lib/events.ts` is the worked example (MUSE-24).
+ * The fingerprint below and `studio.yml`'s `paths:` filter, and nothing else — and the second
+ * of those is asserted against `SOURCE_GLOBS` by `test/sanity.test.ts` rather than left to
+ * a comment. A coarse `src/lib/**` was considered and refused for the reason the whole of
+ * `sanity/` is coarse in the other direction: `src/lib/` is mostly *not* schema source, so
+ * a glob there would make `theme.ts` a schema change and republish Mina's Studio — spending
+ * `SANITY_DEPLOY_TOKEN` — for a CSS edit. Coarse where everything is schema, exact where
+ * almost nothing is.
  *
  * The first entry is the whole `sanity/` tree, deliberately coarse. It used to be
  * `sanity/schemaTypes` walked with an `.endsWith('.ts')` filter, and both halves of that
@@ -97,6 +107,7 @@ const SOURCES = [
   { file: 'sanity.cli.ts' },
   { file: 'src/lib/schedule.ts' },
   { file: 'src/lib/pages.ts' },
+  { file: 'src/lib/events.ts' },
   { file: 'src/lib/sanity/queries.ts' },
 ];
 

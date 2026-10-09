@@ -1,0 +1,227 @@
+---
+import { formatInstantDate, formatInstantTime } from '../lib/dates';
+import { instantChip } from '../lib/dates';
+import { EVENT_COPY, eventTypeName, eventUrl } from '../lib/events';
+import type { Locale } from '../lib/i18n';
+import { imageFocus, imageSize, imageSrc, type StudioEvent } from '../lib/sanity';
+
+/**
+ * One event, as a card — the unit `/events/` and `/events/archive/` are both lists of
+ * (MUSE-24).
+ *
+ * One component rather than one per page, for `TrialForm.astro`'s reason: the two lists are
+ * the same object rendered twice, and a second copy of the markup is where the archive
+ * quietly stops showing a venue. The pages differ in what they *say* around the list, which
+ * is `EVENT_COPY`, and in nothing about a card.
+ *
+ * **The date chip is the one thing here that does not follow the page theme.** Design
+ * system §7.3: it sits on the photograph rather than on the page, so it keeps its plum-ink
+ * ground in both themes — which is exactly what the `--band-*` role set exists for
+ * (`src/styles/tokens.css`), the same set the masthead and the footer use. Reaching for
+ * `--surface-deep` instead would be right in dark and a cream chip on a photograph in
+ * light; reaching for `--plum-ink` would be a brand colour in a component and `npm run ds`
+ * refuses it.
+ *
+ * The heading level is a prop because the two pages nest differently — the index puts its
+ * cards under „Što je sljedeće", the archive has nothing between them and the `<h1>` — and
+ * a card that hardcoded `<h3>` would skip a level on one of them, which is an axe failure
+ * rather than a matter of taste.
+ */
+interface Props {
+  locale: Locale;
+  event: StudioEvent;
+  /** The element the title is set as. `h2` directly under an `<h1>`, `h3` under an `<h2>`. */
+  heading: 'h2' | 'h3';
+}
+
+const { locale, event, heading } = Astro.props;
+const t = EVENT_COPY[locale];
+
+/**
+ * 640px of image, and no `srcset` — `src/lib/sanity/images.ts` has the long argument.
+ *
+ * The card is at most ~420px wide in this grid, so 640 covers 1× with room and
+ * under-serves a 2× screen; fixing that properly means measuring real breakpoints against
+ * real photographs, and there are no photographs in this dataset yet. `imageSize` answers
+ * the intrinsic box the CDN will actually serve — clamped to the asset, so the `width` and
+ * `height` attributes cannot promise pixels the file does not have — which is what reserves
+ * the space before the image arrives and keeps the card from reflowing.
+ */
+const CARD_IMAGE_WIDTH = 640;
+const box = imageSize(event.image, { width: CARD_IMAGE_WIDTH });
+const focus = imageFocus(event.image);
+const chip = instantChip(event.startsAt, locale);
+const Title = heading;
+---
+
+<article class="card">
+  <div class="shot">
+    <img
+      src={imageSrc(event.image, { width: CARD_IMAGE_WIDTH })}
+      alt={event.image.alt[locale]}
+      width={box.width}
+      height={box.height}
+      loading="lazy"
+      decoding="async"
+      style={`object-position: ${focus.x}% ${focus.y}%`}
+    />
+    {/*
+      The chip is decorative in the accessibility tree: the same date is in the `<time>`
+      below it, spelled out and machine-readable, so reading „13 kol" first would announce
+      the date twice in two different shapes.
+    */}
+    <p class="chip" aria-hidden="true">
+      <span class="chipDay">{chip.day}</span>
+      <span class="chipMonth">{chip.month}</span>
+    </p>
+  </div>
+
+  <div class="body">
+    <p class="kind">{eventTypeName(event.eventType, locale)}</p>
+    <Title class="name">
+      <a href={eventUrl(event.slug, locale)}>{event.title[locale]}</a>
+    </Title>
+    <p class="when">
+      <time datetime={event.startsAt}>
+        {formatInstantDate(event.startsAt, locale)} · {formatInstantTime(event.startsAt, locale)}
+      </time>
+    </p>
+    <p class="venue">{event.venue}</p>
+    <p class="more" aria-hidden="true">{t.more}</p>
+  </div>
+</article>
+
+<style>
+  .card {
+    display: flex;
+    flex-direction: column;
+    /* No min-width: the grid track already bounds this, and a pixel floor is what clips a
+       long Croatian title at 390px. */
+    min-width: 0;
+    background: var(--surface-raised);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    /* §5: depth is surface value plus a hairline. No shadow, in either theme. */
+    overflow: hidden;
+    transition: border-color var(--dur-fast) var(--ease);
+  }
+  .card:hover {
+    border-color: var(--line-accent);
+  }
+
+  /* --- the photograph, and the chip that sits on it (§7.3, §9 rule 2) --- */
+  .shot {
+    position: relative;
+    /* The ratio is CSS's, not the CDN's — see the image module in the read path. 16:9 is
+       the Studio's field description tells Mina her upload will be cropped to. */
+    aspect-ratio: 16 / 9;
+    background: var(--surface-sunken);
+  }
+  .shot img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  /*
+    Plum-ink in both themes, because it is on the photograph rather than on the page.
+    `--band-*` is the role set for exactly that (§7.1 names it for the chrome band), so
+    this is still a role token and not a reach for a brand colour.
+  */
+  .chip {
+    position: absolute;
+    inset-block-start: var(--space-3);
+    inset-inline-start: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 3.25rem;
+    padding: var(--space-2) var(--space-3);
+    background: var(--band-surface);
+    border-radius: var(--radius-sm);
+    color: var(--band-text);
+    text-align: center;
+  }
+  /*
+    Cormorant, so never below 26px — 1.75rem is 28px (§4). No `font-variant-numeric`
+    here: lining and tabular figures are inherited from the document
+    (`src/styles/base.css`, MUSE-14), and redeclaring the property replaces that value
+    rather than adding to it, which puts `13` back as an old-style figure that drops
+    below the baseline.
+  */
+  .chipDay {
+    font-family: var(--font-display);
+    font-size: 1.75rem;
+    line-height: 1;
+  }
+  .chipMonth {
+    margin-block-start: 2px;
+    font-family: var(--font-label);
+    font-size: 0.625rem;
+    letter-spacing: 0.2em;
+    /* Č Ć Ž Š carry marks above the cap line — 1.4 is the floor in Croatian (§4.6). */
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--band-accent);
+  }
+
+  /* --- the words --- */
+  .body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-5);
+  }
+
+  .kind {
+    font-family: var(--font-label);
+    font-weight: 300;
+    font-size: 0.6875rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  /* display-s, clamped at Cormorant's 26px floor (§4). */
+  .name {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(1.625rem, 2.6vw, 2rem);
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .name a {
+    text-decoration: none;
+  }
+  .name a:hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  .when,
+  .venue {
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+  }
+
+  /*
+    Not a second link. The title is the link, and a card with two anchors to one URL is two
+    tab stops and two identical announcements; this is the affordance, drawn, and hidden
+    from the accessibility tree. `margin-block-start: auto` pins it to the bottom so cards
+    of unequal title length still line their footers up.
+  */
+  .more {
+    margin-block-start: auto;
+    padding-block-start: var(--space-3);
+    font-family: var(--font-label);
+    font-size: 0.75rem;
+    letter-spacing: 0.2em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+</style>

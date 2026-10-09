@@ -1162,6 +1162,11 @@ describe('the generated types cannot go stale unnoticed', () => {
     expect(SCHEMA_ASSERTIONS.scheduleEntryIsClassEntry).toBe(true);
     expect(Object.keys(SCHEMA_ASSERTIONS.fields).sort()).toEqual([
       'class',
+      // `event` joined in MUSE-24, with `/events`. The type had no compile-time assertions
+      // at all while nothing rendered it, which was right then and is not now: three pages
+      // read eight of its fields, and `Same<>` lines hold the three queries' row types to
+      // each other so one projection cannot drift from the other two.
+      'event',
       'faq',
       'instructor',
       'page',
@@ -1229,13 +1234,41 @@ describe('the generated types cannot go stale unnoticed', () => {
   });
 
   it('has a current stamp in the working tree', () => {
-    // The same check the build runs, so `npm test` says so too.
+    /**
+     * **This used to check the stamp's *shape* and say it was „the same check the build
+     * runs". It was not** (found in MUSE-24, twice, by editing a schema source after
+     * regenerating). Every file named still existed and every hash was still a string, so
+     * the test was green against a stamp that described the tree as it had been ten
+     * minutes earlier — and `npm run build` was red. Nothing shipped stale, because CI's
+     * `typecheck & build` job runs the real gate; what was lost is that `npm test` could
+     * not tell you, which is the one of the two a developer runs in a loop.
+     *
+     * So the comparison is the gate's own: `fingerprint()` against the committed
+     * `sources`, which is literally what `problems()` does. It is reimplemented here
+     * rather than imported because the gate folds three separate failures into one list of
+     * sentences, and the message this test wants is the *files* that drifted.
+     */
     const stamp = JSON.parse(readFileSync(join(ROOT, 'sanity/schema.stamp.json'), 'utf8'));
     expect(Object.keys(stamp.sources).length).toBeGreaterThan(5);
     for (const [file, hash] of Object.entries(stamp.sources)) {
       expect(statSync(join(ROOT, file)).isFile(), file).toBe(true);
       expect(typeof hash, file).toBe('string');
     }
+
+    const current = fingerprint() as Record<string, string>;
+    const drifted = [
+      ...Object.keys(current).filter((file) => stamp.sources[file] !== current[file]),
+      ...Object.keys(stamp.sources)
+        .filter((file) => !(file in current))
+        .map((file) => `${file} (deleted)`),
+    ].sort();
+
+    expect(
+      drifted,
+      'a schema source has changed since the artefacts were generated, so ' +
+        '`sanity/schema.json` and `src/lib/sanity/sanity.types.ts` describe a schema that ' +
+        'no longer exists — run `npm run sanity:types` and commit all three.',
+    ).toEqual([]);
   });
 
   it('fingerprints every file under `sanity/`, whatever it is called', () => {
