@@ -17,15 +17,21 @@
  *
  *   SANITY_PROJECT_ID=q6fk9usq SANITY_DATASET=production node scripts/sanity-read-check.mjs
  *
+ * **The address comes from `scripts/seed-compare.mjs`, which reads the uncached host.**
+ * This script used to write its own URL and reached for the cached one, which is eventually
+ * consistent — so run just after `npm run sanity:seed` it could report EMPTY for documents
+ * that were in the dataset, and EMPTY-versus-OK is the single distinction it exists to
+ * draw. MUSE-81 is the ticket; `src/lib/sanity/client.ts` has the argument.
+ *
  * Reads only. The dataset is publicly readable and no token is used or needed; an
  * unauthenticated write is rejected by the API for want of the `create` permission, so
  * this script cannot change anything even by accident.
  */
 import { readFileSync } from 'node:fs';
 
-const PROJECT_ID = process.env.SANITY_PROJECT_ID ?? 'q6fk9usq';
-const DATASET = process.env.SANITY_DATASET ?? 'production';
-const API_VERSION = process.env.SANITY_API_VERSION ?? '2024-10-01';
+import { queryUrl, target } from './seed-compare.mjs';
+
+const { projectId: PROJECT_ID, dataset: DATASET, apiVersion: API_VERSION } = target();
 
 /**
  * Query names and their text, read off the source rather than imported.
@@ -39,14 +45,6 @@ function loadQueries() {
   const source = readFileSync(new URL('../src/lib/sanity/queries.ts', import.meta.url), 'utf8');
   const pattern = /export const (\w+) = defineQuery\(`([\s\S]*?)`\);/g;
   return [...source.matchAll(pattern)].map(([, name, query]) => ({ name, query }));
-}
-
-function url(query, params) {
-  const search = new URLSearchParams({ query });
-  for (const [key, value] of Object.entries(params)) {
-    search.set(`$${key}`, JSON.stringify(value));
-  }
-  return `https://${PROJECT_ID}.apicdn.sanity.io/v${API_VERSION}/data/query/${DATASET}?${search}`;
 }
 
 /** Every parameter any query takes, so one call site can run all of them. */
@@ -85,7 +83,7 @@ let empty = 0;
 for (const { name, query } of queries) {
   let response;
   try {
-    response = await fetch(url(query, PARAMS));
+    response = await fetch(queryUrl(query, PARAMS));
   } catch (cause) {
     broken += 1;
     console.log(`BROKEN  ${name} — could not reach the API: ${cause.message}`);

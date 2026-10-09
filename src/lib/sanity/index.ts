@@ -141,6 +141,16 @@ export function source(): SanitySource {
   return sanitySource();
 }
 
+/**
+ * Which host the content was fetched from, and what the log says about it (MUSE-81).
+ *
+ * Re-exported here for the reason everything else is: `test/sanity.test.ts` fails on an
+ * import specifier reaching inside `src/lib/sanity/`, so the index is where a test asks
+ * the read path about itself.
+ */
+export { contentEndpoint, endpointNote } from './client';
+export type { ContentEndpoint } from './client';
+
 export interface ListOptions {
   /** Fewest documents this page can render. Below it, the build fails naming the type. */
   minimum?: number;
