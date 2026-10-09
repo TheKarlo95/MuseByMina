@@ -193,7 +193,12 @@ export const DECLARED: ReadonlyMap<string, { ops: number; why: string }> = new M
   ['test/assets.test.ts', { ops: 2, why: 'both deploy targets' }],
   [
     'test/share.test.ts',
-    { ops: 2, why: 'both deploy targets — a share card is a base-path join (MUSE-69)' },
+    {
+      ops: 2,
+      why:
+        'one deploy target twice: the seeded card and an uploaded one (MUSE-69) — the ' +
+        'second target is seo.test.ts’s and assets.test.ts’s (MUSE-77)',
+    },
   ],
   ['test/browserlocale.test.ts', { ops: 2, why: 'a served preview and a browser' }],
   ['test/cascade.test.ts', { ops: 2, why: 'both deploy targets' }],

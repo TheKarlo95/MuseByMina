@@ -104,15 +104,42 @@ function astroSources(): string[] {
 }
 
 /**
- * The half of an `.astro` file Astro ships: everything below the frontmatter fence.
+ * A slice of a file, and the line of the **original** file its first line came from.
+ *
+ * The offset is the whole point, and MUSE-77 is what happens without one: a rebuilt lockup
+ * planted at `src/components/Header.astro:73` was reported at `:12` — inside the
+ * frontmatter, which this scan removes before it counts anything. The file and the literal
+ * were right, so attribution worked and the `file:line` was not pasteable, which is worse
+ * than no line number at all: it sends the reader somewhere real and unrelated.
+ *
+ * `scripts/check-format.mjs`'s `parsedRegions` carries the same `{ line }` for the same
+ * reason. This is that shape.
+ */
+interface Region {
+  /** 1-based line of the original file that `markup`'s first line came from. */
+  line: number;
+  markup: string;
+}
+
+/**
+ * The half of an `.astro` file Astro ships: everything below the frontmatter fence, and
+ * the line it starts on.
  *
  * Same split as `test/sanity.test.ts`, and for a related reason — a brand string in a
  * frontmatter comment is prose, and this rule is about what the page says.
+ *
+ * The slice begins immediately after the closing fence's dashes, so its first line is the
+ * *remainder* of the fence line itself. That number is counted off the discarded half
+ * rather than assumed, because both ways of guessing it — that the fence is on line 3, or
+ * that the slice starts on the line after it — are off-by-ones nothing downstream could
+ * notice.
  */
-function markupHalf(source: string): string {
-  if (!source.startsWith('---')) return source;
+function markupRegion(source: string): Region {
+  if (!source.startsWith('---')) return { line: 1, markup: source };
   const close = source.indexOf('\n---', 3);
-  return close === -1 ? source : source.slice(close + '\n---'.length);
+  if (close === -1) return { line: 1, markup: source };
+  const discarded = source.slice(0, close + '\n---'.length);
+  return { line: discarded.split('\n').length, markup: source.slice(discarded.length) };
 }
 
 /**
@@ -123,28 +150,42 @@ function markupHalf(source: string): string {
  * that could not tell the two apart would make the honest version of this file fail
  * while a silent one passed. Same lesson as `test/helpers/source-guard.ts`: state the
  * rule against code, never against words.
+ *
+ * **Blanked, not deleted** (MUSE-77). Every character of a comment becomes a space and
+ * every newline survives, so a violation stays on the line it is written on. Deleting the
+ * text moved everything below a comment block up by as many lines as the block was long —
+ * 19 of the 61 lines the masthead was misreported by. Blanking is the safer of the two for
+ * the scan as well: deletion closes the gap and could splice two fragments into an element
+ * nobody wrote, while a run of spaces cannot match anything.
  */
-function withoutComments(markup: string): string {
-  return markup
-    .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
-    .replace(/<!--[\s\S]*?-->/g, '');
+function withoutComments(region: Region): Region {
+  const blank = (text: string): string => text.replace(/[^\n]/g, ' ');
+  return {
+    line: region.line,
+    markup: region.markup
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, blank)
+      .replace(/<!--[\s\S]*?-->/g, blank),
+  };
 }
 
 /**
- * Elements in `markup` whose entire text content is one of the lockup's parts, as
- * `{ line, text }`.
+ * Elements in `region` whose entire text content is one of the lockup's parts, as
+ * `{ line, text }` — the line being the one in the **original file**, not in the slice.
  *
  * Deliberately not a parser. The shape being looked for is a tag pair with nothing
  * between it but one of four literals, which a regular expression states exactly and a
  * DOM would only state at the cost of a dependency that cannot see `.astro` anyway.
  */
-function lockupTextParts(markup: string): { line: number; text: string }[] {
+function lockupTextParts(region: Region): { line: number; text: string }[] {
   const found: { line: number; text: string }[] = [];
   const element = /<(\w+)(?:\s[^>]*)?>([^<>{}]*)<\/\1>/g;
-  for (const match of markup.matchAll(element)) {
+  for (const match of region.markup.matchAll(element)) {
     const text = match[2].trim();
     if (!LOCKUP_PARTS.includes(text)) continue;
-    found.push({ line: markup.slice(0, match.index).split('\n').length, text });
+    // The region's first line *is* `region.line`, so what is added is the number of
+    // newlines before the match rather than the line count including it.
+    const newlinesBefore = region.markup.slice(0, match.index).split('\n').length - 1;
+    found.push({ line: region.line + newlinesBefore, text });
   }
   return found;
 }
@@ -156,10 +197,55 @@ describe('no component rebuilds the lockup from separate parts (§12)', () => {
     const root = new URL('..', import.meta.url).pathname;
     for (const file of astroSources()) {
       const parts = lockupTextParts(
-        withoutComments(markupHalf(readFileSync(join(root, file), 'utf8'))),
+        withoutComments(markupRegion(readFileSync(join(root, file), 'utf8'))),
       );
       if (parts.length > 0) offenders.set(file, parts);
     }
+  });
+
+  /* -------------------------------------- the line number is the deliverable (MUSE-77) */
+
+  it('names the line its slice starts on, fence included', () => {
+    // Stated against numbered lines rather than against a real file, because the subject
+    // is one number and the two off-by-ones available here differ by one line.
+    const fenced = ['---', "const t = 'Muse';", '---', '<header>', '</header>'].join('\n');
+    // The slice keeps the newline that ends the fence line, so its first line is line 3.
+    expect(markupRegion(fenced)).toEqual({ line: 3, markup: '\n<header>\n</header>' });
+    // A file with no frontmatter is its own markup, from line 1.
+    expect(markupRegion('<header>\n</header>')).toEqual({
+      line: 1,
+      markup: '<header>\n</header>',
+    });
+  });
+
+  it('reports the line a planted violation is really on, not the line in its slice', () => {
+    // MUSE-77 exactly: a rebuilt lockup planted at `src/components/Header.astro:73` was
+    // reported at `:12`, 61 lines off and inside the frontmatter. Planted in memory rather
+    // than on disk — the arithmetic is the subject — but planted into the *real* file,
+    // because the real file is what supplied both offsets: a 44-line frontmatter and a
+    // markup comment block above the planting site. A synthetic fixture would prove the
+    // sum and not that the two terms of it are the ones a component really has.
+    const root = new URL('..', import.meta.url).pathname;
+    const lines = readFileSync(join(root, 'src/components/Header.astro'), 'utf8').split('\n');
+
+    const fence = lines.indexOf('---', 1) + 1;
+    const comment = lines.findIndex((line) => line.trimEnd().endsWith('*/}')) + 1;
+    // Both terms asserted present, so the test cannot quietly stop exercising either one.
+    expect(fence, 'Header.astro has no closing frontmatter fence').toBeGreaterThan(1);
+    expect(comment, 'Header.astro has no markup comment to be offset by').toBeGreaterThan(
+      fence,
+    );
+
+    const planted = comment + 1;
+    lines.splice(planted - 1, 0, '      <span>Muse</span><span>by Mina</span>');
+    const parts = lockupTextParts(withoutComments(markupRegion(lines.join('\n'))));
+
+    expect(parts).toEqual([
+      { line: planted, text: 'Muse' },
+      { line: planted, text: 'by Mina' },
+    ]);
+    // And the line really does say what the message would send the reader to read.
+    expect(lines[planted - 1]).toContain('<span>Muse</span>');
   });
 
   it('is looking at the components it thinks it is', () => {
@@ -334,6 +420,21 @@ describe('the built site presents the white lockup', () => {
       .filter((tag) => /muse-lockup-white[^"']*\.webp/.test(tag));
   }
 
+  /**
+   * The one lockup `<img>` in `html`, **asserted present before it is read** (MUSE-77).
+   *
+   * `lockupImages(…)[0]!` is a non-null assertion on an array that is empty in exactly
+   * the case this describe exists to catch, and `expect(undefined).toContain(…)` throws
+   * rather than failing. Nothing escapes either way — the suite still goes red — but a
+   * `TypeError` reads as a broken test rather than as a caught defect, which is the
+   * difference between somebody fixing the site and somebody "fixing" the test.
+   */
+  function lockupImage(html: string, where: string): string {
+    const images = lockupImages(html);
+    expect(images, `${where} carries no lockup`).toHaveLength(1);
+    return images[0]!;
+  }
+
   it('emits exactly one lockup file for the whole site', () => {
     const emitted = build.allFiles().filter((f) => /muse-lockup-white.*\.webp$/.test(f));
     // One file, so the header and the footer could never disagree about the artwork and
@@ -377,7 +478,7 @@ describe('the built site presents the white lockup', () => {
   it('gives the footer lockup a name of its own, since nothing else there says it', () => {
     const html = build.read('index.html');
     const footer = html.slice(html.indexOf('<footer'), html.lastIndexOf('</footer>'));
-    const img = lockupImages(footer)[0];
+    const img = lockupImage(footer, 'the homepage footer');
     const alt = /alt="([^"]*)"/.exec(img)?.[1] ?? '';
     // Not a link, so there is no ancestor to inherit a name from and no risk of a
     // double announcement — the opposite call from the masthead, for the opposite reason.
@@ -397,7 +498,7 @@ describe('the built site presents the white lockup', () => {
   });
 
   it('reserves the box it will paint in, so the footer does not reflow', () => {
-    const img = lockupImages(build.read('index.html'))[0];
+    const img = lockupImage(build.read('index.html'), 'the homepage');
     expect(img).toContain(`width="${LOCKUP_EMITTED_WIDTH}"`);
     expect(img).toContain(`height="${lockupHeight(LOCKUP_EMITTED_WIDTH)}"`);
   });
@@ -406,9 +507,7 @@ describe('the built site presents the white lockup', () => {
     // The 1254px original and the two 85 KB pseudo-SVGs live in `logo/`, which is a
     // source directory and not a served one. Anything that reached `dist` got there by
     // being pointed at directly, which is the `public/` mistake MUSE-35 is named after.
-    const strays = build
-      .allFiles()
-      .filter((f) => /lockup/i.test(f) && !/\.webp$/.test(f));
+    const strays = build.allFiles().filter((f) => /lockup/i.test(f) && !/\.webp$/.test(f));
     expect(strays).toEqual([]);
   });
 });
@@ -558,6 +657,25 @@ describe('the built masthead presents the mark', () => {
       .filter((tag) => /muse-mark-white[^"']*\.webp/.test(tag));
   }
 
+  /**
+   * The mark's `<img>` in one built page's masthead, **asserted present before it is
+   * read** (MUSE-77).
+   *
+   * With the mark taken out of `Header.astro`, `the built masthead presents the mark`
+   * failed correctly and two of its siblings threw instead — `TypeError: .toMatch()
+   * expects to receive a string, but got undefined`, and chai's "the given combination of
+   * arguments (undefined and string) is invalid for this assertion". Both were
+   * `markImages(…)[0]!`: a non-null assertion on an array that is empty in precisely the
+   * case this describe exists to catch. Nothing escaped — the suite still went red — but a
+   * `TypeError` reads as a broken test rather than as a caught defect, and that is the
+   * difference between somebody fixing the site and somebody "fixing" the test.
+   */
+  function markImage(page: string): string {
+    const images = markImages(logoLink(page));
+    expect(images, `${page} masthead carries no mark`).toHaveLength(1);
+    return images[0]!;
+  }
+
   it('puts it in the masthead of every page', () => {
     for (const page of build.htmlFiles()) {
       expect(markImages(logoLink(page)), `${page} masthead carries no mark`).toHaveLength(1);
@@ -567,12 +685,12 @@ describe('the built masthead presents the mark', () => {
   it('emits one mark file for the whole site, and serves it', () => {
     const emitted = build.allFiles().filter((f) => /muse-mark-white.*\.webp$/.test(f));
     expect(emitted).toHaveLength(1);
-    const src = /src="([^"]+)"/.exec(markImages(logoLink('index.html'))[0]!)?.[1] ?? '';
+    const src = /src="([^"]+)"/.exec(markImage('index.html'))?.[1] ?? '';
     expect(assetFile(build, src), `${src} does not resolve to a file in dist`).not.toBeNull();
   });
 
   it('reserves the box it will paint in, so the band does not reflow', () => {
-    const img = markImages(logoLink('index.html'))[0]!;
+    const img = markImage('index.html');
     expect(img).toContain(`width="${MASTHEAD_MARK_EMITTED.width}"`);
     expect(img).toContain(`height="${MASTHEAD_MARK_EMITTED.height}"`);
   });
@@ -586,7 +704,7 @@ describe('the built masthead presents the mark', () => {
     // Astro emits an empty `alt` as a bare attribute, which is the same thing to a
     // screen reader and is not the same string, so the claim is stated as "has an alt
     // and it says nothing" rather than as a spelling.
-    const img = markImages(link)[0]!;
+    const img = markImage('index.html');
     expect(img).toMatch(/\balt(=""|(?=[\s>]))/);
     expect(img).not.toMatch(/\balt="[^"]+"/);
   });

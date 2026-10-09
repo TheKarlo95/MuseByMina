@@ -124,6 +124,87 @@ const VITEST_LEAKS = [
 ];
 
 /**
+ * `09:36:55 [ERROR] [vite] ✗ Build failed` → the part after the marker.
+ *
+ * Astro prefixes every error it reports with `[ERROR]`, behind an optional timestamp. That
+ * marker is the whole of the rule below: a scan for the *words* in a build log is what
+ * `test/helpers/source-guard.ts` exists to argue against, and three shapes were measured
+ * before this was written (see `buildErrorHeadline`).
+ *
+ * Anchored at the start of the line, which is only true of a line with its colour taken
+ * off — see the note on `FORCE_COLOR` in `buildErrorHeadline`.
+ */
+const ASTRO_ERROR_LINE = /^(?:\d{2}:\d{2}:\d{2}\s+)?\[ERROR\]\s*(.*)$/;
+
+/**
+ * A line that continues the previous one with *context* rather than with the cause: a
+ * stack frame, a code frame, or one of Astro's labelled blocks.
+ *
+ * Structural rather than a list of banners to keep current, which is the direction that
+ * matters: the question being asked is "does the next line say something new", and the
+ * three kinds of line that never do are recognisable by their own shape.
+ */
+const ASTRO_ERROR_CONTEXT = /^\s*(?:at\s|[╭╰│├┬─└┌]|Hint:|Location:|Stack trace:)/;
+
+/**
+ * The reason a build failed, in one line, or `''` if the output does not name one.
+ *
+ * **The headline of a `beforeAll` build failure used to be only `astro build failed
+ * (outDir …)`** (MUSE-77), with the cause buried in the folded-in log — so deleting
+ * `src/assets/icon/muse-icon-white-32.png` reported itself as an unexplained build
+ * failure plus 31 tests never executed, and `[UNRESOLVED_IMPORT] Could not resolve …`,
+ * which names the file *and* the import site, was somewhere further down the scroll. A
+ * build failure inside a `beforeAll` is the common shape across this suite now, so it is
+ * fixed once, here, rather than per file.
+ *
+ * Three real failures were captured on this tree to write the rule against, because a
+ * wrong headline is worse than a generic one — the whole lesson of the ticket:
+ *
+ *   1. `[ERROR] [vite] ✗ Build failed in 212ms` / `[UNRESOLVED_IMPORT] Could not resolve
+ *      '…' in src/lib/icon.ts` — a deleted asset. The banner, then the cause.
+ *   2. `[ERROR] [muse-staging-guard] An unhandled error occurred …` / `outDir must live
+ *      under the project root (MUSE-41).` — same shape, our own integration.
+ *   3. `[ERROR] SanityContentError: There is no \`siteSettings\` document …` / `    at
+ *      requireDocument (…)` — the cause is *on* the marker line and what follows is a
+ *      stack frame.
+ *
+ * So: the marker line, plus the line after it when that line says something new. Nothing
+ * is ever dropped — the full log still follows on the error — and when no `[ERROR]` line
+ * is found this answers `''` and the headline stays exactly as it was.
+ *
+ * **Every line is stripped of colour first, and that is MUSE-47's lesson rather than a
+ * tidy-up.** Astro 7 switches to JSON log lines when it detects an agentic environment and
+ * writes the human banner otherwise, so the same failure arrives in two formats —
+ * deterministically, by where it ran. The first draft of this matched `[ERROR]` at the
+ * start of a line, passed every local run, and answered `''` on a CI runner, where the
+ * line really reads:
+ *
+ *     \x1b[31m\x1b[1m10:03:30\x1b[22m [ERROR] [muse-staging-guard]\x1b[39m An unhandled…
+ *
+ * Reproduce that locally by unsetting `CLAUDECODE`, `AI_AGENT` and `CLAUDE_CODE_*` **and**
+ * setting `FORCE_COLOR=1`: `kleur` turns colour off when stdout is not a TTY, which it
+ * never is under a test runner, so unsetting the markers alone gives a plain banner and
+ * reads as a clean reproduction.
+ */
+export function buildErrorHeadline(output: string): string {
+  const lines = output.split('\n').map((line) => line.replace(ANSI, ''));
+  const marker = lines.findIndex((line) => ASTRO_ERROR_LINE.test(line));
+  if (marker === -1) return '';
+
+  const said = (ASTRO_ERROR_LINE.exec(lines[marker]!)?.[1] ?? '').trim();
+  const after = lines[marker + 1];
+  const detail =
+    after !== undefined &&
+    after.trim() !== '' &&
+    !ASTRO_ERROR_CONTEXT.test(after) &&
+    !ASTRO_ERROR_LINE.test(after)
+      ? after.trim()
+      : '';
+
+  return detail === '' ? said : `${said} — ${detail}`;
+}
+
+/**
  * Build the real site into a directory nothing else can name, and return that directory.
  *
  * The single place in `test/` that runs `astro build`. Deliberately shells out rather
@@ -143,7 +224,9 @@ const VITEST_LEAKS = [
  *
  * On failure the child's output is folded into the thrown error, which is where a
  * `beforeAll` failure never shows it otherwise — the reason the three earlier sightings
- * of this bug were all diagnosed from scratch.
+ * of this bug were all diagnosed from scratch. **And the cause is lifted onto the first
+ * line** (MUSE-77), because that is the line a test runner prints beside the file name;
+ * see `buildErrorHeadline`.
  *
  * **A successful build's output is kept too** (MUSE-46), under `buildLog`. "The build
  * warns, naming the document" is an acceptance criterion in exactly the shape
@@ -173,9 +256,9 @@ export function astroBuild(env: NodeJS.ProcessEnv, hint?: string): string {
   ].join('\n');
 
   if (child.error || child.status !== 0) {
-    throw new Error([`astro build failed (outDir ${outDir})`, said].join('\n'), {
-      cause: child.error,
-    });
+    const why = buildErrorHeadline(said);
+    const headline = `astro build failed (outDir ${outDir})${why === '' ? '' : `: ${why}`}`;
+    throw new Error([headline, said].join('\n'), { cause: child.error });
   }
 
   BUILD_LOGS.set(outDir, said);
@@ -416,18 +499,14 @@ export async function astroDev(
   // 49152–65535 is the IANA ephemeral range; nothing well-known lives there.
   const port = 49152 + Math.floor(Math.random() * 16_000);
 
-  const child = spawn(
-    'npx',
-    ['astro', 'dev', '--ignore-lock', '--port', String(port)],
-    {
-      cwd: ROOT,
-      env: { ...childEnv, ...env, BUILD_CACHE_DIR: cacheDirFor(cacheDir) },
-      stdio: ['ignore', 'pipe', 'pipe'],
-      // Its own process group, so `stop()` can take the Astro server down with the
-      // `npx` shim that spawned it — see `signalGroup`.
-      detached: true,
-    },
-  );
+  const child = spawn('npx', ['astro', 'dev', '--ignore-lock', '--port', String(port)], {
+    cwd: ROOT,
+    env: { ...childEnv, ...env, BUILD_CACHE_DIR: cacheDirFor(cacheDir) },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    // Its own process group, so `stop()` can take the Astro server down with the
+    // `npx` shim that spawned it — see `signalGroup`.
+    detached: true,
+  });
   running.add(child);
 
   let log = '';
@@ -473,8 +552,12 @@ export async function astroDev(
     };
     child.stdout?.on('data', watch);
     child.stderr?.on('data', watch);
-    child.once('error', (cause) => settle(() => fail(`astro dev failed to spawn: ${cause.message}`)));
-    child.once('exit', (code) => settle(() => fail(`astro dev exited (code ${code}) before it was ready`)));
+    child.once('error', (cause) =>
+      settle(() => fail(`astro dev failed to spawn: ${cause.message}`)),
+    );
+    child.once('exit', (code) =>
+      settle(() => fail(`astro dev exited (code ${code}) before it was ready`)),
+    );
     watch();
   });
 
