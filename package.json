@@ -25,6 +25,7 @@
     "sanity:read": "node scripts/sanity-read-check.mjs",
     "sanity:seed": "sanity dataset import content/seed.ndjson --replace --dataset ${SANITY_DATASET:-production}",
     "sanity:seed:check": "node scripts/sanity-seed-check.mjs",
+    "sanity:seed:release": "node scripts/sanity-seed-release.mjs",
     "sanity:dev": "sanity dev",
     "sanity:build": "sanity build .sanity/studio --yes",
     "sanity:deploy": "sanity deploy .sanity/studio --yes"

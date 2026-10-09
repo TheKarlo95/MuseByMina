@@ -95,7 +95,15 @@ jobs:
     name: sanity schema & types
     runs-on: ubuntu-latest
     steps:
+      # `fetch-depth: 0` for the seed-release gate at the bottom of this job, which reads
+      # `content/seed.ndjson` **as it stood at the merge base** — the only evidence that
+      # tells "we changed this content" from "Mina changed it" (MUSE-78). The default
+      # single-commit checkout does not hold that revision, and `git show` failing there
+      # makes the gate report "could not be determined" and pass, which is the shape of
+      # silent-pass the ticket exists to remove. No other step here needs history.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -198,6 +206,49 @@ jobs:
         env:
           SANITY_PROJECT_ID: ${{ vars.SANITY_PROJECT_ID }}
           SANITY_DATASET: ${{ vars.SANITY_DATASET }}
+
+      # And the half the step above structurally cannot answer: **did *this branch*
+      # author the disagreement, and has it been imported yet?** (MUSE-78.)
+      #
+      # The build fetches the live dataset; the suite reads `content/seed.ndjson`. So a
+      # branch that *edits* a seeded document is green here, green in the suite, and
+      # correct in the diff — and changes nothing on the live site until somebody imports.
+      # MUSE-71 shipped exactly that way: the fix for a false commercial promise landed in
+      # five code surfaces and stayed absent from both `<meta name="description">` tags,
+      # with every check green.
+      #
+      # **This one blocks, and the step above still must not.** They are not the same
+      # claim. `DRIFTED` is one word for two opposite situations — the dataset ahead,
+      # which is Mina editing and is nobody's blocker, and the seed ahead, which is our
+      # own unshipped change and is. The seed is in git, so the direction is answerable
+      # from the diff against the merge base with no credential: a value that differs from
+      # the dataset *and* from the merge base is ours, and nothing about the dataset alone
+      # could have said so. A branch that does not touch the seed cannot fail this step
+      # however far the dataset has drifted, which is the MUSE-45 property intact.
+      #
+      # It fails open on an unreadable API, for `rebuildloop`'s reason — "we could not
+      # tell" must not block a pull request — and because it costs nothing here: `npm run
+      # build` fetches the dataset in the two jobs above and in `deploy.yml`, so an outage
+      # is already red everywhere that matters.
+      #
+      # Read-only. It reports an import; it cannot perform one. Auto-seeding on merge is
+      # option 3 on the ticket and was rejected: it needs a content-write token in CI, and
+      # MUSE-21 and MUSE-45 both went out of their way to make sure none exists.
+      - name: Has this branch’s content been imported?
+        run: npm run sanity:seed:release
+        env:
+          SANITY_PROJECT_ID: ${{ vars.SANITY_PROJECT_ID }}
+          SANITY_DATASET: ${{ vars.SANITY_DATASET }}
+          # The commit to compare the seed against: the pull request's base on a pull
+          # request, the previous tip of `main` on a push. GitHub leaves the unused one
+          # empty, and an all-zero sha (a force-push, a new branch) is read as "no base"
+          # rather than falling through to a merge base that would be HEAD itself.
+          SEED_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          # Which sequence the message should name. Before the merge there is one step and
+          # no stale window; after it there are two, and the second — a forced rebuild —
+          # is the forgettable one, because the import succeeds and looks like the end of
+          # the job. That is the 08:41/08:43 gap in MUSE-78's timeline.
+          SEED_MERGED: ${{ github.event_name == 'push' }}
 
   designsystem:
     name: design-system compliance

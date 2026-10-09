@@ -19,99 +19,73 @@
  * Reads only, over the public API, with no token. Compares only the fields the seed
  * actually sets, so a field Mina fills in that the seed leaves empty — `phone`, say — is
  * not reported as drift.
- */
-import { readFileSync } from 'node:fs';
-
-const PROJECT_ID = process.env.SANITY_PROJECT_ID ?? 'q6fk9usq';
-const DATASET = process.env.SANITY_DATASET ?? 'production';
-const API_VERSION = process.env.SANITY_API_VERSION ?? '2024-10-01';
-const SEED = new URL('../content/seed.ndjson', import.meta.url);
-
-const seeded = readFileSync(SEED, 'utf8')
-  .split('\n')
-  .filter((line) => line.trim() !== '')
-  .map((line) => JSON.parse(line));
-
-/** Drop `_key`, `_type` and friends: they are structure, not content. */
-function content(value) {
-  if (Array.isArray(value)) return value.map(content);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value)
-        .filter(([key]) => !key.startsWith('_'))
-        .map(([key, nested]) => [key, content(nested)]),
-    );
-  }
-  return value;
-}
-
-/** Every leaf of `value`, as `path` → scalar, so a difference can be named. */
-function leaves(value, path = '') {
-  if (Array.isArray(value)) {
-    return value.flatMap((entry, index) => leaves(entry, `${path}[${index}]`));
-  }
-  if (value && typeof value === 'object') {
-    return Object.entries(value).flatMap(([key, nested]) =>
-      leaves(nested, path ? `${path}.${key}` : key),
-    );
-  }
-  return [[path, value]];
-}
-
-/**
- * The uncached API host, not `apicdn` — the one place in this repo that wants it.
  *
- * The build reads through the CDN on purpose (it is cheaper, and a published build only
- * ever wants published content, so a few seconds of lag costs nothing). A drift check is
- * the opposite: asked a minute after an import or a Studio edit, the CDN answers with the
- * previous content and this script reports drift that does not exist — which is worse
- * than not having the check, because the next person stops trusting it.
+ * ## What this check cannot tell you, and where that lives now
+ *
+ * It reports one word, `DRIFTED`, for two opposite situations, and MUSE-78 is the ticket
+ * about the difference. **The dataset ahead** is Mina editing: not a release blocker, and
+ * the reason this step is `continue-on-error` in CI. **The seed ahead** is us changing
+ * content in a pull request, and that change does not reach a visitor until somebody
+ * imports it — which is a release blocker that was, until MUSE-78, completely silent.
+ *
+ * Telling them apart needs evidence this script does not have: the seed as it stood
+ * *before* the branch. So the direction, the ordering and the gate live in
+ * `scripts/sanity-seed-release.mjs`, and the comparison both scripts perform lives in
+ * `scripts/seed-compare.mjs` so that the blocking check and this one cannot disagree
+ * about what a difference is.
  */
-const ids = seeded.map((doc) => doc._id);
-const query = `*[_id in $ids]`;
-const url =
-  `https://${PROJECT_ID}.api.sanity.io/v${API_VERSION}/data/query/${DATASET}?` +
-  new URLSearchParams({ query, $ids: JSON.stringify(ids) });
+import {
+  differences,
+  fetchLive,
+  parseSeed,
+  readSeed,
+  SEED_PATH,
+  showLeaf,
+  target,
+} from './seed-compare.mjs';
 
-console.log(`project ${PROJECT_ID} · dataset ${DATASET} · api v${API_VERSION}\n`);
+const seeded = parseSeed(readSeed());
+const where = target();
 
-const response = await fetch(url);
-if (!response.ok) {
-  console.error(`Could not read the dataset: HTTP ${response.status}`);
-  console.error(await response.text());
+console.log(
+  `project ${where.projectId} · dataset ${where.dataset} · api v${where.apiVersion}\n`,
+);
+
+let published;
+try {
+  published = await fetchLive(
+    seeded.map((doc) => doc._id),
+    where,
+  );
+} catch (error) {
+  console.error(error.message);
   process.exit(1);
 }
-const { result } = await response.json();
-const live = new Map((result ?? []).map((doc) => [doc._id, doc]));
+const live = new Map(published.map((doc) => [doc._id, doc]));
 
 let drifted = 0;
 let missing = 0;
 
 for (const doc of seeded) {
-  const published = live.get(doc._id);
-  if (!published) {
+  const found = live.get(doc._id);
+  if (!found) {
     missing += 1;
     console.log(`MISSING  ${doc._id} (${doc._type}) — run \`npm run sanity:seed\``);
     continue;
   }
 
-  const differences = leaves(content(doc)).filter(([path, value]) => {
-    const found = leaves(content(published)).find(([key]) => key === path);
-    return !found || found[1] !== value;
-  });
-
-  if (differences.length === 0) {
+  const changed = differences(doc, found);
+  if (changed.length === 0) {
     console.log(`SAME     ${doc._id}`);
     continue;
   }
 
   drifted += 1;
   console.log(`DRIFTED  ${doc._id} (${doc._type})`);
-  for (const [path, value] of differences) {
-    const found = leaves(content(published)).find(([key]) => key === path);
+  for (const { path, seed, live: value } of changed) {
     console.log(`           ${path}`);
-    console.log(`             seed: ${JSON.stringify(value)}`);
-    console.log(`             live: ${JSON.stringify(found?.[1])}`);
+    console.log(`             seed: ${showLeaf(seed)}`);
+    console.log(`             live: ${showLeaf(value)}`);
   }
 }
 
@@ -122,8 +96,10 @@ console.log(
 if (missing > 0 || drifted > 0) {
   console.error(
     '\nThe dataset and the seed disagree. If the dataset is right — somebody edited in\n' +
-      'the Studio — update `content/seed.ndjson` so the test fixture is the\n' +
-      'content that actually exists. If the seed is right, `npm run sanity:seed`.',
+      `the Studio — update \`${SEED_PATH}\` so the test fixture is the\n` +
+      'content that actually exists. If the seed is right, `npm run sanity:seed`.\n' +
+      '\nWhich of those it is, this check cannot tell you: `npm run sanity:seed:release`\n' +
+      'can, because it reads the seed as it stood before the branch (MUSE-78).',
   );
   process.exit(1);
 }

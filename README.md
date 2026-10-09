@@ -431,7 +431,19 @@ The migration itself is a committed artefact, not a Studio session:
 ```bash
 npm run sanity:seed         # import content/seed.ndjson, replacing by _id
 npm run sanity:seed:check   # does the live dataset still say what the seed says?
+npm run sanity:seed:release # …and did *this branch* author the difference? (MUSE-78)
 ```
+
+**A branch that edits the seed imports first and merges second**, and the order is not a
+preference. The build fetches the live dataset, so a content change reaches a visitor only
+through a build that runs *after* the import — and the push-triggered deploy fires on
+merge, before anyone can run one. MUSE-71 merged at 08:34, was imported at 08:41, and the
+live page still carried the retired claim at 08:42 with every check green; it took a
+forced rebuild. `npm run sanity:seed:release` is the gate, in CI and runnable by hand: it
+reads the seed as it stood at the merge base, so it can tell *our* unshipped change (a
+blocker) from Mina editing in the Studio (not one, ever — see `sanity:seed:check`'s
+`continue-on-error` and MUSE-45), and it names the `_id`s that have to be imported. It is
+read-only and takes no credential.
 
 That one file is also **the test fixture**. `npm test` runs ten real `astro build`s in
 parallel workers, and ten HTTP round-trips per run would make the suite's result depend on
@@ -456,7 +468,7 @@ and the next unwatched schema file is the one nobody thought to add to it. With 
 out, *"every file under `sanity/` is schema source"* is simply true. The cost is that the
 seed no longer sits beside the schema it instantiates, which is cheap — nothing found it by
 looking there; its consumers are `package.json`, `vitest.config.ts`,
-`scripts/sanity-seed-check.mjs` and two helpers under `test/`. `test/sanity.test.ts` holds
+`scripts/seed-compare.mjs` and two helpers under `test/`. `test/sanity.test.ts` holds
 the line, asserting the property against `MUSE_CONTENT_FIXTURE` rather than a path literal.
 
 ### A component whose page cannot be routed yet
