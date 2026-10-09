@@ -25,6 +25,15 @@ import {
   claimOutDir,
   SCRATCH,
 } from './helpers/scratch';
+import ConcurrencyBudgetReporter from './helpers/concurrency-reporter';
+import {
+  BUDGET,
+  DECLARED,
+  declaredTotal,
+  headroom,
+  type HeavyRecord,
+  judge,
+} from './helpers/concurrency';
 import {
   buildDirectoryNames,
   copyPasteTripwire,
@@ -829,6 +838,213 @@ describe('the run reports a dead hook rather than swallowing it', () => {
 
   it('says nothing at all about a clean run', () => {
     expect(reportOn([passedModule('test/contact.test.ts', [ranTest('passed')])])).toBe('');
+  });
+});
+
+/**
+ * MUSE-68 — how much the run may ask of one machine, and who is told when it asks more.
+ *
+ * The rules above police *where* a build writes and *what* may start one. None of them can
+ * see **how many**, which is how MUSE-67 added a build to `test/lockup.test.ts` and reddened
+ * `test/localeswitch.test.ts`. The budget is the missing count; these are its teeth.
+ *
+ * `judge` is exercised as a rule, with synthetic censuses, for the reason every other guard
+ * in this file is: the live run has exactly one state, and a guard tested only against the
+ * state that passes is a guard nobody has seen fire.
+ */
+describe('the run has a concurrency budget it cannot quietly exceed', () => {
+  /** A census: `[file, operations]` pairs, flattened into records. */
+  function census(...files: [string, number][]): HeavyRecord[] {
+    return files.flatMap(([owner, count]) =>
+      Array.from({ length: count }, () => ({ kind: 'build', owner })),
+    );
+  }
+
+  /** The census the declaration says this tree produces. */
+  function asDeclared(): HeavyRecord[] {
+    return census(...[...DECLARED].map(([file, { ops }]): [string, number] => [file, ops]));
+  }
+
+  const everyDeclaredFile = [...DECLARED.keys()];
+
+  it('declares a tree that fits, and says how much room is left', () => {
+    // The headroom is zero by construction and that is the design, not a near-miss: the
+    // flake this guard exists for has no threshold — it is present at the tree's own
+    // total — so what is enforced is a ratchet, and every change to the run's heavyweight
+    // work goes through `DECLARED` with a reason. See the measurement table at `BUDGET`.
+    expect(declaredTotal()).toBeLessThanOrEqual(BUDGET);
+    expect(headroom()).toBe(BUDGET - declaredTotal());
+  });
+
+  it('passes the tree it declares', () => {
+    expect(judge(asDeclared(), everyDeclaredFile).problems).toEqual([]);
+  });
+
+  it('declares no file that has stopped existing', () => {
+    // A declaration is a liveness claim as well as a count. MUSE-60 deleted the only
+    // `.astro` file under `test/` with the ticket that routed its page; an entry for a
+    // file nobody runs any more is never contradicted by a run.
+    expect(everyDeclaredFile.filter((file) => !existsSync(join(ROOT, file)))).toEqual([]);
+  });
+
+  it('gives every declared file a reason, not just a number', () => {
+    expect(
+      [...DECLARED].filter(([, { why }]) => why.trim() === '').map(([file]) => file),
+    ).toEqual([]);
+  });
+
+  it('names the file whose count changed — not the one counted last', () => {
+    // The whole reason there is a per-file declaration. A bare total can only report the
+    // file it happened to reach last, which is this board's signature defect: the thing
+    // reporting is not the thing at fault.
+    const extra = [...asDeclared(), { kind: 'build', owner: 'test/lockup.test.ts' }];
+    const { problems } = judge(extra, everyDeclaredFile);
+
+    expect(problems.length).toBeGreaterThan(0);
+    expect(problems.join('\n')).toContain('test/lockup.test.ts performs 2');
+    expect(problems.join('\n')).toContain('DECLARED says 1');
+    // …and the total is reported too, so the reader learns both facts at once.
+    expect(problems.join('\n')).toContain(`the budget is ${BUDGET}`);
+  });
+
+  it('names a file that performs heavyweight work and is declared nowhere', () => {
+    const { problems } = judge(
+      [...asDeclared(), { kind: 'build', owner: 'test/newsuite.test.ts' }],
+      [...everyDeclaredFile, 'test/newsuite.test.ts'],
+    );
+
+    expect(problems.join('\n')).toContain('test/newsuite.test.ts performs 1');
+    expect(problems.join('\n')).toContain('not in DECLARED');
+  });
+
+  it('names a declared file that ran and performed nothing', () => {
+    // The direction that catches the meter breaking rather than the tree growing: a
+    // census that silently stopped being written is a budget that passes for ever.
+    const short = asDeclared().filter(({ owner }) => owner !== 'test/nav.test.ts');
+    const { problems } = judge(short, everyDeclaredFile);
+
+    expect(problems.join('\n')).toContain(
+      'test/nav.test.ts ran and performed no heavyweight work',
+    );
+  });
+
+  it('refuses an operation it cannot attribute to a file', () => {
+    const { problems } = judge([{ kind: 'build', owner: '<unattributed>' }], []);
+    expect(problems.join('\n')).toContain('could not be attributed');
+  });
+
+  it('refuses a kind of operation nothing declares', () => {
+    const { problems } = judge([{ kind: 'container', owner: 'test/nav.test.ts' }], []);
+    expect(problems.join('\n')).toContain('kind "container"');
+  });
+
+  it('says nothing about the files a filtered run never touched', () => {
+    // `vitest run test/nav.test.ts` writes a census of one file. Reporting the other
+    // twenty-seven as vanished would make the guard useless the first time anybody ran a
+    // single file, and reporting the total as comfortably under budget would be worse.
+    const { problems, summary } = judge(census(['test/nav.test.ts', 1]), ['test/nav.test.ts']);
+
+    expect(problems).toEqual([]);
+    expect(summary).toContain('1 file(s)');
+  });
+
+  it('holds a filtered run to the count of the file it did run', () => {
+    const { problems } = judge(census(['test/nav.test.ts', 2]), ['test/nav.test.ts']);
+    expect(problems.join('\n')).toContain('test/nav.test.ts performs 2');
+  });
+
+  it('only compares the total with the ceiling when the whole suite ran', () => {
+    // A partial run can be over the ceiling in total and be telling the truth about
+    // nothing: the budget is a property of the run, so it is judged on a complete one.
+    const over = census(['test/nav.test.ts', BUDGET + 5]);
+    // The per-file mismatch is still reported — that one is true of a filtered run. It is
+    // the sentence about the whole run that has to be absent.
+    expect(judge(over, ['test/nav.test.ts']).problems.join('\n')).not.toContain(
+      'the run performs',
+    );
+  });
+
+  it('fails the whole run when the total goes over, and says what to do about it', () => {
+    const over = [
+      ...asDeclared(),
+      ...Array.from({ length: BUDGET + 1 - declaredTotal() }, () => ({
+        kind: 'build',
+        owner: 'test/nav.test.ts',
+      })),
+    ];
+    const { problems } = judge(over, everyDeclaredFile);
+
+    const said = problems.join('\n');
+    expect(said).toContain(`the run performs ${BUDGET + 1} heavyweight operations`);
+    expect(said).toContain('Do not raise it quietly.');
+  });
+
+  /**
+   * And the reporter, read rather than registered.
+   *
+   * `expect(config).toContain(…)` is below as well, because the registration is a separate
+   * claim — but it is not the assertion with teeth. This hands the class a census and reads
+   * the two things it writes.
+   */
+  describe('the reporter says it out loud and fails the run', () => {
+    /** Run the reporter over `records` and hand back what it wrote and the exit code. */
+    function reportOn(records: HeavyRecord[], ran: string[]): { said: string; code: number } {
+      const said: string[] = [];
+      const write = vi
+        .spyOn(process.stderr, 'write')
+        .mockImplementation((chunk) => (said.push(String(chunk)), true));
+      const before = process.exitCode;
+      try {
+        new ConcurrencyBudgetReporter({ census: () => records }).onTestRunEnd(
+          ran.map((id) => passedModule(id, [])),
+        );
+        return { said: said.join(''), code: Number(process.exitCode ?? 0) };
+      } finally {
+        // Restored in a `finally` because a leaked `1` here would fail a green run, which
+        // is the one way a guard about flakiness could become a flake.
+        process.exitCode = before;
+        write.mockRestore();
+      }
+    }
+
+    it('prints the headroom on a run that is in budget, and fails nothing', () => {
+      const { said, code } = reportOn(asDeclared(), everyDeclaredFile);
+
+      expect(said).toContain('concurrency:');
+      expect(said).toContain(`budget ${BUDGET}`);
+      expect(said).toContain('headroom');
+      expect(code).toBe(0);
+    });
+
+    it('names the file and sets a failing exit code when the run is over', () => {
+      const { said, code } = reportOn(
+        [...asDeclared(), { kind: 'build', owner: 'test/lockup.test.ts' }],
+        everyDeclaredFile,
+      );
+
+      expect(said).toContain('CONCURRENCY');
+      expect(said).toContain('test/lockup.test.ts');
+      expect(code).toBe(1);
+    });
+  });
+
+  it('is registered, and so is the census the reporter reads', () => {
+    const config = readFileSync(join(ROOT, 'vitest.config.ts'), 'utf8');
+    expect(config).toContain('concurrency-reporter');
+    // The `globalSetup` entry is what opens the census before any worker is forked. Drop
+    // it and every run reports an empty census, which is a budget that cannot fail.
+    expect(config).toContain("'test/helpers/concurrency.ts'");
+  });
+
+  it('meters every way the run can start heavyweight work, and there are two', () => {
+    // The completeness claim, and it rests on two rules that already exist: nothing but
+    // `test/helpers/scratch.ts` may start a child process (above), and nothing but
+    // `scripts/browser-checks.mjs` may launch Playwright (`test/browserlocale.test.ts`).
+    // So these two files are provably the only sources — and each of them has to record,
+    // or the budget is measuring a subset while reading as though it measured the run.
+    for (const file of ['test/helpers/scratch.ts', 'scripts/browser-checks.mjs']) {
+      expect(readFileSync(join(ROOT, file), 'utf8'), file).toContain('recordHeavyOperation(');
+    }
   });
 });
 

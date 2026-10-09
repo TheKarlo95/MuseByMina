@@ -515,13 +515,45 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   It used to answer the status and invent the body, so no browser suite in the repo could
   reach the error page at all and an all-Croatian 404 was only reproducible against the
   deployed site. Drive it with `test/helpers/preview.ts` and an unknown path.
-- **A test never chooses where it builds.** `npm test` runs ten real `astro build`s in
-  parallel workers; `test/helpers/scratch.ts` mints a directory per build with `mkdtemp`
-  and passes each one its own cache root, so two suites cannot share an output tree and
-  nothing has to be wiped. There is nothing to remember here — that is the point. This
-  bug was fixed three times as a naming convention (MUSE-9, MUSE-10, MUSE-17) and came
-  back twice; `test/isolation.test.ts` now fails if a suite names a build directory,
-  deletes anything, or spawns its own build.
+- **A test never chooses where it builds.** `npm test` performs **80 heavyweight
+  operations — 68 real `astro build`s, 4 `astro dev` servers and 8 browser launches —
+  across 29 of its 34 files**, in a pool of `availableParallelism() - 1` workers, which
+  is 15 on a developer box and 3 on `ubuntu-latest`. (It said *"ten real `astro build`s
+  in parallel workers"* until MUSE-68 counted; nothing had ever made that true, and
+  `test/lockup.test.ts` reasoned from it.) `test/helpers/scratch.ts` mints a directory
+  per build with `mkdtemp` and passes each one its own cache root, so two suites cannot
+  share an output tree and nothing has to be wiped. There is nothing to remember here —
+  that is the point. This bug was fixed three times as a naming convention (MUSE-9,
+  MUSE-10, MUSE-17) and came back twice; `test/isolation.test.ts` now fails if a suite
+  names a build directory, deletes anything, or spawns its own build.
+
+  **And the total is now metered, because adding to it breaks a different file**
+  (MUSE-68). MUSE-67 gave a new `describe` a build of its own and
+  `test/localeswitch.test.ts` went red — `page.waitForEvent: Timeout 20000ms exceeded
+  while waiting for event "framenavigated"`, a correct wait that never got CPU. Measured
+  across two agents: **4 of 15 runs fail at 78 operations and 5 of 8 at 79.** So the
+  count is the thing to watch and **the count is measured, not read off the source**: a
+  scan for `astroBuild`/`astroDev` call sites undercounts by about a fifth, because the
+  heavyweight helpers wrap each other (`startPreview` → `buildPreview` → `astroBuild`)
+  and a rule stated against a callee — the only kind `source-guard.ts` may state — sees
+  the outer name. `scripts/heavy-census.mjs` records one line per operation from the two
+  places that can start one, each already the only permitted source by an existing rule;
+  `test/helpers/concurrency-reporter.ts` judges the run at `onTestRunEnd`, the first
+  moment the count is complete, and prints the total, the pool size and the headroom on
+  **every** run so the number in this paragraph cannot go stale the way the last one did.
+
+  `DECLARED` in `test/helpers/concurrency.ts` is a per-file table, so the failure names
+  **the file whose count changed** rather than the one counted last; adding a build is a
+  one-line edit there, deliberately, because that is where the cost belongs. **The
+  headroom is zero and the ceiling is a ratchet, not a safety line** — the flake is
+  load-sensitive with no threshold and is present at today's total — so read the
+  measurement table above `BUDGET` before changing either number, and do not raise it
+  quietly. MUSE-69 is the worked example: its two builds took the run to 80, the guard
+  exited 1 on 34 green files naming `test/share.test.ts`, and the entry and the number
+  moved together with the measurement. The worker count is deliberately **not** the
+  divisor: the pool is 15 here and 3 in CI, so dividing
+  by it would pass on a laptop and fail on a runner, and pinning it to 10 was measured
+  neutral on wall clock and still flaked.
 
   **The cache root is the half that actually fixed it, and it lives in
   `astro.config.mjs`** — two lines taking `cacheDir` and `vite.cacheDir` from
