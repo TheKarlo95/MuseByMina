@@ -40,18 +40,24 @@ const PAGES_DIR = join(ROOT, 'src/pages');
  * make adding `src/pages/en/404.astro` unsatisfiable: the page exists, but
  * `@astrojs/sitemap` is right to leave it out.
  *
- * `/events/[slug]` is here for a different reason and it is not about indexing (MUSE-24).
- * It is a **template**, not a page: the pages it produces are one per `event` document, so
- * they are content rather than structure. Every one of them *is* indexed — it declares a
- * canonical, carries its hreflang pair and appears in the sitemap, which
- * `test/events.test.ts` asserts against a build that holds events — but it has no entry in
- * `ROUTES`, no `page` document and therefore no `llms.txt` line. That partition is
- * deliberate: `llms.txt` is a short index of the site's sections and says so by linking the
- * sitemap under „Machine-readable", while the sitemap is the surface designed for a page
- * set that grows with the content. Listing a line per event would also make this file's set
- * equality a claim about the dataset rather than about the page registry.
+ * `/events/[slug]` and `/blog/[slug]` are here for a different reason and it is not about
+ * indexing (MUSE-24, MUSE-26). They are **templates**, not pages: what each produces is one
+ * page per `event` or `post` document, so they are content rather than structure. Every one
+ * of those pages *is* indexed — it declares a canonical and appears in the sitemap, which
+ * `test/events.test.ts` and `test/blog.test.ts` assert against builds that hold them — but
+ * neither template has an entry in `ROUTES`, a `page` document or therefore an `llms.txt`
+ * line. That partition is deliberate: `llms.txt` is a short index of the site's sections and
+ * says so by linking the sitemap under „Machine-readable", while the sitemap is the surface
+ * designed for a page set that grows with the content. Listing a line per event or per post
+ * would also make this file's set equality a claim about the dataset rather than about the
+ * page registry.
+ *
+ * Note the one thing a *post's* page does not always have, and which no other page on the
+ * site lacks: an `hreflang` pair. A post may be written in one language only, so its
+ * cluster can hold one member and is then omitted — `src/lib/blog.ts` argues it, and the
+ * assertions in this file that require a cluster are over `ROUTES`, which it is not in.
  */
-const NOT_A_PAGE = new Set(['/404', '/events/[slug]']);
+const NOT_A_PAGE = new Set(['/404', '/events/[slug]', '/blog/[slug]']);
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {

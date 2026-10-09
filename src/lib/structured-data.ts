@@ -59,9 +59,16 @@ import { addressLines, socialUrl, type SiteSettings } from './sanity';
  * crawler caches and a human never looks, so it is the last place fiction should reach,
  * not the first.
  *
- * `FAQPage`, `Event` and `Article` are the ticket's other three types and wait on
- * `/faq`, `/events` (MUSE-24) and `/blog` (MUSE-26) existing. `BreadcrumbList`, review
- * and rating markup, and `Course` are out of scope in the ticket itself.
+ * `FAQPage` and `Event` are the ticket's other types and wait on `/faq` and `/events`
+ * (MUSE-24) existing. `BreadcrumbList`, review and rating markup, and `Course` are out of
+ * scope in the ticket itself.
+ *
+ * `Article` arrived with `/blog` (MUSE-26) and is below as `BlogPosting`. It is here
+ * rather than in `PostPage.astro` because `test/structured-data.test.ts` fails if a second
+ * `.astro` file writes an `application/ld+json` tag at all: two emission sites are two
+ * answers to „does the markup agree with the page", which is the failure this whole module
+ * is shaped around. So a post hands its facts *up* through `BaseLayout`'s `article` prop
+ * and the one `<script>` carries three nodes instead of two.
  */
 
 /** The vocabulary every block is written in. */
@@ -91,8 +98,55 @@ export const STUDIO_TYPE = ['LocalBusiness', 'EducationalOrganization'] as const
  */
 export const PROFILE_PLATFORMS = ['instagram', 'facebook', 'linktree'] as const;
 
+/**
+ * **`BlogPosting`, not `Article` — and both are real, which is the difference from
+ * `DanceSchool`** (MUSE-26).
+ *
+ * The ticket says „article structured data". `Article` would validate; `BlogPosting` is a
+ * subtype of it and is what a post on a studio's blog actually is, so it is the more
+ * specific true statement and consumers that understand only `Article` still understand
+ * it. The reason to say this out loud is the note above: `DanceSchool` *looked* like the
+ * obvious type too, and an unknown `@type` fails silently — the validator reports a node
+ * with nothing recognised on it. `BlogPosting` resolves at `https://schema.org/
+ * BlogPosting`; `test/blog.test.ts` pins the name so a later reader cannot talk themselves
+ * into a plausible-looking one.
+ */
+export const ARTICLE_TYPE = 'BlogPosting';
+
 /** A JSON-LD node: a `@type` and whatever properties that type carries. */
 type Node = Record<string, unknown>;
+
+/**
+ * One post, as the facts a `BlogPosting` node needs — assembled by the page that *is* the
+ * post and passed up, never read here.
+ *
+ * Every field is already on the page a reader sees: the headline is the `<h1>`, the
+ * description is the `<meta name="description">` the same `excerpt` produced, the date is
+ * the `<time>`, the byline is the byline. That is the construction `structuredData`'s own
+ * note argues for — there is nothing here for a value to drift *from*, because the page
+ * and the block are two renderings of one set of strings.
+ */
+export interface ArticleInput {
+  /** The post's title, in this page's locale. */
+  headline: string;
+  /** The same string the page's `<meta name="description">` carries. */
+  description: string;
+  /** `publishedAt`, a UTC ISO instant. */
+  datePublished: string;
+  /**
+   * The instructor who wrote it, or `undefined` for a post the studio signs.
+   *
+   * `undefined` means exactly one thing (MUSE-49): nobody was named. A *deleted* author is
+   * a build failure long before this, in `decode.ts`, so the unsigned case cannot arrive
+   * here by accident — which is what makes falling back to the studio safe rather than a
+   * guess. `author` is a required property of `BlogPosting` for Google's article
+   * treatment, and the studio is the honest answer when the field is empty: it is what the
+   * visible byline says, off the same `studioName`.
+   */
+  authorName?: string;
+  /** Absolute URL of the cover image, if the post has one. */
+  image?: string;
+}
 
 export interface StructuredDataInput {
   /** The singleton the page already rendered from. Not re-read here — see the note. */
@@ -102,6 +156,8 @@ export interface StructuredDataInput {
   canonical: string;
   /** `Astro.site` — the deploy's origin, so nothing here names a host (MUSE-8). */
   site: URL;
+  /** Set only on a page that *is* an article. See {@link ArticleInput}. */
+  article?: ArticleInput;
 }
 
 /**
@@ -133,6 +189,7 @@ export function structuredData({
   locale,
   canonical,
   site,
+  article,
 }: StructuredDataInput): Node {
   const address = addressLines(settings);
   const home = new URL(localeUrl('/', locale), site).href;
@@ -168,7 +225,45 @@ export function structuredData({
     about: { '@id': studioId },
   };
 
-  return { '@context': SCHEMA_CONTEXT, '@graph': [studio, page] };
+  /**
+   * The post, as a third node in the same graph (MUSE-26).
+   *
+   * A node rather than a replacement for `WebPage`, for the reason the graph is two nodes
+   * in the first place: the page and the thing on it are different entities, and merging
+   * them would make one `@id` claim both „this is a web page at this URL" and „this is an
+   * article published on a date", which a consumer merging by `@id` reads as one
+   * self-contradicting object. `mainEntityOfPage` is the edge between them, in the
+   * direction schema.org defines it — the article is *of* the page — and the page's own
+   * `about` edge to the studio is untouched.
+   *
+   * `datePublished` and no `dateModified`: Sanity has `_updatedAt` on every document, and
+   * publishing it would claim the article's *text* changed when what changed may have been
+   * a typo in the author reference. Nobody has asked for it, and a date that moves for the
+   * wrong reason is the kind of fact MUSE-36 is about. No `wordCount` either, for the
+   * `openingHours` reason the note above gives: a derived number in a machine-readable
+   * surface that no human ever checks.
+   */
+  const nodes: Node[] = [studio, page];
+  if (article !== undefined) {
+    nodes.push({
+      '@type': ARTICLE_TYPE,
+      '@id': `${canonical}#post`,
+      url: canonical,
+      headline: article.headline,
+      description: article.description,
+      datePublished: article.datePublished,
+      inLanguage: LOCALE_HTML_LANG[locale],
+      mainEntityOfPage: { '@id': canonical },
+      author:
+        article.authorName === undefined
+          ? { '@id': studioId }
+          : { '@type': 'Person', name: article.authorName },
+      publisher: { '@id': studioId },
+      ...(article.image === undefined ? {} : { image: article.image }),
+    });
+  }
+
+  return { '@context': SCHEMA_CONTEXT, '@graph': nodes };
 }
 
 /**

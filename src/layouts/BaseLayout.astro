@@ -37,7 +37,7 @@ import {
   type Locale,
 } from '../lib/i18n';
 import { getSiteSettings } from '../lib/sanity';
-import { jsonLd, structuredData } from '../lib/structured-data';
+import { jsonLd, structuredData, type ArticleInput } from '../lib/structured-data';
 /**
  * The faces the first paint needs — **this page's, not a fixed pair** (MUSE-74).
  *
@@ -95,36 +95,67 @@ interface Props {
    * rather than carved around.
    *
    * **This is a question about crawlers and nothing else.** It used to answer a second
-   * one as well; see `localeTwin`.
+   * one as well; see `localeTwins`. A post published in one language is `indexable` and
+   * has no twin, which is the live counterexample to collapsing the two.
    */
   indexable?: boolean;
   /**
-   * Is there an addressable page for this route in each locale?
+   * **Which locales have an addressable page for this route.** Defaults to all of them.
    *
-   * The error page is the one place the answer is no, and it is the whole of MUSE-38.
+   * A set rather than a boolean since MUSE-26, and the generalisation is the smaller half
+   * of the same decision: a blog post may be written in one language only, so „is there a
+   * twin" stopped being one answer for the page and became one answer **per locale** — the
+   * shape `urlFor` has always had. `src/lib/blog.ts` argues the content decision; what is
+   * here is the three things that read it, and the point is that they read *one* thing:
+   *
+   *   - the language switcher renders only if some *other* locale is in this set;
+   *   - `langInitScript` is handed a URL per locale, and `null` for one that is not;
+   *   - the `hreflang` cluster names exactly this set — and is omitted entirely when it
+   *     holds one locale, because a cluster of one makes no claim a crawler can use and a
+   *     lone `hreflang="hr-HR"` is a statement that the page is *for* Croatian speakers.
+   *     `@astrojs/sitemap` takes the same position on its own (`links.length <= 1`), so
+   *     the page and the sitemap agree by rule rather than by coincidence.
+   *
+   * ---------------------------------------------------------------------------------
+   * **It was `localeTwin?: boolean` and the error page is why it exists** (MUSE-38).
    * GitHub Pages serves one root `404.html` for every unknown path, so `/404/`, `/en/404`
-   * and `/en/404/` are all themselves 404s. Two things follow, and only two:
-   *
-   *   - the language switcher cannot render, because it is a prefix swap on the current
-   *     route and would be two dead links on the one page a visitor reaches *because* a
-   *     link was dead (MUSE-13);
-   *   - `langInitScript` has nowhere to navigate, so it is handed no URL for either
-   *     locale and its one `go()` becomes a no-op.
+   * and `/en/404/` are all themselves 404s — the one page on the site with no twin in any
+   * locale, which is now `localeTwins={[]}`. Two things followed from that and only two:
+   * the switcher cannot render, because it is a prefix swap on the current route and would
+   * be two dead links on the one page a visitor reaches *because* a link was dead
+   * (MUSE-13); and `langInitScript` has nowhere to navigate, so it is handed no URL for
+   * either locale and its one `go()` becomes a no-op.
    *
    * What does **not** follow is that the page stops handling language. MUSE-13 wrote
    * `const localeRouting = indexable;` — true of today's pages, and a different claim —
    * so the error page shipped no `langInitScript` either, and MUSE-33's `?lang=`, which
    * acts on every page by design, was discarded rather than persisted on the one page a
    * stale link actually lands on. One flag was answering "should a crawler index this" and
-   * "may this page route by language" at once; they are two props now, and neither is
-   * derived from the other. `test/nav.test.ts` pins both the behaviour and the absence of
-   * the alias, because an alias reads as a tidy-up rather than as a decision.
+   * "may this page route by language" at once; they are two props, **neither derived from
+   * the other**, and `test/nav.test.ts` pins both the behaviour and the absence of the
+   * alias — because an alias reads as a tidy-up rather than as a decision.
    *
-   * A page with no twin still says which language it is written in, and the error page
-   * answers that by being bilingual rather than by choosing client-side — see
-   * `src/pages/404.astro`.
+   * A post published in one language is what made the boolean insufficient, and it is also
+   * the clearest case for the split: it is `indexable` — a real URL a crawler should find —
+   * and it has no twin. Deriving either prop from the other now has a live
+   * counterexample rather than only a historical one.
+   *
+   * A page with no twin still says which language it is written in. The error page answers
+   * that by being bilingual rather than by choosing client-side (`src/pages/404.astro`);
+   * a post answers it by being written in one language and saying so in `<html lang>`.
+   * ---------------------------------------------------------------------------------
    */
-  localeTwin?: boolean;
+  localeTwins?: readonly Locale[];
+  /**
+   * The article this page *is*, if it is one — for the JSON-LD block and nothing else.
+   *
+   * It goes through `src/lib/structured-data.ts` like everything else, because
+   * `test/structured-data.test.ts` fails if a second `.astro` file writes an
+   * `application/ld+json` tag: two emission sites are two answers to "does the markup
+   * agree with the page" (MUSE-31). So a post hands its own facts *up* rather than
+   * emitting a block of its own, and the one `<script>` below carries both nodes.
+   */
+  article?: ArticleInput;
 }
 
 const {
@@ -133,7 +164,8 @@ const {
   description,
   detectLanguage = false,
   indexable = true,
-  localeTwin = true,
+  localeTwins = LOCALES,
+  article,
 } = Astro.props;
 
 const route = routeKey(Astro.url.pathname);
@@ -150,7 +182,27 @@ const canonical = new URL(localeUrl(route, locale), Astro.site).href;
  * different language helps nobody — but *reading* the request and persisting it is not a
  * navigation, and that is the half that used to be missing.
  */
-const localeHref = (l: Locale): string | null => (localeTwin ? localeUrl(route, l) : null);
+const localeHref = (l: Locale): string | null =>
+  localeTwins.includes(l) ? localeUrl(route, l) : null;
+
+/**
+ * The locales this route really has a page in, in `LOCALES` order — and the two things
+ * that read it.
+ *
+ * `alternates` is the `hreflang` cluster and is **empty below two members**, which is the
+ * rule `@astrojs/sitemap` applies to its own `xhtml:link` groups: a group of one states
+ * nothing a crawler can act on, and a lone `hreflang` is read as „this page is for
+ * speakers of that language" — which on a post published only in Croatian would ask
+ * Google to withhold it from an English search it is a perfectly good answer to.
+ *
+ * `switchable` is whether the language switcher has anywhere to point. Note it asks for a
+ * locale *other than this one*: a post published only in Croatian, rendered in Croatian,
+ * has one entry in the cluster and nothing to switch to.
+ */
+const alternates = LOCALES.filter((l) => localeHref(l) !== null);
+const hreflangs = alternates.length > 1 ? alternates : [];
+const switchable = alternates.some((l) => l !== locale);
+
 const skipLabel = locale === 'hr' ? 'Preskoči na sadržaj' : 'Skip to content';
 
 /**
@@ -179,6 +231,7 @@ const ldJson = indexable
         locale,
         canonical,
         site: Astro.site!,
+        article,
       }),
     )
   : undefined;
@@ -238,23 +291,33 @@ const cardUrl = new URL(card.src, Astro.site).href;
     <meta name="description" content={description} />
 
     {/* `localeUrl` emits the trailing slash the host serves these at, so a canonical and
-        its alternates all resolve 200 rather than 301ing (MUSE-9). */}
+        its alternates all resolve 200 rather than 301ing (MUSE-9).
+
+        The cluster is `hreflangs`, which is the locales this route **has a page in** and
+        is empty below two of them — see `localeTwins` above. Every href still goes
+        through `localeHref`, so a declared alternate cannot name a URL the build did not
+        emit: that is MUSE-9's rule stated as one expression rather than as two lists that
+        have to agree. `x-default` rides with the cluster and is dropped with it, because
+        „the page for a reader whose language we do not have" is a statement about a group
+        and means nothing about a page that is only in one language. */}
     {
       indexable ? (
         <Fragment>
           <link rel="canonical" href={canonical} />
-          {LOCALES.map((l) => (
+          {hreflangs.map((l) => (
             <link
               rel="alternate"
               hreflang={LOCALE_HTML_LANG[l]}
-              href={new URL(localeUrl(route, l), Astro.site).href}
+              href={new URL(localeHref(l)!, Astro.site).href}
             />
           ))}
-          <link
-            rel="alternate"
-            hreflang="x-default"
-            href={new URL(localeUrl(route, DEFAULT_LOCALE), Astro.site).href}
-          />
+          {hreflangs.includes(DEFAULT_LOCALE) && (
+            <link
+              rel="alternate"
+              hreflang="x-default"
+              href={new URL(localeHref(DEFAULT_LOCALE)!, Astro.site).href}
+            />
+          )}
         </Fragment>
       ) : (
         <meta name="robots" content="noindex, follow" />
@@ -344,11 +407,12 @@ const cardUrl = new URL(card.src, Astro.site).href;
   <body>
     <a class="skip-link" href="#main">{skipLabel}</a>
     {/*
-      Whether a language switcher can work at all is "does this route have a page in each
-      locale" — `localeTwin`, not `indexable` (MUSE-38). The two agree on every page the
-      site has today and are not the same question; see Header's prop (MUSE-13).
+      Whether a language switcher can work at all is "does this route have a page in
+      *another* locale" — `localeTwins`, never `indexable` (MUSE-38). A post published in
+      one language is the page where the two visibly differ: it is indexable and there is
+      nowhere to switch to. See Header's prop (MUSE-13).
     */}
-    <Header locale={locale} localeSwitch={localeTwin} />
+    <Header locale={locale} localeSwitch={switchable} />
     <main id="main">
       <slot />
     </main>

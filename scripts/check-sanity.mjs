@@ -192,7 +192,22 @@ const READ_CONTRACT = {
     'ticketUrl',
   ],
   galleryImage: ['image', 'caption', 'takenAt', 'order'],
-  post: ['title', 'slug', 'publishedAt', 'excerpt', 'coverImage', 'body', 'author'],
+  /**
+   * **Six fields, because the words moved one level down** (MUSE-26). `title`, `excerpt`
+   * and `body` are fields of `postTranslation` now, and `POSTS_QUERY` names them inside
+   * `hr{…}` / `en{…}` — a different GROQ scope, which is why this list holds `hr` and
+   * `en` and not the three.
+   *
+   * That is a real narrowing of *this* layer and it is stated rather than left to be
+   * discovered: `READ_CONTRACT` is keyed by **document** type (the completeness check
+   * below asserts its keys are exactly the document types in the schema), so an object
+   * type cannot be listed here. The three fields keep three of their four layers —
+   * `shape.ts`'s `_postTextFields` is a compile-time `Guaranteed` on each, the stamp
+   * forces regeneration when the schema moves, and `test/projections.test.ts` executes
+   * the projection against a row. What is lost is only this gate's ability to name them,
+   * and teaching it to descend into an object-typed projected field is its own change.
+   */
+  post: ['slug', 'publishedAt', 'coverImage', 'author', 'hr', 'en'],
   faq: ['question', 'answer', 'order'],
 };
 

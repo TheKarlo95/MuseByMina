@@ -1,0 +1,76 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PostPage from '../../components/PostPage.astro';
+import {
+  assertPostSlugs,
+  postCoverUrl,
+  postMetaDescription,
+  postMetaTitle,
+  publishedIn,
+  publishedLocales,
+} from '../../lib/blog';
+import { getPosts, getSiteSettings, readStaticPaths, type Post } from '../../lib/sanity';
+
+/**
+ * **One page per `post` document that is written in Croatian** (MUSE-26).
+ *
+ * This is where the ticket's hardest question becomes a build decision: `getStaticPaths`
+ * generates a path only for a post `publishedIn('hr')`, so a post written only in English
+ * has **no** `/blog/<slug>/` — and `/en/blog/<slug>/` is the only URL it has. Its English
+ * twin does the same for the other language. The two templates therefore generate
+ * **different slug sets**, which is the deliberate opposite of `/events/<slug>/`, where
+ * both locales always exist and the twin's existence is asserted.
+ *
+ * Nothing links to the URL that is not built, because the only thing that would is the
+ * index that does not list the post — so the honest 404 is unreachable rather than merely
+ * correct. `localeTwins` below is the same fact a third time, and `src/lib/blog.ts` has
+ * the whole argument plus what the alternative (list it and mark it) would have cost.
+ *
+ * `assertPostSlugs` is the half that can fail, and it is handed **every** post rather than
+ * the Croatian ones: two posts claiming one slug collide as a fact about the dataset, not
+ * about a language, and the collision would otherwise only surface in whichever locale
+ * happened to contain both.
+ *
+ * This route is deliberately **not** in `ROUTES` and has no `page` document: a `page`
+ * document exists per route, and one per post would be a second document saying again what
+ * the `post` already says. So the `<title>` and the description are derived, and
+ * `test/routes.test.ts`/`test/seo.test.ts` carry `/blog/[slug]` as a *template* rather than
+ * a page — which is what it is.
+ */
+export async function getStaticPaths() {
+  // `readStaticPaths` is there for the error, not for the read: Astro prints a
+  // `getStaticPaths` rejection without the error's class name, and `getStaticPaths` is the
+  // first read of the build — so a Sanity outage would otherwise stop saying which of
+  // `decode.ts`'s three outcomes it was. See the note on it in `src/lib/sanity/index.ts`.
+  return readStaticPaths(async () => {
+    const posts = await getPosts({ minimum: 0 });
+    assertPostSlugs(posts);
+    return posts
+      .filter((post) => publishedIn(post, 'hr'))
+      .map((post) => ({ params: { slug: post.slug }, props: { post } }));
+  });
+}
+
+const { post } = Astro.props as { post: Post };
+
+/** The studio's name, from the same `siteSettings` the footer and the JSON-LD render. */
+const settings = await getSiteSettings();
+const text = post.text.hr!;
+const description = postMetaDescription(text.excerpt);
+---
+
+<BaseLayout
+  locale="hr"
+  title={postMetaTitle(text.title, settings.studioName)}
+  description={description}
+  localeTwins={publishedLocales(post)}
+  article={{
+    headline: text.title,
+    description,
+    datePublished: post.publishedAt,
+    authorName: post.author,
+    image: postCoverUrl(post),
+  }}
+>
+  <PostPage locale="hr" post={post} studioName={settings.studioName} />
+</BaseLayout>

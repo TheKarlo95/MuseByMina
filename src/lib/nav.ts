@@ -105,6 +105,18 @@ export const MORE_NAV: NavItem[] = [
    * see the `aria-current` partition in `test/nav.test.ts`.
    */
   { route: '/events', label: { hr: 'Događaji', en: 'Events' } },
+  /**
+   * **`/blog` is the third, and the same budget argument applies** (MUSE-26). The bar is
+   * still four links plus this disclosure; a blog is also not where a returning visitor
+   * is going, and its traffic arrives from a search engine rather than from the masthead
+   * — which is the whole point of having one.
+   *
+   * **`/blog/<slug>` is deliberately not in this list, or any list** — it is a page per
+   * `post` document, so which pages exist is content rather than structure, exactly as
+   * for an event. The index is the one door, which is also what makes a post's page
+   * reachable at all for `test/nav.test.ts`'s orphan rule.
+   */
+  { route: '/blog', label: { hr: 'Blog', en: 'Blog' } },
 ];
 
 /**

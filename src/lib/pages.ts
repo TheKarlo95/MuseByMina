@@ -84,9 +84,46 @@ export const ROUTES: SiteRoute[] = [
   // teaches it, how to come.
   { route: '/pricing', studioLabel: 'Cjenik' },
   { route: '/aboutus', studioLabel: 'O nama' },
+  // After the people and before „how to come" (MUSE-26). The writing is the one section
+  // nobody arrives at mid-decision — a reader meets it from a search engine or after
+  // they already trust the place — so it sits at the end of the trust run rather than
+  // between the timetable and the price. Only `/blog` is a route: `/blog/<slug>/` is a
+  // page per `post` document and so is content rather than structure, which is why it has
+  // no entry here, no `page` document and no `llms.txt` line — see
+  // `src/pages/blog/[slug].astro`.
+  { route: '/blog', studioLabel: 'Blog' },
   { route: '/contact', studioLabel: 'Kontakt' },
   { route: '/privacy', studioLabel: 'Izjava o privatnosti' },
 ];
+
+/**
+ * **The last segment of every route that is a direct child of `prefix`.**
+ *
+ * The one thing a dynamic route has to know about the static ones beside it, and the
+ * reason is that Astro gives a static segment priority over a parameter **silently**: a
+ * `post` slugged `archive` under a `/blog/archive` route would build a page nothing can
+ * reach — published, invisible, no error anywhere.
+ *
+ * Derived from `ROUTES` rather than written out, so a static child reserves itself the day
+ * it is routed. That is the same argument `test/seo.test.ts` makes for reading its page
+ * list off `src/pages/`: a hand-maintained copy of „which pages exist" is the copy that
+ * goes stale, and here the cost of staleness is a published page nobody can open.
+ *
+ * `routes` is a parameter with a default rather than a closed-over read of `ROUTES`,
+ * because **today it answers `[]` for every prefix the site has** — there is no static
+ * child of `/blog` — and a guard with nothing to find is a guard that passes without
+ * asserting anything (MUSE-60's note on the empty preview registry). Passing a route list
+ * in is how `test/blog.test.ts` proves the derivation works against a `/blog/archive`
+ * that does not exist yet, instead of proving only that nothing is reserved.
+ */
+export function reservedChildSlugs(prefix: string, routes: readonly SiteRoute[] = ROUTES): string[] {
+  const under = `${prefix}/`;
+  return routes
+    .map(({ route }) => route)
+    .filter((route) => route.startsWith(under))
+    .map((route) => route.slice(under.length))
+    .filter((slug) => slug !== '' && !slug.includes('/'));
+}
 
 /**
  * **The three lists, and the two ways they could disagree without anybody noticing**

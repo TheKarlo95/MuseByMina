@@ -929,12 +929,40 @@ describe('POSTS_QUERY: published posts, newest first', () => {
     const earlier = posts.find((post) => post.id === 'post-earlier');
 
     expect(earlier?.slug).toBe('post-earlier');
-    expect(earlier?.title).toEqual({ hr: 'HR post earlier', en: 'EN post earlier' });
     expect(earlier?.publishedAt).toBe(POST_EARLIER.publishedAt);
-    expect(earlier?.excerpt).toEqual({ hr: 'HR post earlier.', en: 'EN post earlier.' });
     expect(earlier?.coverImage).toEqual(expectedImage(POST_EARLIER, 'coverImage'));
-    expect(earlier?.body.hr).toHaveLength(1);
-    expect(earlier?.body.en).toHaveLength(1);
+
+    /**
+     * The text is projected **per locale as an object** since MUSE-26, so the assertion is
+     * on the object rather than on three bilingual fields: `hr{title, excerpt, body}` with
+     * one of the three misspelled answers `null` for that key, which `decodePost` refuses
+     * naming it, and the whole object going missing is how a post stops being published in
+     * a language. `sanity/schemaTypes/objects/locale.ts` has the shape's argument.
+     */
+    expect(earlier?.text.hr?.title).toBe('HR post earlier');
+    expect(earlier?.text.hr?.excerpt).toBe('HR post earlier excerpt.');
+    expect(earlier?.text.hr?.body).toHaveLength(1);
+    expect(earlier?.text.en?.title).toBe('EN post earlier');
+    expect(earlier?.text.en?.excerpt).toBe('EN post earlier excerpt.');
+    expect(earlier?.text.en?.body).toHaveLength(1);
+  });
+
+  it('answers `undefined` for a language the post is not written in (MUSE-26)', async () => {
+    /**
+     * The projection half of MUSE-26's decision. `en{title, excerpt, body}` over a `post`
+     * with no `en` object answers `null`, which `decodePost` reads as „not published in
+     * English" — and that is the *same shape* a typo in the projection would produce, which
+     * is why it is pinned here against a row that really has one half and not the other
+     * rather than only in the suite that renders the page.
+     */
+    const posts = await from(full, () => getPosts({ now: NOW }));
+    const oneLocale = posts.find((post) => post.id === 'post-one-locale');
+
+    expect(oneLocale?.text.hr?.title).toBe('HR post one locale');
+    expect(oneLocale?.text.en).toBeUndefined();
+
+    // And the other direction, so „undefined" cannot be the answer for every row.
+    expect(posts.find((post) => post.id === 'post-earlier')?.text.en).toBeDefined();
   });
 
   it('projects `author` and `authorRef`, the pair a typo cannot hide behind', async () => {
@@ -957,7 +985,7 @@ describe('POSTS_QUERY: published posts, newest first', () => {
 
   it('orders newest first and drops a post dated in the future', async () => {
     const ids = (await from(full, () => getPosts({ now: NOW }))).map((post) => post.id);
-    expect(ids).toEqual(['post-now', 'post-earlier']);
+    expect(ids).toEqual(['post-now', 'post-earlier', 'post-one-locale']);
   });
 });
 
@@ -1446,8 +1474,8 @@ describe('$now is a boundary, asserted rather than assumed', () => {
       getPosts({ now: new Date(NOW.getTime() - MS), minimum: 0 }),
     );
 
-    expect(atNow.map((p) => p.id)).toEqual(['post-now', 'post-earlier']);
-    expect(justBefore.map((p) => p.id)).toEqual(['post-earlier']);
+    expect(atNow.map((p) => p.id)).toEqual(['post-now', 'post-earlier', 'post-one-locale']);
+    expect(justBefore.map((p) => p.id)).toEqual(['post-earlier', 'post-one-locale']);
   });
 
   it('publishes a post dated in the future once `$now` reaches it', async () => {
@@ -1457,7 +1485,7 @@ describe('$now is a boundary, asserted rather than assumed', () => {
       await from(full, () => getPosts({ now: new Date(POST_FUTURE.publishedAt as string) }))
     ).map((post) => post.id);
 
-    expect(ids).toEqual(['post-future', 'post-now', 'post-earlier']);
+    expect(ids).toEqual(['post-future', 'post-now', 'post-earlier', 'post-one-locale']);
   });
 
   it('pins the fixture instants either side of the boundary', async () => {

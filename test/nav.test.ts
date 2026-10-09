@@ -854,14 +854,17 @@ describe('indexability and language handling are separate questions (MUSE-38)', 
     // it guards against would make writing that note impossible.
     const layout = readFileSync(LAYOUT, 'utf8');
     expect(layout).toContain('indexable');
-    expect(layout).toContain('localeTwin');
+    // `localeTwin` became `localeTwins`, a set of locales, when a post could be published
+    // in one language (MUSE-26). The needle allows either spelling on purpose: the rule is
+    // about the *alias*, and renaming the prop must not be a way to stop the rule applying.
+    expect(layout).toMatch(/\blocaleTwins?\b/);
 
     const code = layout
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/^\s*\/\/.*$/gm, '');
     expect(code, 'the comment stripper ate the frontmatter').toContain('Astro.props');
     expect(
-      /\b(?:const|let|var)\s+\w+\s*=\s*(?:indexable|localeTwin)\s*[;,]/.test(code),
+      /\b(?:const|let|var)\s+\w+\s*=\s*(?:indexable|localeTwins?)\s*[;,]/.test(code),
       'one locale/indexing flag is aliased from the other again',
     ).toBe(false);
   });

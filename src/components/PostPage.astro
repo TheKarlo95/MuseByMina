@@ -1,0 +1,339 @@
+---
+import { BLOG_COPY, BLOG_ROUTE, COVER_WIDTH, postCoverUrl } from '../lib/blog';
+import { formatInstantDate } from '../lib/dates';
+import { localeUrl, type Locale } from '../lib/i18n';
+import { renderPortableText } from '../lib/portable-text';
+import { imageFocus, imageSize, type Post } from '../lib/sanity';
+
+/**
+ * `/blog/<slug>` — one post, set as prose (MUSE-26).
+ *
+ * ---------------------------------------------------------------------------------
+ * **The body is Portable Text and this is the site's first renderer for it.**
+ *
+ * `src/lib/portable-text.ts` owns the mapping and the argument for writing it rather than
+ * taking `@portabletext/to-html`; the part that matters here is the contract between the
+ * two. The renderer emits a **closed set of elements** — `p`, `h2`, `blockquote`, `ul`,
+ * `li`, `strong`, `em`, `a` — and anything it has no rule for stops the build naming
+ * itself. So the prose styles below can be stated against elements rather than against
+ * classes, and `test/blog.test.ts` requires a rule for every element the renderer can
+ * produce. An unstyled block is then a red test rather than browser default inside an
+ * otherwise typeset article.
+ *
+ * `:global()` is how those rules reach the markup at all: Astro scopes a component's
+ * styles by stamping an attribute on the elements *in its template*, and HTML arriving
+ * through `set:html` has no attribute to stamp. The selectors are therefore
+ * `.prose :global(p)` — the container keeps its scope, the descendant does not — which is
+ * the narrowest form that works. Note what CLAUDE.md warns about here: a `:global()`
+ * escape hatch creates cascade *ties* with `globals.css`, which is why these rules name an
+ * element inside a scoped class rather than a bare element, and why none of them touches
+ * `font-variant-numeric` (MUSE-14 — `npm run ds` would refuse it anyway).
+ *
+ * ## Nothing may break the measure or overflow at 390px
+ *
+ * Three things do that work, and the first is the strongest:
+ *
+ *   1. **An image block and a code block cannot arrive.** The schema offers neither, and
+ *      the renderer fails the build on either — so the two constructs that would blow the
+ *      measure are refused rather than styled around. That is a better guarantee than a
+ *      CSS rule, because a CSS rule has to be right about something nobody has seen.
+ *   2. **`overflow-wrap: anywhere` on the prose.** What *is* allowed and can still be wide
+ *      is a long unbroken token: a URL pasted as link text, a Croatian compound. 390px is
+ *      the measured case and `test/blog.test.ts` drives a 200-character token through it.
+ *   3. **One measure, on the container.** `68ch` (§5) is set once on `.prose` rather than
+ *      per element, so a block type added later inherits it instead of needing to remember.
+ *
+ * ## The byline, and the three states an author can be in
+ *
+ * MUSE-49's field, rendered. `decode.ts` has already reduced four possibilities to three,
+ * and the third never reaches this component:
+ *
+ *   - **a name** — the instructor who wrote it, so the byline is the person;
+ *   - **nothing** — the Studio field says „Ostavi prazno i objava je potpisana studijem",
+ *     so the byline is the **studio's own name**, read off the same `siteSettings` the
+ *     footer, `og:site_name` and the JSON-LD use. A post signed by the studio is an
+ *     editorial choice, not a gap, so it gets a byline rather than losing one;
+ *   - **a deleted instructor** — a `_ref` with no value, which is a **build failure**
+ *     naming the document, the field and the `_ref`. That is the whole of MUSE-49: before
+ *     it, this case was indistinguishable from the second and published the post unsigned
+ *     with nothing said.
+ *
+ * So there is no „no author" branch in this file, and that is the point: the only way to
+ * have no byline would be for the studio to have no name.
+ * ---------------------------------------------------------------------------------
+ */
+interface Props {
+  locale: Locale;
+  post: Post;
+  /**
+   * The byline when the post names nobody: the studio's own name, off the same
+   * `getSiteSettings()` the footer and the JSON-LD read. Passed in rather than read here
+   * so there is one read and no second copy (MUSE-50).
+   */
+  studioName: string;
+}
+
+const { locale, post, studioName } = Astro.props;
+const t = BLOG_COPY[locale];
+
+/**
+ * The text in this locale.
+ *
+ * Non-null because the page wrapper only generates a path for a locale the post is
+ * published in — `getStaticPaths` filters on exactly this — so arriving here without it is
+ * a routing bug rather than a content one. The `!` is the assertion of that invariant and
+ * `test/blog.test.ts` proves it from the outside: `/en/blog/<hr-only-slug>/` is a 404,
+ * not a page with a hole in it.
+ */
+const text = post.text[locale]!;
+const body = renderPortableText(text.body, `${post.id} \`${locale}.body\``);
+const byline = post.author ?? studioName;
+
+/**
+ * The cover, at the one width `src/lib/blog.ts` names — the same URL the JSON-LD block's
+ * `image` carries, which is why the width is a shared constant rather than a literal here.
+ * `imageSize` clamps to what the asset has, so the intrinsic size in the markup is the
+ * size of the bytes and the box does not reflow when the image lands (§9 rule 2).
+ */
+const cover = post.coverImage;
+const coverUrl = postCoverUrl(post);
+const box = cover === undefined ? undefined : imageSize(cover, { width: COVER_WIDTH });
+const focus = cover === undefined ? undefined : imageFocus(cover);
+---
+
+<article class="post">
+  <section class="head">
+    <div class="wrap">
+      <p class="when">
+        <time datetime={post.publishedAt}>{formatInstantDate(post.publishedAt, locale)}</time>
+        {/* The separator is decoration between two facts, so it is not announced. */}
+        <span class="dot" aria-hidden="true">·</span>
+        <span class="by">{byline}</span>
+      </p>
+      <h1 class="display">{text.title}</h1>
+      <p class="lede">{text.excerpt}</p>
+    </div>
+  </section>
+
+  {
+    cover !== undefined && (
+      <section class="coverSection">
+        <div class="wrap">
+          <div class="shot">
+            <img
+              src={coverUrl}
+              alt={cover.alt[locale]}
+              width={box!.width}
+              height={box!.height}
+              decoding="async"
+              style={`object-position: ${focus!.x}% ${focus!.y}%`}
+            />
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  <section class="bodySection">
+    <div class="wrap">
+      {/*
+        The one `set:html` on the site. Everything inside it came through
+        `renderPortableText`, which escapes every text node and every attribute value
+        itself and refuses any construct it has no rule for — so there is no path from a
+        Studio field to raw markup here. See that module's note on why the escaping is
+        ours rather than a library's.
+      */}
+      <div class="prose" set:html={body} />
+
+      <p class="back">
+        <a class="backLink" href={localeUrl(BLOG_ROUTE, locale)}>{t.toBlog}</a>
+      </p>
+    </div>
+  </section>
+</article>
+
+<style>
+  .head {
+    padding: var(--space-7) var(--space-5) var(--space-6);
+  }
+  .coverSection {
+    padding: 0 var(--space-5);
+  }
+  .bodySection {
+    padding: var(--space-7) var(--space-5) var(--space-8);
+  }
+  @media (min-width: 768px) {
+    .head {
+      padding: var(--space-9) var(--space-7) var(--space-6);
+    }
+    .coverSection {
+      padding: 0 var(--space-7);
+    }
+    .bodySection {
+      padding: var(--space-7) var(--space-7) var(--space-10);
+    }
+  }
+  /*
+    The measure, once. 1280px would be the page container elsewhere on the site; an article
+    is prose from edge to edge, so §5's 68ch is the container rather than a cap applied per
+    element — a block type added to the renderer later inherits it instead of having to
+    remember it.
+  */
+  .wrap {
+    max-width: 68ch;
+    margin-inline: auto;
+  }
+
+  .when {
+    font-family: var(--font-label);
+    font-weight: 400;
+    font-size: 0.75rem;
+    letter-spacing: 0.28em;
+    /* Č Ć Ž Š carry marks above the cap line — 1.4 is the floor in Croatian (§4.6). */
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .dot {
+    margin-inline: var(--space-2);
+    color: var(--text-subtle);
+  }
+  .by {
+    color: var(--text-muted);
+  }
+
+  /* Cormorant, so never below 26px — `clamp()`'s first value is the floor (§4). */
+  .display {
+    margin-block-start: var(--space-4);
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.5rem, 7vw, 4.5rem);
+    line-height: 1;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    /* A Croatian title can be one long compound; it wraps rather than widening the page. */
+    overflow-wrap: anywhere;
+  }
+
+  .lede {
+    margin-block-start: var(--space-5);
+    font-size: 1.125rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+  }
+
+  /* --- the cover (§9 rule 2: `cover` plus an explicit `aspect-ratio`) --- */
+  .shot {
+    aspect-ratio: 16 / 9;
+    background: var(--surface-sunken);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    /* §9: on a light page a full-bleed image gets a hairline so it does not float. */
+    border: 1px solid var(--line);
+  }
+  .shot img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  /* ------------------------------------------------------------------ the prose */
+  /*
+    One rule per element `renderPortableText` can emit, and `PROSE_ELEMENTS` in
+    `src/lib/portable-text.ts` is derived from the same maps the renderer branches on — so
+    `test/blog.test.ts` can require this block to cover all of them. A block style added to
+    the schema and the renderer without a rule here is a red test rather than a paragraph
+    of browser default in the middle of a typeset article.
+
+    `:global()` because `set:html` content carries no scope attribute; the container keeps
+    its own, so the blast radius is inside `.prose` and nowhere else.
+  */
+  .prose {
+    font-size: 1.0625rem;
+    line-height: 1.7;
+    color: var(--text-muted);
+    /* A pasted URL as link text is the realistic overflow at 390px — it breaks instead. */
+    overflow-wrap: anywhere;
+  }
+
+  .prose :global(p) {
+    margin-block-start: var(--space-5);
+  }
+  .prose :global(p:first-child) {
+    margin-block-start: 0;
+  }
+
+  /*
+    The one subheading the schema offers, rendered as `<h2>` so the outline under the
+    post's `<h1>` does not skip a level (§11.8, and `heading-order` is live in
+    `npm run a11y` since MUSE-75). Set in the **label** face rather than the display one,
+    which is `WhatIsBachata.astro`'s reasoning on the same problem: Cormorant cannot go
+    below 26px, so a display-face `h2` on a page of them either crowds the h1 or loses the
+    `đ` crossbar — and a document reads as a document rather than as a stack of heroes.
+  */
+  .prose :global(h2) {
+    margin-block-start: var(--space-7);
+    font-family: var(--font-label);
+    font-weight: 400;
+    font-size: 0.75rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  /*
+    §6.6's hairline box applied to a quote: an accent rule on the inline start edge, no
+    fill and no shadow (§5 — depth is surface value and hairlines, in either theme).
+  */
+  .prose :global(blockquote) {
+    margin-block-start: var(--space-6);
+    padding-inline-start: var(--space-5);
+    border-inline-start: 2px solid var(--line-accent);
+    color: var(--text);
+  }
+
+  .prose :global(ul) {
+    margin-block-start: var(--space-5);
+    padding-inline-start: var(--space-5);
+    list-style: disc;
+  }
+  /* A nested list is tighter than a new one: it is a continuation, not a new section. */
+  .prose :global(ul ul) {
+    margin-block-start: var(--space-2);
+  }
+  .prose :global(li) {
+    margin-block-start: var(--space-2);
+  }
+
+  .prose :global(strong) {
+    font-weight: 600;
+    color: var(--text);
+  }
+  .prose :global(em) {
+    font-style: italic;
+  }
+  .prose :global(a) {
+    color: var(--accent);
+    text-underline-offset: 3px;
+  }
+
+  .back {
+    margin-block-start: var(--space-7);
+    padding-block-start: var(--space-6);
+    border-block-start: 1px solid var(--line);
+  }
+  .backLink {
+    display: inline-flex;
+    align-items: center;
+    /* 44px is the §11 touch target. */
+    min-height: 44px;
+    font-family: var(--font-label);
+    font-size: 0.8125rem;
+    letter-spacing: 0.2em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+    text-underline-offset: 4px;
+  }
+</style>

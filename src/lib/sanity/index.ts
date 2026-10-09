@@ -117,6 +117,7 @@ export type {
   Instructor,
   PageMetaDoc,
   Post,
+  PostTranslation,
   PricingTier,
   ProsePage,
   ProseSection,
@@ -468,7 +469,8 @@ export async function getPastEvents({
  * risk; the diagnosis was.
  *
  * So the name is folded into the message here, in one place, for any future dynamic route
- * rather than for `/events/<slug>/` alone. `cause` is kept, so nothing is lost for a reader
+ * rather than for `/events/<slug>/` alone — `/blog/<slug>/` is the second caller
+ * (MUSE-26) and needed nothing but the import. `cause` is kept, so nothing is lost for a reader
  * who wants the original. `test/content.test.ts` is the guard and needed no new build: its
  * unreachable-API build now fails *through* this function, and still has to name the class.
  */
@@ -502,6 +504,22 @@ export async function getGallery({ minimum = 1 }: ListOptions = {}) {
   return requireDocuments(rows, 'galleryImage', decodeGalleryImage, minimum);
 }
 
+/**
+ * **Published posts, newest first — `/blog/` and every `/blog/<slug>/`** (MUSE-26).
+ *
+ * One reader for both, which is deliberate and is where this departs from `/events`:
+ * `POSTS_QUERY` is the only query over `post`, so the index and `getStaticPaths` cannot
+ * disagree about which posts exist. `src/lib/sanity/queries.ts` has the argument for why
+ * there is no clockless twin here — the short version is that a post must not have a URL
+ * before its `publishedAt`, which is the whole of what the Studio field promises.
+ *
+ * `now` is a parameter so two builds of one commit at one instant agree (MUSE-20), and so
+ * that a page can hand the same instant to everything it renders.
+ *
+ * **Not memoised**, for `getStudioStory`'s reason: `test/projections.test.ts` swaps the
+ * fixture per test, and a memoised reader silently answers the second test from the
+ * first's dataset. The cost is one query per locale per build.
+ */
 export async function getPosts({
   minimum = 1,
   now = new Date(),
