@@ -110,6 +110,18 @@ export function formatPrice(amountEur: number, locale: Locale): string {
  * Wording, not content: this is the site saying "per class" in the page's language, the
  * same way `STUDIO.country` says „Hrvatska"/"Croatia". What a package costs and what it
  * includes are Mina's and come from the CMS.
+ *
+ * **Each pair must say the same thing in two languages and nothing more** (MUSE-73).
+ * `package` read "one-off package" in English against „paket" in Croatian — a word about
+ * *payment terms* that the Croatian does not say and no `pricingTier` document contains,
+ * which is MUSE-80's defect inside a formatting table rather than inside copy. It is
+ * „paket" / "package" now. The period that carried it is retired from the dataset with
+ * the two-month tier, so nothing renders it today; it stays in the list because a closed
+ * set is the Studio's dropdown and Mina may sell a package again, and because a value the
+ * page cannot name is a build failure (`periodName`) rather than a blank card.
+ *
+ * `class` is what a drop-in uses — „po satu" / "per class", the honest shape for a single
+ * class, and already the right words before MUSE-73 needed them.
  */
 export const PERIOD_NAME: Record<Locale, Record<string, string>> = {
   hr: {
@@ -122,7 +134,7 @@ export const PERIOD_NAME: Record<Locale, Record<string, string>> = {
     class: 'per class',
     course: 'per course',
     month: 'per month',
-    package: 'one-off package',
+    package: 'package',
   },
 };
 
@@ -177,11 +189,12 @@ export function packageValue(tier: { name: Record<Locale, string> }): string {
  * Four strings. Deliberately four: MUSE-22 landed with the dataset empty and no prices
  * agreed, so the component had to be built without inventing any content for it — no
  * package names, no "what's included" lines, no "most popular" claim, no lede. MUSE-59
- * then filled the dataset and routed the page **without adding a fifth**, which is the
- * half worth noticing: the page a visitor reads says „Cjenik", two package names, two
- * prices, two periods and one line each, and every one of those but the first came out
- * of `pricingTier`. All of it is Mina's. What is left here is chrome, and each of the
- * four is a word for something structural rather than a claim about anything:
+ * then filled the dataset and routed the page **without adding a fifth**, and MUSE-73
+ * published the studio's third rate without adding one either, which is the half worth
+ * noticing: the page a visitor reads says „Cjenik", three rate names, three prices,
+ * three periods and one line each, and every one of those but the first came out of
+ * `pricingTier`. All of it is Mina's. What is left here is chrome, and each of the four
+ * is a word for something structural rather than a claim about anything:
  *
  *   - `title` is the page's own name.
  *   - `featuredTab` says what the tab *is* — the Studio's checkbox is „Istaknuti paket",

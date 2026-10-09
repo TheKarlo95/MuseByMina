@@ -1150,15 +1150,37 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   panel and in the footer's quick list. `test/nav.test.ts` was already written as a
   conditional on `MORE_NAV` rather than as "there is no More button", so the disclosure is
   held to its own criteria the day it comes back.
-- **`/pricing` publishes two periods: 55 € for one month, 100 € for two** — confirmed by
-  the studio, and the whole of it. No drop-in rate, no student discount, no third package;
-  `test/pricing.test.ts`'s `CONFIRMED_TIERS` is the receipt and a third document in the
-  seed is a red test. 100 € is a real discount on 2 × 55 €, and the two-month tier's one
-  `features` line says so, because a reader should not have to multiply. Neither tier is
-  `featured`: nobody has asked Mina which to single out, and `resolveFeatured` treats zero
-  as a complete page. `features` is `required().min(1)`, so „an empty optional field is a
-  decision" could not be taken here — the two lines that exist describe the *period*
-  rather than claiming what a month of classes contains.
+- **`/pricing` publishes the studio's three rates, and that is the whole rate card**
+  (MUSE-73). 55 € regular monthly, 40 € student monthly, 20 € drop-in — confirmed by the
+  owner on 2026-10-09, in those words, after being asked for the complete card.
+  `test/pricing.test.ts`'s `CONFIRMED_TIERS` is the receipt and a fourth document in the
+  seed is a red test. None of the three is `featured`: nobody has asked which to single
+  out, three cards is exactly the arrangement a „most popular" tab is written for, and
+  `resolveFeatured` treats zero as a complete page. `features` is `required().min(1)`, so
+  „an empty optional field is a decision" could not be taken — each line restates what the
+  rate *is* rather than claiming what a month of classes contains, which is the only
+  honest thing to put there when the card gives a name, a price and a period and nothing
+  else.
+
+  **It said „two periods: 55 € for one month, 100 € for two — and the whole of it" until
+  MUSE-73, and that sentence is the shape to learn from.** It was true that MUSE-59 was
+  told so; it was not the rate card. The studio's own enrolment form charges three rates
+  and no two-month package, so the site was missing the student rate and the drop-in and
+  publishing a price nobody offers. **Every mechanism on this board stops the site saying
+  more than is true, and nothing watches it saying less** — a frozen list, a document
+  count, a residue subtraction and an invented-price scan are all one-directional, and
+  all four were green. The receipt now records *who was asked and when*, because that is
+  the only instrument there is for the other direction.
+
+  **Retiring a rate is a seed deletion, which is a case this repository cannot finish.**
+  `npm run sanity:seed` is `sanity dataset import --replace`: it replaces by `_id` and
+  **never deletes** what it was not given, so dropping the line leaves the document live
+  and rendering while the suite, reading the seed, shows it gone and passes. The dataset
+  half is `sanity documents delete <id>`, a write, and **an agent does not run it** — same
+  rule as the import. Order matters and the gap is the reason: delete first, then import.
+  Between the two writes the dataset is briefly inconsistent either way, and MUSE-21's
+  cron can rebuild inside that window — import-first publishes four cards including the
+  retired price, delete-first publishes a truthful page that is one rate short.
 - **The site makes no claim about what a first class costs** (MUSE-71). „Besplatni probni
   sat" / "Free trial class" was the header CTA on all fourteen pages in both locales, and
   the promise was repeated in the homepage `#trial` band, `/contact`'s eyebrow,

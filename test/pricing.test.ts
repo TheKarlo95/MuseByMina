@@ -169,6 +169,33 @@ describe('the period a price is for', () => {
     }
   });
 
+  /**
+   * **MUSE-73, MUSE-80: a period is named, never characterised.**
+   *
+   * `package` read "one-off package" in English against „paket" in Croatian. „Paket" says
+   * *what the price covers*; "one-off" says *how it is paid* — a payment-terms claim the
+   * Croatian does not make, that no `pricingTier` field contains and that nobody at the
+   * studio has stated. It is MUSE-80's defect one layer down, inside the formatting table
+   * rather than inside copy, and it was reachable because this map is the one place on the
+   * page where a word is chosen in code rather than read from the CMS.
+   *
+   * Stated over every period and not only the one that was wrong: the rule is that the two
+   * languages name the same thing, so the needles are the kinds of thing a *translation*
+   * cannot add. A drop-in is now `class` — „po satu" / "per class" — which is the honest
+   * shape and needed no new period to exist.
+   */
+  it('names each period without characterising how it is paid', () => {
+    const claims = /one-?off|single payment|up-?front|no commitment|lifetime|unlimited/i;
+    for (const locale of LOCALES) {
+      for (const period of PRICE_PERIODS) {
+        expect(periodName(period, locale), `${locale}.${period}`).not.toMatch(claims);
+      }
+    }
+    expect(PERIOD_NAME.en['package']).toBe('package');
+    expect(PERIOD_NAME.hr['class']).toBe('po satu');
+    expect(PERIOD_NAME.en['class']).toBe('per class');
+  });
+
   it('leaves none of them blank', () => {
     for (const locale of LOCALES) {
       for (const period of PRICE_PERIODS) {
@@ -782,6 +809,96 @@ describe('§7.2: the featured treatment is a hairline and a tab, never a fill', 
     }
   });
 
+  /**
+   * **§7.2 is „three cards", and whether three fit is arithmetic nobody had done**
+   * (MUSE-73).
+   *
+   * The row was `repeat(auto-fit, minmax(15rem, 24rem))` inside a 1280px container with
+   * 48px of section padding and a 32px gap. Three 384px cards plus two gaps is 1216
+   * against a row of 1184, so the moment a third rate was seeded the page wrapped 2 + 1
+   * **at the exact width this design is drawn at** — and `auto-fit` centres the *track
+   * set*, so the orphan sat in track 1, under the left-hand card, reading as a card that
+   * had failed to load. Every number was individually defensible and no two of them had
+   * ever been multiplied together.
+   *
+   * So this is the multiplication, read out of the source and out of `tokens.css` rather
+   * than retyped: **the seeded rates fit on one line at the container's own width.** The
+   * count comes from the seed, so a fourth rate makes this a decision again rather than a
+   * surprise in a screenshot; the ceiling, the gap, the padding and the container all
+   * come from the files that set them, so moving any one of them fails here naming the
+   * sum. It costs no build and no browser — the census has zero headroom (MUSE-68) — and
+   * a layout is otherwise only visible in `npm run shots`, which is a human looking.
+   */
+  it('fits every seeded rate on one row at the container’s own width', () => {
+    const SPACE = readFileSync(join(SRC, 'styles/tokens.css'), 'utf8');
+
+    /** A length in CSS pixels: a `var(--space-n)` resolved against the token file, or a literal. */
+    const px = (value: string): number => {
+      const token = /var\(--([\w-]+)\)/.exec(value)?.[1];
+      if (token !== undefined) {
+        const declared = new RegExp(`--${token}:\\s*([\\d.]+)px`).exec(SPACE)?.[1];
+        expect(declared, `${token} is not a px token in tokens.css`).toBeDefined();
+        return Number(declared);
+      }
+      const rem = /^([\d.]+)rem$/.exec(value.trim())?.[1];
+      if (rem !== undefined) return Number(rem) * 16;
+      const absolute = /^([\d.]+)px$/.exec(value.trim())?.[1];
+      expect(absolute, `${value} is neither a token, a rem nor a px`).toBeDefined();
+      return Number(absolute);
+    };
+
+    /** Every declaration block for `selector`, in source order. */
+    const blocks = (selector: string): string[] =>
+      [...STYLE.matchAll(new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`, 'g'))].map((m) => m[1]!);
+
+    /** One declaration out of a block, by property name. */
+    const declared = (block: string, property: string): string => {
+      const found = new RegExp(`(?<![-\\w])${property}\\s*:\\s*([^;]+)`).exec(block)?.[1];
+      expect(found, `no \`${property}\` in ${JSON.stringify(block.trim())}`).toBeDefined();
+      return found!.trim();
+    };
+
+    const tiers = blocks('.tiers');
+    const sections = blocks('.section');
+    const cells = blocks('.cell');
+    expect(tiers.length, 'no .tiers rule').toBeGreaterThan(0);
+    expect(sections.length, 'no .section rule').toBeGreaterThan(0);
+
+    // The desktop values are the last rule for each selector: the media query is at the
+    // end of the stylesheet, which `test/cascade.test.ts`'s argument makes load-bearing.
+    const container = px(declared(tiers[0]!, 'max-width'));
+    const gap = px(declared(tiers.at(-1)!, 'gap'));
+    const padding = px(declared(sections.at(-1)!, 'padding').split(/\s+/).at(-1)!);
+    const sized = cells.find((block) => /flex\s*:/.test(block));
+    expect(sized, 'no .cell rule sizes the card').toBeDefined();
+    const ceiling = px(declared(sized!, 'flex').split(/\s+/).at(-1)!);
+    const floor = px(declared(sized!, 'min-width'));
+
+    const count = seededTiers().length;
+    const row = container - 2 * padding;
+    const needed = count * ceiling + (count - 1) * gap;
+
+    expect(count, 'one card always fits; this test needs a row').toBeGreaterThan(1);
+    expect(floor, 'the ceiling is below the floor').toBeLessThanOrEqual(ceiling);
+    expect(
+      needed,
+      `${count} cards of ${ceiling}px with ${gap}px gaps need ${needed}px, and the row ` +
+        `is ${container}px less 2 × ${padding}px of section padding = ${row}px. §7.2 is ` +
+        'three cards; lower the ceiling, or say in the component why the row may wrap.',
+    ).toBeLessThanOrEqual(row);
+  });
+
+  it('centres a line that does wrap, rather than hanging it off the left', () => {
+    // The other half of the same defect, and the half that outlives today's three: a
+    // wrapped flex line centres itself, where `auto-fit`'s wrapped card lands in the
+    // first track of a centred track set. Stated against the desktop rule so a fourth
+    // rate is a tidy 3 + 1 rather than a card that looks like it failed to load.
+    const desktop = [...STYLE.matchAll(/\.tiers\s*\{([^}]*)\}/g)].at(-1)![1]!;
+    expect(desktop).toMatch(/display:\s*flex/);
+    expect(desktop).toMatch(/flex-wrap:\s*wrap/);
+    expect(desktop).toMatch(/justify-content:\s*center/);
+  });
+
   it('keeps the price above Cormorant’s 26px floor', () => {
     // Below it the `đ` crossbar vanishes; the scale's own floor is `display-s` at
     // 1.625rem. The price is `display-m`, whose clamp minimum is 2.125rem.
@@ -842,37 +959,66 @@ describe('the component copy table', () => {
 /**
  * **What the studio confirmed, frozen — the receipt, not the source.**
  *
- * Two periods and no others: 55 € for one month, 100 € for two. The seed is the source and
- * the page reads it; this is the second copy that makes „somebody invented a third tier"
- * a red test rather than a thing a reviewer has to notice. `src/data/schedule.ts` is why:
- * thirteen invented classes passed every test in the repository for the life of the
- * project, because the suite compared the page to the file the page was rendered from
- * (MUSE-36).
+ * The seed is the source and the page reads it; this is the second copy that makes
+ * „somebody invented a tier" a red test rather than a thing a reviewer has to notice.
+ * `src/data/schedule.ts` is why: thirteen invented classes passed every test in the
+ * repository for the life of the project, because the suite compared the page to the file
+ * the page was rendered from (MUSE-36).
  *
  * It follows `PUBLISHED_BEFORE_THE_MIGRATION` in `test/content.test.ts` exactly: when Mina
- * legitimately changes a price or adds a package, **edit this list in the same commit with
- * a sentence saying who decided it** — do not quietly make it match.
+ * legitimately changes a price or adds a rate, **edit this list in the same commit with a
+ * sentence saying who decided it** — do not quietly make it match.
+ *
+ * **The edit of record (MUSE-73).** It read „two periods and no others: 55 € for one month,
+ * 100 € for two" — relayed in good faith and *incomplete*. The owner was asked directly for
+ * the complete rate card on 2026-10-09 and gave three rates: a regular monthly 55 €, a
+ * student monthly 40 € and a 20 € drop-in; asked about the fourth price the site was
+ * publishing, 100 € for two months, the owner removed it. It is on neither the rate card
+ * nor the studio's own enrolment form, so it goes for MUSE-71's reason — a published price
+ * nobody offers is an invented commercial claim whichever direction the invention ran.
+ *
+ * Worth keeping in view, because it is the first of its kind on this board: every guard
+ * here was built to stop the site saying **more** than is true, and this receipt was what
+ * made the site saying **less** a green test. A reader on `/pricing` concluded there was no
+ * student rate. Freezing a list closes one hole and opens the other; the only thing that
+ * closes both is asking the owner, which is what the entry above records.
  *
  * `featured` is in here for the same reason the prices are. Nobody has asked the studio
- * which package to single out, so neither tier is featured, and „an empty optional field
- * is a decision" is only a decision if undoing it is visible.
+ * which rate to single out, so none of the three is featured — three cards is exactly the
+ * arrangement a „most popular" tab is written for, and inventing that emphasis is
+ * inventing a claim about other people's behaviour. „An empty optional field is a
+ * decision" is only a decision if undoing it is visible.
  */
 const CONFIRMED_TIERS = [
   { id: 'pricing-one-month', priceEur: 55, period: 'month', featured: false },
-  { id: 'pricing-two-months', priceEur: 100, period: 'package', featured: false },
+  { id: 'pricing-student', priceEur: 40, period: 'month', featured: false },
+  { id: 'pricing-dropin', priceEur: 20, period: 'class', featured: false },
 ] as const;
+
+/**
+ * **The rate the studio no longer publishes, kept by `_id` so its return is a red test.**
+ *
+ * `pricing-two-months` is deleted from the seed, and a seed deletion is *not* a dataset
+ * deletion: `npm run sanity:seed` is `sanity dataset import --replace`, which replaces by
+ * `_id` and leaves everything it was not given alone. So removing the line is the half this
+ * repository can hold, and the other half is a write nobody here performs — see the pull
+ * request. What this constant is for is the half that *is* testable: the document must not
+ * come back into the seed, and no rate on the page may be the one it carried.
+ */
+const RETIRED_TIER = { id: 'pricing-two-months', priceEur: 100, period: 'package' } as const;
 
 /**
  * The prices the edited dataset states instead, for the MUSE-50 build.
  *
- * Deliberately unlike anything else a page of this site prints, and neither one a
- * substring of the other or of the seeded pair — the absence claim below is a byte search
+ * Deliberately unlike anything else a page of this site prints, and no one of them a
+ * substring of another or of the seeded three — the absence claim below is a byte search
  * over every file in the output, so `€15` inside `€150` would make it pass for the wrong
- * reason.
+ * reason, and `20 €` inside `120 €` is the same trap with the seeded value on the inside.
  */
 const EDITED_PRICES: Record<string, number> = {
   'pricing-one-month': 73,
-  'pricing-two-months': 151,
+  'pricing-student': 86,
+  'pricing-dropin': 91,
 };
 
 /** Where each locale's pricing page lands in the output. */
@@ -944,8 +1090,8 @@ beforeAll(() => {
   });
 }, 600_000);
 
-describe('MUSE-59: two periods, confirmed by the studio, and no others', () => {
-  it('seeds exactly the confirmed tiers, at the confirmed prices', () => {
+describe('MUSE-73: three rates, confirmed by the owner, and no others', () => {
+  it('seeds exactly the confirmed rates, at the confirmed prices', () => {
     expect(
       seededTiers().map((tier) => ({
         id: tier._id,
@@ -956,29 +1102,98 @@ describe('MUSE-59: two periods, confirmed by the studio, and no others', () => {
     ).toEqual(CONFIRMED_TIERS.map((tier) => ({ ...tier })));
   });
 
-  it('invents no third tier, no drop-in rate and no package', () => {
+  it('publishes every rate the studio charges, which is the half MUSE-59 missed', () => {
+    // The direction nothing on this board was watching. MUSE-59's guard made „a fourth
+    // document is content nobody confirmed" a red test and left „a rate nobody published"
+    // green — and the site charged three rates while publishing one of them.
+    expect(seededTiers().map((tier) => tier.priceEur).sort()).toEqual(
+      CONFIRMED_TIERS.map((tier) => tier.priceEur).sort(),
+    );
+  });
+
+  it('invents no fourth rate, no package and no course price', () => {
     // The assertion MUSE-36 did not have. A fourth document in the seed is content nobody
     // confirmed, and a price is a commercial claim as well as a string.
     expect(seededTiers()).toHaveLength(CONFIRMED_TIERS.length);
   });
 
-  it('gives the two-month tier a real discount rather than a rounder number', () => {
-    const [oneMonth, twoMonths] = CONFIRMED_TIERS;
-    expect(twoMonths.priceEur).toBeLessThan(2 * oneMonth.priceEur);
+  it('no longer seeds the two-month package, by id, by price and by period', () => {
+    /**
+     * Three claims because there are three ways for it to come back: the same document, a
+     * new document carrying the same rate, and a rate the page would describe as a
+     * package. The owner removed this price on 2026-10-09; the dataset half of the
+     * removal is a write this repository cannot perform (see the pull request).
+     */
+    expect(seedDocs().map((doc) => doc._id)).not.toContain(RETIRED_TIER.id);
+    expect(seededTiers().map((tier) => tier.priceEur)).not.toContain(RETIRED_TIER.priceEur);
+    expect(seededTiers().map((tier) => tier.period)).not.toContain(RETIRED_TIER.period);
   });
 
-  it('says on the page that it is a discount, so nobody has to do the arithmetic', () => {
-    // The tier's own `features`, which is where a reason a package is worth buying
-    // belongs — not a number computed in a component, which would be a second place a
-    // price lives (and would go stale against `priceEur` on the next Studio edit).
-    const twoMonths = seededTiers().find((tier) => tier._id === 'pricing-two-months')!;
-    const features = twoMonths.features as Record<Locale, string>[];
-    expect(features.length).toBeGreaterThan(0);
+  it('leaves the retired price nowhere on the built page, in either locale', () => {
+    // The output half: the number, formatted the way the page would have printed it.
     for (const locale of LOCALES) {
-      for (const feature of features) {
-        expect(feature[locale]?.trim(), `${locale}`).toBeTruthy();
-        expect(published.read(PRICING_PAGE[locale]), locale).toContain(feature[locale]);
+      expect(
+        published.read(PRICING_PAGE[locale]),
+        `${locale} still prints the retired rate`,
+      ).not.toContain(formatPrice(RETIRED_TIER.priceEur, locale));
+    }
+  });
+
+  it('charges students less than the regular monthly rate, as the card says', () => {
+    const regular = CONFIRMED_TIERS.find((tier) => tier.id === 'pricing-one-month')!;
+    const student = CONFIRMED_TIERS.find((tier) => tier.id === 'pricing-student')!;
+    expect(student.period, 'the student rate is monthly too').toBe(regular.period);
+    expect(student.priceEur).toBeLessThan(regular.priceEur);
+  });
+
+  it('prices the drop-in per class rather than per month', () => {
+    // „po satu" / "per class", not „paket" / "one-off package" — the wording MUSE-80
+    // found makes a payment-terms claim the Croatian does not. The period is the whole
+    // of the fix: a drop-in is one class, and `class` is the value that says so.
+    const dropIn = seededTiers().find((tier) => tier._id === 'pricing-dropin')!;
+    expect(dropIn.period).toBe('class');
+    const monthly = seededTiers().filter((tier) => tier.period === 'month');
+    expect(monthly).toHaveLength(2);
+    for (const locale of LOCALES) {
+      const card = cards(published.read(PRICING_PAGE[locale])).find(
+        (c) => c.attrs['data-tier'] === dropIn._id,
+      )!;
+      expect(card, locale).toBeDefined();
+      expect(card.text, locale).toContain(PERIOD_NAME[locale]['class']);
+      expect(card.text, locale).not.toContain(PERIOD_NAME[locale]['month']);
+    }
+  });
+
+  it('says of each rate only what its own document says', () => {
+    // Every tier's `features`, rendered — which is where a line about what a rate is for
+    // belongs. Not a sentence composed in the component, which would be a second place a
+    // claim about a price lives and would go stale on the next Studio edit. Stated over
+    // every tier rather than over the one that had a discount line, so the next rate is
+    // covered the day it is seeded.
+    for (const tier of seededTiers()) {
+      const features = tier.features as Record<Locale, string>[];
+      expect(features.length, tier._id).toBeGreaterThan(0);
+      for (const locale of LOCALES) {
+        for (const feature of features) {
+          expect(feature[locale]?.trim(), `${tier._id} ${locale}`).toBeTruthy();
+          expect(
+            published.read(PRICING_PAGE[locale]),
+            `${tier._id} ${locale}`,
+          ).toContain(feature[locale]);
+        }
       }
+    }
+  });
+
+  it('singles out none of the three, so no card claims to be the popular one', () => {
+    // Three cards is the arrangement a „most popular" tab is written for, and nobody has
+    // said which rate that would be. `resolveFeatured` treats zero as a complete page.
+    expect(seededTiers().filter((tier) => tier.featured === true)).toEqual([]);
+    for (const locale of LOCALES) {
+      expect(published.read(PRICING_PAGE[locale]), locale).not.toContain('data-tab');
+      expect(published.read(PRICING_PAGE[locale]), locale).not.toContain(
+        PRICING_COPY[locale].featuredTab,
+      );
     }
   });
 

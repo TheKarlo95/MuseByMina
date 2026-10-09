@@ -28,11 +28,18 @@ import TrialForm from './TrialForm.astro';
  * leaves `minimum` at 1 — so a route pointing here would have failed every build on
  * `main`, the pull request checks, the deploy and MUSE-21's scheduled rebuild with it.
  *
- * What ended that was content, not code: Mina confirmed **two** periods, 55 € for one
- * month and 100 € for two, and nothing else — no drop-in rate, no third package.
- * `test/pricing.test.ts` holds that as a frozen list, because a wrong price is the worst
+ * What ended that was content, not code: the studio confirmed its rates, and
+ * `test/pricing.test.ts` holds them as a frozen list, because a wrong price is the worst
  * thing this site could invent: it is MUSE-36's failure (plausible placeholder content
  * that reached production and stayed) plus a commercial claim somebody budgets around.
+ *
+ * **MUSE-59 published one of three, which is the other half of that rule** (MUSE-73).
+ * The frozen list was „two periods and no others", relayed in good faith and incomplete:
+ * the studio's own enrolment form charges a regular monthly rate, a student monthly rate
+ * and a drop-in, and the two-month package the site published was none of them. So every
+ * guard on this page was pointed at the site saying *more* than is true and nothing
+ * watched it saying *less* — a reader on `/pricing` concluded there was no student rate.
+ * The receipt is three entries now, and a fourth document is still a red test.
  *
  * The ordering that got it here is worth knowing, because the next routed page needs it
  * too: the `pricingTier` and `page` documents were imported into the live dataset
@@ -76,10 +83,15 @@ const { tiers, warning } = resolveFeatured(await getPricingTiers());
  * MUSE-59 shipped the page and did **not** add that rule, which is a decision rather
  * than an omission: it is a schema change, so it costs a regenerated `schema.json`, a
  * regenerated type file, a new stamp and a Studio redeploy, and it guards a state that
- * cannot exist in the dataset today — neither seeded tier is featured, so there is no
- * second box to tick by accident. It becomes worth doing the day somebody ticks the
- * first one. Until then the build log is the whole of the report, and that is enough,
- * because the page it describes still renders correctly.
+ * cannot exist in the dataset today — none of the three seeded rates is featured, so
+ * there is no second box to tick by accident. It becomes worth doing the day somebody
+ * ticks the first one. Until then the build log is the whole of the report, and that is
+ * enough, because the page it describes still renders correctly.
+ *
+ * **MUSE-73 added a third rate and deliberately featured none of them.** Three cards is
+ * the arrangement a "most popular" tab is written for, and nobody has said which of the
+ * studio's rates that would be — inventing commercial emphasis is MUSE-36's defect with
+ * a border around it.
  */
 if (warning !== undefined) console.warn(`[pricing] ${warning}`);
 
@@ -287,24 +299,47 @@ const packages = tiers.map((tier) => ({
     gap: var(--space-4);
   }
   @media (min-width: 768px) {
-    .tiers {
-      /* `auto-fit` with a floor and a ceiling rather than three fixed columns: Croatian
-         runs 20–25% longer than English (§10), so the cards size to their content between
-         those two bounds and a fourth tier wraps instead of squeezing the other three.
+    /* **A wrapping, centred row of equal cards — and the width is arithmetic, not taste.**
 
-         The ceiling is what MUSE-59 added, and it is about the real data rather than
-         about taste. §7.2 describes three cards; the studio confirmed **two** periods, and
-         with `1fr` two tracks split 1280px into a pair of 600px cards holding a name, a
-         price, one line and a button — a price list that reads as though a third card
-         failed to load. A ceiling plus `justify-content: center` keeps a tier the same
-         size whether there are two of them or four, which is also what makes the row
-         comparable: a card that is wider because there are fewer of them is a card the
-         eye weighs differently. Not a `width` on the card — §10's rule is that the
-         content decides the size, and a track range is a floor and a ceiling, not a
-         width. */
-      grid-template-columns: repeat(auto-fit, minmax(15rem, 24rem));
+       This was `grid-template-columns: repeat(auto-fit, minmax(15rem, 24rem))` with
+       `justify-content: center`, which MUSE-59 chose over `1fr` for a reason that still
+       holds: with `1fr` two tracks split the row into a pair of 600px cards holding a
+       name, a price, one line and a button — a price list that reads as though a third
+       card failed to load. A ceiling keeps a tier the same size whether there are two of
+       them or four, which is what makes the row comparable; a card that is wider because
+       there are fewer of them is a card the eye weighs differently.
+
+       **MUSE-73 made it three and the ceiling did not fit.** §7.2 is „three cards", and
+       24rem is 384px: three of them plus two 32px gaps is 1216, against a row of
+       1280 − 2 × 48px of section padding = 1184. So the third card wrapped, at the exact
+       width this design is drawn at, and `auto-fit` put it in the first track of a
+       centred two-track grid — a lone card hanging under the left-hand one. The number
+       was never checked against the padding and the gaps, and with two tiers nothing
+       could show it.
+
+       So the ceiling is **23rem**: 3 × 368 + 2 × 32 = 1168, which is 16px inside 1184.
+       That arithmetic is the whole reason for the value — change the container width,
+       the section padding or the gap and it has to be redone. `npm run shots` with
+       `ROUTE=/pricing` is how you see it; the budget run opens the same 1280.
+
+       And it is **flex rather than grid**, which is the half that is about more than
+       three: `auto-fit` centres the *track set*, so a wrapped card lands in track 1 and
+       reads as a card that failed to load, while a flex line centres itself — the day a
+       fourth rate makes it 3 + 1 the orphan sits under the middle of the row. Nothing
+       else changes: `flex: 0 1 23rem` with `min-width: 15rem` is the same floor and
+       ceiling the track range was, so §10's rule that the content decides the size holds
+       and there is still no `width` on a card. Flex only shrinks a line that overflows,
+       and a line is filled at the basis, so every card is the same width whichever line
+       it is on. */
+    .tiers {
+      display: flex;
+      flex-wrap: wrap;
       justify-content: center;
       gap: var(--space-6);
+    }
+    .cell {
+      flex: 0 1 23rem;
+      min-width: 15rem;
     }
   }
   .cell {

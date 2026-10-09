@@ -199,18 +199,24 @@ const CMS_OWNS: { path: string; why: string }[] = [
   {
     path: 'pricingTier.name',
     why:
-      'what Mina calls a package — the `<h3>` on each card and the value the enrolment ' +
-      "form submits (`packageValue`). The component's own copy table holds four " +
-      'structural words and no package name, which is the shape MUSE-22 shipped on ' +
-      'purpose; a name reappearing in code is that decision being undone.',
+      'what Mina calls a rate — the `<h2>` on each card (MUSE-75) and the value the ' +
+      "enrolment form submits (`packageValue`). The component's own copy table holds four " +
+      'structural words and no rate name, which is the shape MUSE-22 shipped on ' +
+      'purpose; a name reappearing in code is that decision being undone. MUSE-73 is why ' +
+      'that matters beyond tidiness: the names moved — one was reworded and two arrived — ' +
+      'when the owner gave the complete rate card, and a literal would have made each of ' +
+      'those a code change.',
   },
   {
     path: 'pricingTier.features[]',
     why:
-      'what a package includes, and in the two-month tier’s case the sentence that says ' +
-      'the price is a discount. The one place on the site a „what you get" line may live, ' +
-      'because it is a claim about what the studio sells — and the field MUSE-36 would ' +
-      'have been filled with fiction if it had been written in code.',
+      'the one line each rate says about itself. The one place on the site a „what you ' +
+      'get" line may live, because it is a claim about what the studio sells — and the ' +
+      'field MUSE-36 would have been filled with fiction if it had been written in code. ' +
+      'MUSE-73 is the near miss: the field is `required().min(1)` and the confirmed rate ' +
+      'card gives nothing beyond a name, a price and a period, so the two new lines ' +
+      'restate the rate in words rather than claiming anything — which is only a safe ' +
+      'answer while they are a value Mina can type over.',
   },
   {
     path: 'prosePage.heading',
@@ -330,9 +336,14 @@ const MAY_APPEAR_IN_CODE: { path: string; why: string }[] = [
     why:
       'a closed set, like the levels and the weekdays — `PRICE_PERIODS` is the Studio’s ' +
       'half and `PERIOD_NAME` in `src/lib/pricing.ts` is the page’s, keyed by the same ' +
-      'identifiers. The stored value is `month`, and the *word* („mjesečno" / "per ' +
-      'month") is formatting, which CLAUDE.md keeps in code for the same reason ' +
-      '`formatTime` is there. The identifier is supposed to be written down.',
+      'identifiers. The stored values are `month` and, since MUSE-73, `class`; the ' +
+      '*words* („mjesečno" / "per month", „po satu" / "per class") are formatting, which ' +
+      'CLAUDE.md keeps in code for the same reason `formatTime` is there. The identifier ' +
+      'is supposed to be written down. Note what the exemption costs and why it is still ' +
+      'right: because the word is code, „one-off package" could be published against ' +
+      '„paket" for the life of the page with every guard green (MUSE-80) — a translation ' +
+      'is not drift, so this file is the wrong instrument and `test/pricing.test.ts` ' +
+      'holds it instead.',
   },
   {
     path: 'class.name',
