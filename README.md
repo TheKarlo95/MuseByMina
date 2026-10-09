@@ -46,7 +46,7 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
 ```
 
 **Build output is pruned by age, and the worktrees are swept by hand** (MUSE-79). `npm
-test` performs sixty-eight real builds, and before this each one's output sat in
+test` performs sixty-nine real builds, and before this each one's output sat in
 `node_modules/.muse-test-builds/` in **the worktree it ran in** until something ran there
 again — which, for a worktree whose ticket merged, is never. Measured when the ticket was
 filed: 30,061 stale build directories across 43 worktrees, 16 GB, none of them younger

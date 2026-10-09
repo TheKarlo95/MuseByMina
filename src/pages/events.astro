@@ -1,0 +1,25 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Events from '../components/Events.astro';
+import { EVENTS_ROUTE } from '../lib/events';
+import { getEvents, getPage } from '../lib/sanity';
+
+/**
+ * `minimum: 0` is the whole reason this page could be built now (MUSE-24): „nothing is
+ * announced" is a real state of this studio, and `Events.astro` says so in words rather
+ * than rendering an empty grid. The strict default would make an ordinary Tuesday a
+ * failed build.
+ *
+ * `now` is read once and handed to the reader rather than defaulted inside it, so this
+ * page and `/events/archive` are two renderings of one partition.
+ */
+const now = new Date();
+const [meta, upcoming] = await Promise.all([
+  getPage(EVENTS_ROUTE),
+  getEvents({ minimum: 0, now }),
+]);
+---
+
+<BaseLayout locale="hr" title={meta.title.hr} description={meta.description.hr}>
+  <Events locale="hr" upcoming={upcoming} />
+</BaseLayout>

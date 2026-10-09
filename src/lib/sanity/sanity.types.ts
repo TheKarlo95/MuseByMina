@@ -89,6 +89,8 @@ export type ProsePage = {
     | "/"
     | "/whatisbachata"
     | "/schedule"
+    | "/events"
+    | "/events/archive"
     | "/pricing"
     | "/aboutus"
     | "/contact"
@@ -117,6 +119,8 @@ export type Page = {
     | "/"
     | "/whatisbachata"
     | "/schedule"
+    | "/events"
+    | "/events/archive"
     | "/pricing"
     | "/aboutus"
     | "/contact"
@@ -535,6 +539,8 @@ export type PAGES_QUERY_RESULT = Array<{
     | "/"
     | "/aboutus"
     | "/contact"
+    | "/events"
+    | "/events/archive"
     | "/pricing"
     | "/privacy"
     | "/schedule"
@@ -562,6 +568,8 @@ export type PROSE_PAGES_QUERY_RESULT = Array<{
     | "/"
     | "/aboutus"
     | "/contact"
+    | "/events"
+    | "/events/archive"
     | "/pricing"
     | "/privacy"
     | "/schedule"
@@ -699,6 +707,68 @@ export type PRICING_QUERY_RESULT = Array<{
 // Variable: EVENTS_QUERY
 // Query: *[_type == "event" && (!defined(endsAt) && startsAt >= $now || endsAt >= $now)] | order(startsAt asc){    _id,    "slug": slug.current,    title{ hr, en },    eventType,    startsAt,    endsAt,    venue,    description{ hr, en },    lineup,    ticketUrl,    image{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop }  }
 export type EVENTS_QUERY_RESULT = Array<{
+  _id: string;
+  slug: string;
+  title: {
+    hr: string;
+    en: string;
+  };
+  eventType: "bootcamp" | "party" | "social" | "workshop";
+  startsAt: string;
+  endsAt: string | null;
+  venue: string;
+  description: {
+    hr: string;
+    en: string;
+  };
+  lineup: Array<string> | null;
+  ticketUrl: string | null;
+  image: {
+    assetId: string | null;
+    alt: {
+      hr: string;
+      en: string;
+    };
+    hotspot: SanityImageHotspot | null;
+    crop: SanityImageCrop | null;
+  };
+}>;
+
+// Source: src/lib/sanity/queries.ts
+// Variable: PAST_EVENTS_QUERY
+// Query: *[_type == "event" && (defined(endsAt) && endsAt < $now || !defined(endsAt) && startsAt < $now)] | order(startsAt desc){    _id,    "slug": slug.current,    title{ hr, en },    eventType,    startsAt,    endsAt,    venue,    description{ hr, en },    lineup,    ticketUrl,    image{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop }  }
+export type PAST_EVENTS_QUERY_RESULT = Array<{
+  _id: string;
+  slug: string;
+  title: {
+    hr: string;
+    en: string;
+  };
+  eventType: "bootcamp" | "party" | "social" | "workshop";
+  startsAt: string;
+  endsAt: string | null;
+  venue: string;
+  description: {
+    hr: string;
+    en: string;
+  };
+  lineup: Array<string> | null;
+  ticketUrl: string | null;
+  image: {
+    assetId: string | null;
+    alt: {
+      hr: string;
+      en: string;
+    };
+    hotspot: SanityImageHotspot | null;
+    crop: SanityImageCrop | null;
+  };
+}>;
+
+// Source: src/lib/sanity/queries.ts
+// Variable: ALL_EVENTS_QUERY
+// Query: *[_type == "event"] | order(startsAt desc){    _id,    "slug": slug.current,    title{ hr, en },    eventType,    startsAt,    endsAt,    venue,    description{ hr, en },    lineup,    ticketUrl,    image{ "assetId": asset._ref, alt{ hr, en }, hotspot, crop }  }
+export type ALL_EVENTS_QUERY_RESULT = Array<{
   _id: string;
   slug: string;
   title: {

@@ -22,6 +22,7 @@ import {
   requireDocuments,
 } from './decode';
 import {
+  ALL_EVENTS_QUERY,
   CLASSES_QUERY,
   DOCUMENT_COUNTS_QUERY,
   EVENTS_QUERY,
@@ -29,6 +30,7 @@ import {
   GALLERY_QUERY,
   INSTRUCTORS_QUERY,
   PAGES_QUERY,
+  PAST_EVENTS_QUERY,
   POSTS_QUERY,
   PRICING_QUERY,
   PROSE_PAGES_QUERY,
@@ -424,6 +426,74 @@ export async function getEvents({
   now = new Date(),
 }: ListOptions & { now?: Date } = {}) {
   const rows = await runQuery<unknown>(EVENTS_QUERY, { now: now.toISOString() });
+  return requireDocuments(rows, 'event', decodeEvent, minimum);
+}
+
+/**
+ * Past events, most recent first — `/events/archive/` (MUSE-24).
+ *
+ * The exact complement of `getEvents`, and the two must be handed the **same** `now`: the
+ * pages are two renderings of one partition, and two `new Date()` calls are two instants.
+ * `minimum: 0` is the honest default for both, because „nothing has happened yet" and
+ * „nothing is coming" are both real states of a studio with no events in the dataset — and
+ * `src/components/Events.astro` and `EventsArchive.astro` each say so in words rather than
+ * rendering an empty list.
+ *
+ * Not memoised, for `getStudioStory`'s reason: one caller, once per locale, and
+ * `test/projections.test.ts` swaps the fixture per test.
+ */
+export async function getPastEvents({
+  minimum = 0,
+  now = new Date(),
+}: ListOptions & { now?: Date } = {}) {
+  const rows = await runQuery<unknown>(PAST_EVENTS_QUERY, { now: now.toISOString() });
+  return requireDocuments(rows, 'event', decodeEvent, minimum);
+}
+
+/**
+ * **A read performed inside `getStaticPaths`, with its error class kept in the log**
+ * (MUSE-24).
+ *
+ * `./decode.ts` keeps three outcomes apart on purpose — unreachable, empty, malformed — and
+ * what makes that reach a human is the error's **class name** in the build output. Astro
+ * prints a *page render* failure as `SanityUnavailableError: …`, and a **`getStaticPaths`
+ * rejection as the message, the location and the stack with no name at all** (measured on
+ * Astro 7.3.6, `callGetStaticPaths` in `core/render/route-cache.js`).
+ *
+ * That matters more than it looks, because `getStaticPaths` runs **before any page
+ * renders**: the moment a dynamic route exists, it is the first read of the build, so it is
+ * the one that fails during a Sanity outage — and the log for the single most likely
+ * infrastructure failure on this project would have stopped saying which of the three it
+ * was. `TRANSIENT_BUILD_FAILURE` survives either way, so MUSE-21's retry was never at
+ * risk; the diagnosis was.
+ *
+ * So the name is folded into the message here, in one place, for any future dynamic route
+ * rather than for `/events/<slug>/` alone. `cause` is kept, so nothing is lost for a reader
+ * who wants the original. `test/content.test.ts` is the guard and needed no new build: its
+ * unreachable-API build now fails *through* this function, and still has to name the class.
+ */
+export async function readStaticPaths<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (cause) {
+    if (cause instanceof Error) throw new Error(`${cause.name}: ${cause.message}`, { cause });
+    throw cause;
+  }
+}
+
+/**
+ * **Every event, on no clock at all — which detail pages the build emits** (MUSE-24).
+ *
+ * `getStaticPaths` is the only caller. It is deliberately not "upcoming plus past": an
+ * event's URL is permanent, so the set of URLs a build emits may not depend on the instant
+ * the build started, and deriving it from the two filtered readers would make that
+ * permanence contingent on their partition holding rather than on anything structural.
+ *
+ * `minimum: 0` because a studio with no events is not a broken build — it is the state this
+ * page shipped in.
+ */
+export async function getAllEvents({ minimum = 0 }: ListOptions = {}) {
+  const rows = await runQuery<unknown>(ALL_EVENTS_QUERY);
   return requireDocuments(rows, 'event', decodeEvent, minimum);
 }
 

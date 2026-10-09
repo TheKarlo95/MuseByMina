@@ -49,13 +49,23 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PAGES_DIR = join(ROOT, 'src/pages');
 
 /**
- * Routes that are built and deliberately not indexed, keyed without a locale prefix.
+ * Entries under `src/pages/` that are not a route of their own, keyed without a locale
+ * prefix.
  *
- * The same exclusion `test/seo.test.ts` makes, for the same reason and spelled the same
- * way: `/404` is a page the build emits and `@astrojs/sitemap` is right to leave out, so
- * it is not a hole in `ROUTES` either.
+ * Two different reasons, and keeping them apart matters because only one of them is about
+ * indexing. The same two exclusions `test/seo.test.ts` makes, spelled the same way.
+ *
+ *   - **`/404`** is a page the build emits and `@astrojs/sitemap` is right to leave out,
+ *     so it is not a hole in `ROUTES` either.
+ *   - **`/events/[slug]`** is not a page at all — it is a **template** (MUSE-24). The pages
+ *     it produces are one per `event` document, so which pages exist is content rather than
+ *     structure: `ROUTES` could not list them, the Studio's route dropdown could not offer
+ *     them, and there is no `page` document per event (the `<title>` is derived from the
+ *     event — see `src/pages/events/[slug].astro`). Its *index* and its *archive* are
+ *     ordinary routes and are in `ROUTES`; this is the one entry under `src/pages/` whose
+ *     route key carries a parameter, and the assertion below pins that it does.
  */
-const NOT_A_ROUTE = new Set(['/404']);
+const NOT_A_ROUTE = new Set(['/404', '/events/[slug]']);
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
@@ -70,6 +80,17 @@ function walk(dir: string): string[] {
  * `src/pages/schedule.astro` and `src/pages/en/schedule.astro` are one *route* — HR and
  * EN share slugs (CLAUDE.md), and `ROUTES` has one entry per route rather than per page.
  */
+/** The same walk as `routesUnderSrcPages`, before `NOT_A_ROUTE` is applied. */
+function routesUnderSrcPagesRaw(): string[] {
+  const keys = walk(PAGES_DIR)
+    .filter((file) => file.endsWith('.astro'))
+    .map((file) => '/' + relative(PAGES_DIR, file).replace(/\.astro$/, '').replace(/\\/g, '/'))
+    .map((route) => (route.endsWith('/index') ? route.slice(0, -'/index'.length) || '/' : route))
+    .map((route) => (route === '/en' || route.startsWith('/en/') ? route.slice(3) || '/' : route));
+
+  return [...new Set(keys)].sort();
+}
+
 function routesUnderSrcPages(): string[] {
   const keys = walk(PAGES_DIR)
     .filter((file) => file.endsWith('.astro'))
@@ -131,6 +152,32 @@ describe('`ROUTES` and `src/pages/` describe the same site', () => {
         `llms.txt and a dead entry in the nav — the same defect as MUSE-13's 24 dead ` +
         `navigation links, one list further along.`,
     ).toEqual([]);
+  });
+
+  /**
+   * A dynamic template is excluded because it is a template, and that is checked rather
+   * than asserted in a comment (MUSE-24).
+   *
+   * The exclusion is the one that could rot into a blanket: `/404` is a fixed filename and
+   * `/events/[slug]` is a *shape*, so the thing to pin is that every excluded entry which
+   * is not `/404` really does carry a parameter, and that the parameterised entries on disk
+   * are exactly the ones excluded. A new `[id].astro` added without an entry here fails
+   * `declares every page the build serves as a route` below; one added *with* an entry but
+   * no file fails this.
+   */
+  it('excludes a dynamic template, and only where the filename really is one', () => {
+    const parameterised = routesUnderSrcPagesRaw().filter((route) => /\[[^\]]+\]/.test(route));
+    expect(parameterised, 'no dynamic template on disk to exclude').not.toEqual([]);
+    expect(parameterised).toContain('/events/[slug]');
+
+    const excludedTemplates = [...NOT_A_ROUTE].filter((route) => /\[[^\]]+\]/.test(route));
+    expect(excludedTemplates.sort()).toEqual(parameterised.sort());
+
+    // And the template's own index and archive are real routes, so excluding the template
+    // does not quietly excuse the pages around it.
+    const declared = ROUTES.map(({ route }) => route);
+    expect(declared).toContain('/events');
+    expect(declared).toContain('/events/archive');
   });
 
   it('declares every page the build serves as a route', () => {

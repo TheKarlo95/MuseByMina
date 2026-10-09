@@ -1,3 +1,4 @@
+import { isIsoInstant } from '../dates';
 import type { Locale } from '../i18n';
 import { LEVELS, WEEKDAYS, type ClassEntry } from '../schedule';
 
@@ -852,12 +853,58 @@ function localisedMember(
   return { hr: text(entry, 'hr', here), en: text(entry, 'en', here) };
 }
 
+/**
+ * A `datetime` field, held to the one spelling the site compares and formats (MUSE-24).
+ *
+ * `text()` alone was not enough once `/events` started rendering these. Two different
+ * silent failures sit behind a loose datetime, and neither is a missing field:
+ *
+ *   - **`Intl` renders an unparseable date as the literal words "Invalid Date"**, which on
+ *     an event card is a date chip reading „Invalid Date" at 40px. `src/lib/dates.ts`
+ *     refuses it too, but by then the value is already in a page's frontmatter; the
+ *     decoder's job is that nothing malformed reaches a component at all, and this is the
+ *     field path the error should name.
+ *   - **„upcoming" is decided by comparing strings.** `EVENTS_QUERY` and
+ *     `PAST_EVENTS_QUERY` compare `startsAt`/`endsAt` against `$now` in GROQ, where both
+ *     sides are strings, and `$now` is always `Date#toISOString`'s `…Z` spelling. A value
+ *     carrying a local offset (`…+02:00`) is the same instant and a different string, so it
+ *     would sort into the wrong half of the partition — an event in the archive while it is
+ *     still to come. That cannot be caught downstream, because the comparison has already
+ *     happened by the time a page sees the row.
+ *
+ * `isIsoInstant` is the same predicate `src/lib/dates.ts` formats through, imported rather
+ * than restated: two spellings of „what counts as a datetime here" is the shape of defect
+ * this directory exists to prevent.
+ */
+function instantAt(
+  doc: unknown,
+  path: string,
+  where: Where,
+  required: boolean,
+): string | undefined {
+  const value = required
+    ? text(doc, path, where)
+    : optionalText(doc, path, where);
+  if (value === undefined) return undefined;
+  if (!isIsoInstant(value)) {
+    fail(
+      at(where, path),
+      'a UTC ISO instant like `2026-08-13T19:00:00.000Z` — the spelling Sanity stores a ' +
+        '`datetime` in, and the only one the upcoming/past split can compare',
+      value,
+    );
+  }
+  return value;
+}
+
 export interface StudioEvent {
   id: string;
   slug: string;
   title: Record<Locale, string>;
   eventType: string;
+  /** A UTC ISO instant. Formatted in the studio's zone by `src/lib/dates.ts`. */
   startsAt: string;
+  /** Optional, because „kraj nije objavljen" is a real state the Studio field offers. */
   endsAt?: string;
   venue: string;
   description: Record<Locale, string>;
@@ -874,8 +921,8 @@ export function decodeEvent(row: unknown): StudioEvent {
     slug: text(row, 'slug', where),
     title: localised(row, 'title', where),
     eventType: text(row, 'eventType', where),
-    startsAt: text(row, 'startsAt', where),
-    endsAt: optionalText(row, 'endsAt', where),
+    startsAt: instantAt(row, 'startsAt', where, true)!,
+    endsAt: instantAt(row, 'endsAt', where, false),
     venue: text(row, 'venue', where),
     description: localised(row, 'description', where),
     lineup: Array.isArray(lineup)

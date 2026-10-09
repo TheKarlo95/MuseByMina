@@ -82,6 +82,29 @@ export const PRIMARY_NAV: NavItem[] = [
  */
 export const MORE_NAV: NavItem[] = [
   { route: '/whatisbachata', label: { hr: 'Što je bachata', en: 'What is bachata' } },
+  /**
+   * **`/events` is here and not in `PRIMARY_NAV`, and the bar's budget is the reason**
+   * (MUSE-24).
+   *
+   * It is a decision-path page — a party is a thing somebody comes to — so the obvious
+   * home is the desktop bar. The bar has no room: `PRIMARY_NAV` renders four links on
+   * desktop plus this disclosure, which is the budget `test/nav.test.ts` holds ("leaves
+   * the desktop bar neither empty nor long"), and the note above says what a fifth
+   * uppercase link at 0.18em tracking does to it. Events are also the least frequent
+   * thing on the site — there are none in the dataset as this ships — so the bar would be
+   * spending its last slot on the page most often empty.
+   *
+   * It is a complete entry in the mobile panel and in the footer's quick list either way,
+   * which is what `MORE_NAV.slice(0, 4)` in `Footer.astro` is for.
+   *
+   * **`/events/archive` is deliberately not in this list, or any list.** It is reached
+   * from `/events/` and from a past event's own page, which is where somebody looking for
+   * last year's party actually is; a site-wide „Arhiva" entry would advertise past events
+   * on every page of a site that has never held one. That makes `/events/archive` and
+   * every `/events/<slug>/` the first pages here whose route the footer does not list —
+   * see the `aria-current` partition in `test/nav.test.ts`.
+   */
+  { route: '/events', label: { hr: 'Događaji', en: 'Events' } },
 ];
 
 /**

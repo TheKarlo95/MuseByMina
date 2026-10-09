@@ -16,10 +16,11 @@ on:
   push:
     branches: [main]
     paths:
-      # Everything the Studio's schema is built from, including the two app modules the
-      # schema imports its closed sets out of — levels, styles, weekdays, the route list.
+      # Everything the Studio's schema is built from, including the three app modules the
+      # schema imports its closed sets out of — levels and weekdays, the route list, the
+      # event kinds (MUSE-24).
       #
-      # The first six entries are `SOURCE_GLOBS` in `scripts/check-sanity.mjs`, in order.
+      # The first seven entries are `SOURCE_GLOBS` in `scripts/check-sanity.mjs`, in order.
       # A comment used to say "keep them together" and they had already drifted — the
       # fingerprint covered `src/lib/sanity/queries.ts` and this filter did not, and this
       # filter covered `sanity/structure.ts` as a single file while the fingerprint walked
@@ -31,6 +32,7 @@ on:
       - 'sanity.cli.ts'
       - 'src/lib/schedule.ts'
       - 'src/lib/pages.ts'
+      - 'src/lib/events.ts'
       - 'src/lib/sanity/queries.ts'
       #
       # `sanity/**` is a schema glob and nothing else, which is why `content/seed.ndjson`

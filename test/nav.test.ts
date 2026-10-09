@@ -18,6 +18,7 @@ import { resolveRequest, servePages, type Host } from './helpers/serve';
 import { DEFAULT_LOCALE, LOCALES, type Locale } from '../src/lib/i18n';
 import { LANG_PARAM, LANG_STORAGE_KEY } from '../src/lib/lang';
 import { MORE_NAV, PRIMARY_NAV } from '../src/lib/nav';
+import { ROUTES } from '../src/lib/pages';
 
 /**
  * MUSE-13 — no link the site serves may lead to a 404.
@@ -300,6 +301,51 @@ function describeOrphan(orphan: Orphan): string {
   );
 }
 
+/**
+ * **A section of the site: a route no other route is the parent of** (MUSE-24).
+ *
+ * Derived from `ROUTES` by path depth rather than written down, so `/events/archive` is a
+ * child the day it is routed and a second one reclassifies itself. `/` is excluded from
+ * being anybody's parent — every route is nominally under it, and treating it as one would
+ * make the whole site a child of the homepage.
+ */
+function topLevelRoutes(): string[] {
+  const routed = new Set(ROUTES.map(({ route }) => route));
+  return ROUTES.map(({ route }) => route).filter((route) => {
+    const segments = route.split('/').filter(Boolean);
+    if (segments.length < 2) return true;
+    return !routed.has(`/${segments.slice(0, -1).join('/')}`);
+  });
+}
+
+/** The sections, as a set. */
+const SECTIONS = new Set(topLevelRoutes());
+
+/**
+ * Does the footer's own list contain this page's route?
+ *
+ * Module scope rather than inside the `aria-current` block, because two blocks turn on the
+ * same partition: a page the footer lists is marked and self-links through that mark, and a
+ * page it does not list is neither. One definition, so the two cannot drift.
+ */
+function footerLists(page: string): boolean {
+  return SECTIONS.has(routeOfPage(page));
+}
+
+/** The routes the footer's own lists link, read off the built markup. */
+function footerRoutes(html: string): Set<string> {
+  const footer = /<footer\b[^>]*>([\s\S]*?)<\/footer>/.exec(html);
+  expect(footer, 'no <footer> in the built page').not.toBeNull();
+
+  const routes = new Set<string>();
+  for (const match of footer![1]!.matchAll(/<a\b[^>]*\bhref="([^"]*)"/g)) {
+    const href = decode(match[1]!);
+    if (!isOwnAsset(build, href)) continue;
+    routes.add(addressOf(new URL(href, `${build.origin}/`).pathname).route);
+  }
+  return routes;
+}
+
 /** `en/schedule/index.html` → `/schedule`. For failure messages. */
 function routeOfPage(page: string): string {
   const segments = page.replace(/(?:^|\/)index\.html$/, '').split('/').filter(Boolean);
@@ -571,15 +617,37 @@ describe('AC4: a page nothing links to is an orphan, whatever it links to itself
   });
 
   it('still finds the self-references it discounts, so the discount stays exercised', () => {
-    // Every addressable page links to itself today — locale switcher, logo, or the nav's
-    // own `aria-current` entry. The day that stops being true, the exclusion above is
-    // dead code and the next author deletes it in good faith; this is the test that
-    // argues with them.
+    /**
+     * The discount exists so that a page's own link to itself does not count as inbound,
+     * and it is dead code the day nothing self-links — at which point the next author
+     * deletes it in good faith. This is the test that argues with them.
+     *
+     * **It used to say „every addressable page self-links", and MUSE-24 is where that
+     * stopped being true.** A page self-links through the footer's `aria-current` entry,
+     * the nav's, or the logo — all three are lists of *sections*, and `/events/archive/` is
+     * the first page the site serves that is not one: it is reached from `/events/` and is
+     * deliberately in no menu (`src/lib/nav.ts`). So the claim is split in two, and both
+     * halves are here rather than one weaker one:
+     *
+     *   - the discount is exercised, by most of the build rather than by one page;
+     *   - and the pages that do *not* self-link are exactly the pages the footer does not
+     *     list, which is the same partition the `aria-current` block below turns on. A
+     *     listed page that stopped self-linking is still a failure, named.
+     */
     const { pages, links } = linkGraph();
-    const selfless = pages.filter(
-      (page) => !links.some((ref) => ref.from === page && ref.to === page),
+    const selfLinks = (page: string): boolean =>
+      links.some((ref) => ref.from === page && ref.to === page);
+
+    const selfless = pages.filter((page) => !selfLinks(page));
+    const linked = pages.filter(selfLinks);
+
+    expect(linked.length, 'no page self-links — the rule discounts nothing').toBeGreaterThan(
+      pages.length / 2,
     );
-    expect(selfless, 'no page self-links — the rule discounts nothing').toEqual([]);
+    expect(
+      selfless.sort(),
+      'a page in the footer’s list stopped linking to itself, or an unlisted page started',
+    ).toEqual(pages.filter((page) => !footerLists(page)).sort());
   });
 });
 
@@ -944,18 +1012,72 @@ describe('the footer says where you are (MUSE-38)', () => {
     return build.htmlFiles().filter((page) => !errors.has(page));
   }
 
-  it('marks exactly one footer entry on every page that has a URL', () => {
-    for (const page of addressable()) {
+  /**
+   * **Which pages the footer can say „you are here" about, and which it must not** (MUSE-24).
+   *
+   * The footer is an index of the site's *sections*, and `aria-current` is a claim about
+   * one link: MUSE-39's rule is that whatever carries it must either not be a link or be a
+   * link to exactly where we already are. So a page the footer lists gets exactly one mark
+   * and a page it does not list gets none — marking the „Događaji" entry on
+   * `/events/archive/` would be a marked link to somewhere else, which is the lie this whole
+   * block exists to prevent.
+   *
+   * It was „every addressable page" until `/events/archive/` and `/events/<slug>/` arrived,
+   * and the partition is derived rather than listed: the footer's routes come off the built
+   * markup, and `topLevelRoutes()` below holds them to `ROUTES` so the footer cannot quietly
+   * stop listing a section.
+   */
+  it('lists every section of the site, so the partition below is not a loophole', () => {
+    /**
+     * The half that keeps the exclusion honest. „A page the footer does not list is not
+     * marked" is satisfied by a footer that lists nothing, so what the footer lists is
+     * pinned against `ROUTES` — every route that is not a child of another route, which is
+     * what a section is. `/events/archive` is a child of `/events` and is therefore not one;
+     * `/privacy` is footer-only and is (MUSE-7).
+     */
+    const listed = [...footerRoutes(build.read('index.html'))].sort();
+    expect(listed, 'the footer and ROUTES disagree about the site’s sections').toEqual(
+      topLevelRoutes().sort(),
+    );
+    // And every page of a listed section really is in the build, in both locales.
+    expect(listed.length).toBeGreaterThan(4);
+  });
+
+  it('marks exactly one footer entry on every page the footer lists', () => {
+    const listed = addressable().filter(footerLists);
+    expect(listed.length, 'no listed page to check').toBeGreaterThan(4);
+
+    for (const page of listed) {
       const marked = markedInFooter(build.read(page));
       expect(marked.length, `${page}'s footer marks ${marked.length} entries, not 1`).toBe(1);
       expect(marked[0]!.value, `${page} uses aria-current="${marked[0]!.value}"`).toBe('page');
     }
   });
 
+  it('marks nothing on a page below a section, because the entry points elsewhere', () => {
+    /**
+     * `/events/archive/` is the first page the site serves whose route the footer does not
+     * list, and the honest answer there is silence: the „Događaji" entry points at
+     * `/events/`, so marking it would announce „you are here" about another page. MUSE-39's
+     * rule, applied in the direction that is easy to get wrong by being helpful.
+     *
+     * The set is asserted non-empty, so this does not become a test about nothing — and it
+     * is derived, so `/events/<slug>/` joins it the day an event is published.
+     */
+    const unlisted = addressable().filter((page) => !footerLists(page));
+    expect(unlisted.length, 'no page below a section — this test has no subject').toBeGreaterThan(
+      0,
+    );
+
+    for (const page of unlisted) {
+      expect(markedInFooter(build.read(page)), `${page} marks a footer entry`).toEqual([]);
+    }
+  });
+
   it('marks the entry that points at the page it is on', () => {
     // The thing `aria-current` asserts, and the only way to get it wrong quietly: a
     // marked link to somewhere else reads as "you are here" about another page.
-    for (const page of addressable()) {
+    for (const page of addressable().filter(footerLists)) {
       const marked = markedInFooter(build.read(page))[0]!;
       if (marked.href === undefined) continue;
       expect(marked.href, `${page}'s footer marks a link to somewhere else`).toBe(

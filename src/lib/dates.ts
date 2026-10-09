@@ -54,6 +54,29 @@ const FORMATTERS: Record<Locale, Intl.DateTimeFormat> = {
   }),
 };
 
+/**
+ * **The studio's own clock, and why a calendar date and an instant need different ones.**
+ *
+ * `formatDate` below renders a *calendar date* — `studioStory.foundedOn`, a `YYYY-MM-DD`
+ * with no time in it — and formats it in UTC, because parsing `2026-08-13` yields midnight
+ * UTC and a build west of Greenwich would otherwise publish the 12th.
+ *
+ * `event.startsAt` is not that. It is an **instant**, a `datetime` in the Studio, and what
+ * a reader needs from it is the wall-clock time in the room: an event that starts at nine
+ * in the evening in Ilica is `19:00Z` in August and `20:00Z` in December. Rendering it in
+ * UTC would publish the UTC hour, and
+ * rendering it in the build machine's zone would make the published page depend on where
+ * the build ran — the runner is UTC, a developer's box is not, and MUSE-20's byte-identical
+ * criterion would fail for a reason nobody would look for. So the zone is named here, once,
+ * and it is the studio's.
+ *
+ * `Europe/Zagreb` rather than a fixed offset, because Croatia observes daylight saving and
+ * a fixed `+02:00` would be an hour wrong for half the year — the same class of mistake
+ * `src/lib/rebuild.ts` refuses to make when it promises Mina a duration instead of a clock
+ * time.
+ */
+export const STUDIO_TIME_ZONE = 'Europe/Zagreb';
+
 /** An ISO calendar date — `YYYY-MM-DD` — and nothing looser. */
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -83,4 +106,136 @@ export function formatDate(iso: string, locale: Locale): string {
   }
 
   return FORMATTERS[locale].format(date);
+}
+
+/* ------------------------------------------------------------------ instants */
+
+/**
+ * An ISO instant as Sanity stores a `datetime`, and as `Date#toISOString` writes one.
+ *
+ * Deliberately loose about the seconds and the fractional part — Sanity writes
+ * `2026-08-13T19:00:00.000Z` and `2026-08-13T19:00:00Z` depending on how the value got
+ * there — and deliberately strict about the `Z`. A datetime with a local offset
+ * (`…+02:00`) would still parse, but `getEvents` compares `startsAt` against `$now` as a
+ * **string** in GROQ, and two spellings of one instant do not compare equal. The decoder
+ * refuses the offset form so that „upcoming" cannot be decided lexicographically on a
+ * value whose zone is written down rather than normalised.
+ */
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z$/;
+
+/** Is this an ISO instant in the one spelling the site compares and formats? */
+export function isIsoInstant(value: string): boolean {
+  return ISO_INSTANT.test(value) && !Number.isNaN(new Date(value).getTime());
+}
+
+function instant(iso: string, what: string): Date {
+  if (!isIsoInstant(iso)) {
+    throw new Error(
+      `${what} expected a UTC ISO instant like "2026-08-13T19:00:00.000Z", got ` +
+        `${JSON.stringify(iso)}. Intl renders an unparseable date as the words ` +
+        `"Invalid Date" rather than failing, so this stops here instead of publishing ` +
+        `them at the size of a heading.`,
+    );
+  }
+  return new Date(iso);
+}
+
+/**
+ * The formatters, built once.
+ *
+ * Four shapes per locale, and the pair that differs between them is the whole of §10:
+ * **Croatian is 24-hour, English is 12-hour.** That is the design system's base rule for
+ * prose, and an event card is prose — one date, read on its own. Note that
+ * `formatTime` in `src/lib/schedule.ts` goes the *other* way and is 24-hour in both
+ * locales; that is a documented exception for the timetable grid, where the times are a
+ * column of numbers that has to align. Two rules, two surfaces, and neither is a
+ * relaxation of the other.
+ *
+ * `hourCycle: 'h23'` on the Croatian clock rather than `hour12: false` alone: the latter
+ * can resolve to `h24`, which spells midnight `24:00`.
+ */
+const INSTANT_DATE: Record<Locale, Intl.DateTimeFormat> = {
+  hr: new Intl.DateTimeFormat(FORMATTING_LOCALE.hr, {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: STUDIO_TIME_ZONE,
+  }),
+  en: new Intl.DateTimeFormat(FORMATTING_LOCALE.en, {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: STUDIO_TIME_ZONE,
+  }),
+};
+
+const INSTANT_TIME: Record<Locale, Intl.DateTimeFormat> = {
+  hr: new Intl.DateTimeFormat(FORMATTING_LOCALE.hr, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZone: STUDIO_TIME_ZONE,
+  }),
+  en: new Intl.DateTimeFormat(FORMATTING_LOCALE.en, {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: STUDIO_TIME_ZONE,
+  }),
+};
+
+const INSTANT_WEEKDAY: Record<Locale, Intl.DateTimeFormat> = {
+  hr: new Intl.DateTimeFormat(FORMATTING_LOCALE.hr, { weekday: 'long', timeZone: STUDIO_TIME_ZONE }),
+  en: new Intl.DateTimeFormat(FORMATTING_LOCALE.en, { weekday: 'long', timeZone: STUDIO_TIME_ZONE }),
+};
+
+const INSTANT_CHIP: Record<Locale, Intl.DateTimeFormat> = {
+  hr: new Intl.DateTimeFormat(FORMATTING_LOCALE.hr, {
+    day: 'numeric',
+    month: 'short',
+    timeZone: STUDIO_TIME_ZONE,
+  }),
+  en: new Intl.DateTimeFormat(FORMATTING_LOCALE.en, {
+    day: 'numeric',
+    month: 'short',
+    timeZone: STUDIO_TIME_ZONE,
+  }),
+};
+
+/** One instant's date: `13. kolovoza 2026.` / `13 August 2026` (§10). */
+export function formatInstantDate(iso: string, locale: Locale): string {
+  return INSTANT_DATE[locale].format(instant(iso, 'formatInstantDate'));
+}
+
+/** One instant's time, in the studio's zone: `20:00` / `8:00 pm` (§10). */
+export function formatInstantTime(iso: string, locale: Locale): string {
+  return INSTANT_TIME[locale].format(instant(iso, 'formatInstantTime'));
+}
+
+/** One instant's weekday: `četvrtak` / `Thursday`. */
+export function formatInstantWeekday(iso: string, locale: Locale): string {
+  return INSTANT_WEEKDAY[locale].format(instant(iso, 'formatInstantWeekday'));
+}
+
+/**
+ * The two lines of a date chip (§7.3): the day number and the abbreviated month.
+ *
+ * Returned as parts rather than as a string, because the chip sets them at two different
+ * sizes in two different faces — the number in the display face, the month in the label
+ * face — and a component that had to split a formatted string would be re-deriving the
+ * locale's own punctuation. Croatian's `day: 'numeric'` renders `13.` with its ordinal
+ * full stop, which is right in a sentence and wrong stacked above a month, so the day is
+ * taken from `formatToParts` rather than from the formatted string.
+ */
+export function instantChip(iso: string, locale: Locale): { day: string; month: string } {
+  const parts = INSTANT_CHIP[locale].formatToParts(instant(iso, 'instantChip'));
+  const part = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((candidate) => candidate.type === type)?.value ?? '';
+
+  return { day: part('day'), month: part('month') };
+}
+
+/** Do two instants fall on the same calendar day in the studio's zone? */
+export function sameStudioDay(a: string, b: string): boolean {
+  return formatInstantDate(a, 'en') === formatInstantDate(b, 'en');
 }

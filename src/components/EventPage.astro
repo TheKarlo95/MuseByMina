@@ -1,0 +1,441 @@
+---
+import {
+  formatInstantDate,
+  formatInstantTime,
+  formatInstantWeekday,
+  instantChip,
+  sameStudioDay,
+} from '../lib/dates';
+import {
+  EVENTS_ARCHIVE_ROUTE,
+  EVENTS_ROUTE,
+  EVENT_COPY,
+  eventTypeName,
+  hasPassed,
+} from '../lib/events';
+import { localeUrl, type Locale } from '../lib/i18n';
+import { imageFocus, imageSize, imageSrc, type StudioEvent } from '../lib/sanity';
+
+/**
+ * `/events/<slug>` — the whole of one event, on this site (MUSE-24).
+ *
+ * **This page is the ticket's point.** Both reference studios put every detail of every
+ * party on Facebook, so anybody not logged in — or not on Facebook at all — hits a wall and
+ * never finds out what the thing is. So the detail lives here: what it is, when, where, who
+ * is playing, and whether there is anything to book. Facebook and a ticket link are *extra
+ * doors*, offered when the dataset has them, never the only one.
+ *
+ * ---------------------------------------------------------------------------------
+ * **A past event's page says so, in words.**
+ *
+ * This is the half of the staleness decision that lands on the page rather than in a
+ * comment. The upcoming/past split is computed at build time and nothing moves until
+ * something builds, so an event can sit in the upcoming list for up to `MAX_WAIT_HOURS`
+ * (`src/lib/rebuild.ts`) after it has finished — and somebody can arrive at this page from
+ * a shared link a year later. A page that reads as an invitation in either case is the
+ * failure; `hasPassed` is written as exactly the condition `PAST_EVENTS_QUERY` selects on,
+ * so the words on this page and which list the event is in are one rule rather than two.
+ *
+ * It is a **statement about the date**, not a page that hides itself: the description, the
+ * venue and the line-up all stay, because that is what an archive is for. What changes is
+ * that the call to action is the archive rather than a ticket link — booking a party that
+ * has happened is the one thing this page must not offer.
+ * ---------------------------------------------------------------------------------
+ *
+ * The event is a **prop**, not a read: `getStaticPaths` in the two page wrappers has
+ * already read every event in order to know which pages exist, and reading again here would
+ * be a second query per page whose answer has to match the first. The `now` comes with it
+ * for the same reason the two lists share one.
+ */
+interface Props {
+  locale: Locale;
+  event: StudioEvent;
+  /** The build instant the upcoming/past split was computed at. */
+  now: Date;
+}
+
+const { locale, event, now } = Astro.props;
+const t = EVENT_COPY[locale];
+
+/**
+ * 1280px of image for a hero that spans the measure at desktop width — one width, no
+ * `srcset`, for the reason `src/lib/sanity/images.ts` states and `EventCard.astro`
+ * repeats. `imageSize` clamps to what the asset has, so the intrinsic size in the markup
+ * is the size of the bytes.
+ */
+const HERO_IMAGE_WIDTH = 1280;
+const box = imageSize(event.image, { width: HERO_IMAGE_WIDTH });
+const focus = imageFocus(event.image);
+const chip = instantChip(event.startsAt, locale);
+const passed = hasPassed(event, now);
+
+/**
+ * When, as one line a human reads.
+ *
+ * Four shapes, and the branch is about the *data* rather than about taste: an event with no
+ * announced end has no end to print (the Studio field says „Ostavi prazno ako kraj nije
+ * objavljen"), and one that runs past midnight ends on a different calendar day, so printing
+ * a bare `02:00` after a date would say the wrong day. `sameStudioDay` compares in the
+ * studio's own zone, which is the only zone in which „the same night" means anything.
+ */
+const startDate = formatInstantDate(event.startsAt, locale);
+const startTime = formatInstantTime(event.startsAt, locale);
+const weekday = formatInstantWeekday(event.startsAt, locale);
+
+const endSuffix =
+  event.endsAt === undefined
+    ? ''
+    : sameStudioDay(event.startsAt, event.endsAt)
+      ? ` – ${formatInstantTime(event.endsAt, locale)}`
+      : ` – ${formatInstantDate(event.endsAt, locale)}, ${formatInstantTime(event.endsAt, locale)}`;
+
+const when = `${weekday}, ${startDate} · ${startTime}${endSuffix}`;
+---
+
+<article class="event">
+  <section class="hero">
+    <div class="shot">
+      <img
+        src={imageSrc(event.image, { width: HERO_IMAGE_WIDTH })}
+        alt={event.image.alt[locale]}
+        width={box.width}
+        height={box.height}
+        decoding="async"
+        style={`object-position: ${focus.x}% ${focus.y}%`}
+      />
+      {/*
+        The same chip as the card, on the same ground, for the same reason: it sits on the
+        photograph rather than on the page, so it is plum-ink in both themes (§7.3) through
+        the `--band-*` roles. `aria-hidden` because the full date is in the `<time>` below.
+      */}
+      <p class="chip" aria-hidden="true">
+        <span class="chipDay">{chip.day}</span>
+        <span class="chipMonth">{chip.month}</span>
+      </p>
+    </div>
+
+    <div class="head">
+      <p class="kind">{eventTypeName(event.eventType, locale)}</p>
+      <h1 class="display">{event.title[locale]}</h1>
+      {passed && <p class="passed">{t.passed}</p>}
+    </div>
+  </section>
+
+  <section class="body">
+    <div class="wrap">
+      {/*
+        A definition list rather than a paragraph, for the reason `WhatIsBachata.astro`
+        gives: every value is a derived or CMS string, and composing them into a sentence
+        would need declensions the data cannot supply — and a sentence is where a claim
+        nobody checked gets smuggled in beside one that was.
+      */}
+      <dl class="facts">
+        <div class="fact">
+          <dt class="label">{t.when}</dt>
+          <dd class="value">
+            <time datetime={event.startsAt}>{when}</time>
+          </dd>
+        </div>
+        <div class="fact">
+          <dt class="label">{t.where}</dt>
+          <dd class="value">{event.venue}</dd>
+        </div>
+      </dl>
+
+      {event.description[locale]
+        .split(/\n{2,}/)
+        .map((paragraph) => paragraph.trim())
+        .filter(Boolean)
+        .map((paragraph) => <p class="p">{paragraph}</p>)}
+
+      {
+        event.lineup.length > 0 && (
+          <div class="lineup">
+            <h2 class="h">{t.lineup}</h2>
+            <ul class="names">
+              {event.lineup.map((name) => (
+                <li class="name">{name}</li>
+              ))}
+            </ul>
+          </div>
+        )
+      }
+
+      {/*
+        The one call to action, and which one it is depends on two facts rather than on a
+        preference. A past event is never offered a ticket — see the note at the top. An
+        upcoming one with `ticketUrl` set gets that link, external and `rel`-guarded; one
+        without gets `/contact`, because „ostavi prazno i prikazuje se obrazac za kontakt"
+        is what the Studio field promises Mina.
+      */}
+      <p class="cta">
+        {
+          passed ? (
+            <a class="btn btnQuiet" href={localeUrl(EVENTS_ARCHIVE_ROUTE, locale)}>
+              {t.archiveHeading}
+            </a>
+          ) : event.ticketUrl === undefined ? (
+            <a class="btn btnPrimary" href={localeUrl('/contact', locale)}>
+              {t.ask}
+            </a>
+          ) : (
+            <a
+              class="btn btnPrimary"
+              href={event.ticketUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {t.tickets}
+            </a>
+          )
+        }
+      </p>
+
+      <p class="back">
+        <a class="backLink" href={localeUrl(EVENTS_ROUTE, locale)}>{t.toEvents}</a>
+      </p>
+    </div>
+  </section>
+</article>
+
+<style>
+  .hero {
+    max-width: 1280px;
+    margin-inline: auto;
+    padding: var(--space-6) var(--space-5) 0;
+  }
+  .body {
+    padding: var(--space-7) var(--space-5) var(--space-8);
+  }
+  @media (min-width: 768px) {
+    .hero {
+      padding: var(--space-8) var(--space-7) 0;
+    }
+    .body {
+      padding: var(--space-8) var(--space-7) var(--space-10);
+    }
+  }
+  .wrap {
+    max-width: 1280px;
+    margin-inline: auto;
+  }
+
+  /* --- the photograph (§9 rule 2: `cover` plus an explicit `aspect-ratio`) --- */
+  .shot {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    background: var(--surface-sunken);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+  .shot img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  /* Plum-ink in both themes — it is on the photograph, not on the page (§7.3). */
+  .chip {
+    position: absolute;
+    inset-block-start: var(--space-4);
+    inset-inline-start: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 4rem;
+    padding: var(--space-3) var(--space-4);
+    background: var(--band-surface);
+    border-radius: var(--radius-sm);
+    color: var(--band-text);
+    text-align: center;
+  }
+  /* Cormorant at 2.25rem = 36px, well clear of the 26px floor (§4). Figures are
+     inherited from the document, never redeclared here (MUSE-14). */
+  .chipDay {
+    font-family: var(--font-display);
+    font-size: 2.25rem;
+    line-height: 1;
+  }
+  .chipMonth {
+    margin-block-start: 2px;
+    font-family: var(--font-label);
+    font-size: 0.6875rem;
+    letter-spacing: 0.2em;
+    /* Č Ć Ž Š carry marks above the cap line — 1.4 is the floor in Croatian (§4.6). */
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--band-accent);
+  }
+
+  .head {
+    margin-block-start: var(--space-6);
+  }
+  .kind {
+    font-family: var(--font-label);
+    font-weight: 300;
+    font-size: 0.75rem;
+    letter-spacing: 0.32em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  /* Cormorant, so never below 26px — `clamp()`'s first value is the floor (§4). */
+  .display {
+    margin-block-start: var(--space-4);
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.5rem, 7vw, 4.5rem);
+    line-height: 1;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  /*
+    A statement, not a warning: an outline rather than a fill, and `--text` rather than
+    `--error`. An event that has passed is an ordinary fact about a date, and §11 keeps the
+    error role for things a visitor has to act on.
+  */
+  .passed {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    margin-block-start: var(--space-5);
+    padding-inline: var(--space-4);
+    border: 1px solid var(--line-accent);
+    border-radius: var(--radius-full);
+    font-family: var(--font-label);
+    font-size: 0.75rem;
+    letter-spacing: 0.2em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+
+  /* --- the facts --- */
+  .facts {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-5);
+    padding-block-end: var(--space-6);
+    border-block-end: 1px solid var(--line);
+  }
+  @media (min-width: 768px) {
+    .facts {
+      grid-template-columns: repeat(2, 1fr);
+      gap: var(--space-6);
+    }
+  }
+  .fact {
+    /* No pixel floor: a grid track already bounds this, and a floor is what clips a long
+       Croatian venue at 390px. */
+    min-width: 0;
+  }
+  .label {
+    font-family: var(--font-label);
+    font-weight: 400;
+    font-size: 0.75rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .value {
+    /* `margin-inline: 0` is not tidying: the UA gives `dd` a 40px inline start margin, and
+       `base.css` resets `ul`/`ol` but has no reason to know about a definition list. Left
+       alone it indents every value away from its own label. */
+    margin-inline: 0;
+    margin-block-start: var(--space-2);
+    font-size: 1.0625rem;
+    line-height: 1.5;
+    color: var(--text);
+  }
+
+  .p {
+    margin-block-start: var(--space-5);
+    font-size: 1.0625rem;
+    line-height: 1.7;
+    color: var(--text-muted);
+    /* §5: prose measures around 68ch. */
+    max-width: 68ch;
+  }
+
+  .lineup {
+    margin-block-start: var(--space-7);
+  }
+  .h {
+    font-family: var(--font-label);
+    font-weight: 400;
+    font-size: 0.75rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .names {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-5);
+    margin-block-start: var(--space-4);
+    list-style: none;
+  }
+  .name {
+    font-size: 1.0625rem;
+    line-height: 1.5;
+  }
+
+  .cta {
+    margin-block-start: var(--space-7);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+    padding-inline: var(--space-6);
+    border: 1px solid transparent;
+    border-radius: var(--radius-full);
+    font-family: var(--font-label);
+    font-size: 0.8125rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    text-decoration: none;
+    transition:
+      transform var(--dur-fast) var(--ease),
+      filter var(--dur-fast) var(--ease);
+  }
+  @media (min-width: 768px) {
+    .btn {
+      min-height: 56px;
+    }
+  }
+  .btn:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+  }
+  .btnPrimary {
+    background: var(--btn-bg);
+    color: var(--btn-fg);
+  }
+  .btnQuiet {
+    border-color: var(--line-accent);
+    color: var(--accent);
+  }
+
+  .back {
+    margin-block-start: var(--space-6);
+  }
+  .backLink {
+    display: inline-flex;
+    align-items: center;
+    /* 44px is the §8 touch target. */
+    min-height: 44px;
+    font-family: var(--font-label);
+    font-size: 0.8125rem;
+    letter-spacing: 0.2em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+    text-underline-offset: 4px;
+  }
+</style>

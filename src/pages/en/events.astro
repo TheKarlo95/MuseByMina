@@ -1,0 +1,16 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Events from '../../components/Events.astro';
+import { EVENTS_ROUTE } from '../../lib/events';
+import { getEvents, getPage } from '../../lib/sanity';
+
+const now = new Date();
+const [meta, upcoming] = await Promise.all([
+  getPage(EVENTS_ROUTE),
+  getEvents({ minimum: 0, now }),
+]);
+---
+
+<BaseLayout locale="en" title={meta.title.en} description={meta.description.en}>
+  <Events locale="en" upcoming={upcoming} />
+</BaseLayout>

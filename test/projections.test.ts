@@ -9,6 +9,7 @@ import {
   DRAFTS,
   CLASS_ONE,
   CLASS_TWO,
+  EVENT_ENDED,
   EVENT_ENDING_NOW,
   EVENT_FUTURE,
   EVENT_STARTING_NOW,
@@ -36,10 +37,12 @@ import {
   expectedImage,
   fixtureOf,
 } from './helpers/structural-content';
+import { hasPassed } from '../src/lib/events';
 import { ROUTES } from '../src/lib/pages';
 import {
   SanityContentError,
   SanityUnavailableError,
+  getAllEvents,
   getClasses,
   getEvents,
   getFaqs,
@@ -47,6 +50,7 @@ import {
   getInstructors,
   getPage,
   getPageMeta,
+  getPastEvents,
   getPosts,
   getPricingTiers,
   getProsePage,
@@ -58,7 +62,13 @@ import {
 // The literal query text, imported rather than retyped — see the note below on why a
 // copy here would defeat the whole suite. `FIXTURE_ENV` and `runFixtureQuery` come from
 // the read path's own module for the same reason.
-import { EVENTS_QUERY, PAGES_QUERY, POSTS_QUERY } from '../src/lib/sanity/queries';
+import {
+  ALL_EVENTS_QUERY,
+  EVENTS_QUERY,
+  PAGES_QUERY,
+  PAST_EVENTS_QUERY,
+  POSTS_QUERY,
+} from '../src/lib/sanity/queries';
 // The whole module as well, so the parameter cross-check below covers every query there
 // is rather than the ones somebody remembered to list.
 import * as QUERIES from '../src/lib/sanity/queries';
@@ -719,6 +729,165 @@ describe('EVENTS_QUERY: upcoming events, past ones dropped', () => {
   it('orders soonest first', async () => {
     const ids = (await from(full, () => getEvents({ now: NOW }))).map((event) => event.id);
     expect(ids).toEqual(['event-ending-now', 'event-starting-now', 'event-future']);
+  });
+});
+
+/* ------------------------------------------------- PAST_EVENTS_QUERY, ALL_EVENTS_QUERY */
+
+/**
+ * **The archive, the clockless path, and the partition between them** (MUSE-24).
+ *
+ * `EVENTS_QUERY` had cases; its complement and the query `getStaticPaths` reads did not
+ * exist. Three claims here, and the first two would each be satisfied by a wrong query:
+ *
+ *   1. the archive projects the same eight fields the index does;
+ *   2. it orders most recent first, which is the opposite of the index;
+ *   3. **every event is on exactly one of the two lists** — the claim neither query can
+ *      make alone, and the one a hand-written complement gets wrong. `!(upcoming)` was
+ *      the obvious spelling and is broken: `endsAt >= $now` over an absent `endsAt` is
+ *      `null` in GROQ and `!null` is `null`, so every event with no announced end would
+ *      fall out of both lists — present in the dataset, on no page, and its detail page
+ *      the only thing left pointing at it.
+ */
+describe('PAST_EVENTS_QUERY: the archive, and the partition it completes', () => {
+  it('projects every field the index projects, optional ones included', async () => {
+    const past = await from(full, () => getPastEvents({ now: NOW }));
+    const ended = past.find((event) => event.id === 'event-ended');
+
+    expect(ended).toEqual({
+      id: 'event-ended',
+      slug: 'event-ended',
+      title: { hr: 'HR event ended', en: 'EN event ended' },
+      eventType: 'social',
+      startsAt: EVENT_ENDED.startsAt,
+      endsAt: EVENT_ENDED.endsAt,
+      venue: 'Fixture Venue',
+      description: { hr: 'HR event ended.', en: 'EN event ended.' },
+      lineup: [],
+      ticketUrl: undefined,
+      image: expectedImage(EVENT_ENDED, 'image'),
+    });
+  });
+
+  it('keeps an event that has started and has no announced end', async () => {
+    // The half `!(the upcoming filter)` loses. `EVENT_PAST` started an hour ago with no
+    // `endsAt`, so the index is right to drop it — and the archive has to pick it up, or
+    // the event is on no page at all.
+    const ids = (await from(full, () => getPastEvents({ now: NOW }))).map((e) => e.id);
+    expect(ids).toContain('event-past');
+  });
+
+  it('orders most recent first — the opposite of the index', async () => {
+    const ids = (await from(full, () => getPastEvents({ now: NOW }))).map((e) => e.id);
+    expect(ids).toEqual(['event-past', 'event-ended']);
+  });
+
+  it('drops an event that is still to come, on both sides of the boundary', async () => {
+    const ids = (await from(full, () => getPastEvents({ now: NOW }))).map((e) => e.id);
+    for (const upcoming of ['event-ending-now', 'event-starting-now', 'event-future']) {
+      expect(ids, upcoming).not.toContain(upcoming);
+    }
+  });
+
+  it('puts every event on exactly one of the two lists', async () => {
+    /**
+     * The acceptance criterion the two queries share, stated over the whole dataset rather
+     * than row by row — and over the *same* `$now`, because two instants is the other way
+     * this comes apart.
+     *
+     * Every one of the five fixture events is here, two of them sitting exactly on the
+     * boundary, so `>=` against `>` is visible in the partition too.
+     */
+    const now = NOW;
+    const [upcoming, past, every] = await Promise.all([
+      from(full, () => getEvents({ now, minimum: 0 })),
+      from(full, () => getPastEvents({ now })),
+      from(full, () => getAllEvents()),
+    ]);
+
+    const ids = (list: { id: string }[]): string[] => list.map((e) => e.id).sort();
+    expect(ids([...upcoming, ...past])).toEqual(ids(every));
+    expect(upcoming.filter((e) => past.some((other) => other.id === e.id))).toEqual([]);
+    expect(every.length).toBe(FULL_COUNTS.event);
+  });
+
+  it('agrees with `hasPassed`, which is what the page says in words', async () => {
+    /**
+     * The page's own sentence — „Ovaj je događaj prošao." — is `hasPassed` in
+     * `src/lib/events.ts`, and it has to mean the same thing as which list the event is on
+     * or the two surfaces contradict each other. Two rules, one answer, asserted row for
+     * row against the same instant.
+     */
+    const now = NOW;
+    const past = new Set(
+      (await from(full, () => getPastEvents({ now }))).map((event) => event.id),
+    );
+    const every = await from(full, () => getAllEvents());
+
+    expect(every.length).toBeGreaterThan(1);
+    for (const event of every) {
+      expect(hasPassed(event, now), `${event.id}`).toBe(past.has(event.id));
+    }
+  });
+
+  it('moves the boundary with `$now`, so the split is not baked in', async () => {
+    const MS = 1;
+    const justAfter = await from(full, () =>
+      getPastEvents({ now: new Date(NOW.getTime() + MS) }),
+    );
+    expect(justAfter.map((e) => e.id)).toContain('event-ending-now');
+    expect(justAfter.map((e) => e.id)).toContain('event-starting-now');
+  });
+});
+
+describe('ALL_EVENTS_QUERY: which detail pages exist, on no clock', () => {
+  it('returns every event, whatever instant the build is at', async () => {
+    /**
+     * The guarantee behind „an archive URL keeps working": the set of pages
+     * `getStaticPaths` emits is the same at every instant, so an event passing cannot take
+     * its own page away. Asserted by reading it at three instants a month apart.
+     */
+    const ids = async (): Promise<string[]> =>
+      (await from(full, () => getAllEvents())).map((event) => event.id).sort();
+
+    const first = await ids();
+    expect(first.length).toBe(FULL_COUNTS.event);
+    expect(await ids()).toEqual(first);
+    expect(first).toContain('event-past');
+    expect(first).toContain('event-future');
+  });
+
+  it('projects the same row the other two do', async () => {
+    const [every, upcoming] = await Promise.all([
+      from(full, () => getAllEvents()),
+      from(full, () => getEvents({ now: NOW })),
+    ]);
+    const fromAll = every.find((event) => event.id === 'event-future');
+    const fromIndex = upcoming.find((event) => event.id === 'event-future');
+
+    expect(fromAll).toEqual(fromIndex);
+    expect(fromAll?.image).toEqual(expectedImage(EVENT_FUTURE, 'image'));
+  });
+
+  it('orders most recent first, so the order is a decision and not an accident', async () => {
+    /**
+     * Asserted as „non-increasing" rather than as a list of five ids, because two fixture
+     * events start at the same instant and which of those two sorts first is `groq-js`'s
+     * business rather than a decision anybody made. The claim that matters is the
+     * direction, and it is the opposite of the index's.
+     */
+    const starts = (await from(full, () => getAllEvents())).map((event) => event.startsAt);
+    expect(starts.length).toBe(FULL_COUNTS.event);
+    expect([...starts].sort().reverse()).toEqual(starts);
+    expect(starts[0]).toBe(EVENT_FUTURE.startsAt);
+    expect(starts.at(-1)).toBe(EVENT_ENDED.startsAt);
+  });
+
+  it('answers an empty dataset with an empty list rather than failing', async () => {
+    // `minimum: 0` by default, because a studio with no events is not a broken build — it
+    // is the state `/events` shipped in. The strict default would make `getStaticPaths`
+    // fail on every build until the first event was announced.
+    expect(await from(empty, () => getAllEvents())).toEqual([]);
   });
 });
 
@@ -1522,14 +1691,21 @@ describe('the parameter scanner agrees with `groq-js`, query by query', () => {
     });
   }
 
-  it('finds `$now` in the two queries that take it, and nothing in the other nine', () => {
+  it('finds `$now` in the three queries that take it, and nothing in the rest', () => {
+    // Three since MUSE-24: `PAST_EVENTS_QUERY` is `EVENTS_QUERY`'s complement and is handed
+    // the same instant. `ALL_EVENTS_QUERY` is deliberately **not** on this list — the set
+    // of detail pages a build emits may not depend on when the build ran — so a `$now`
+    // appearing in it is a red test rather than a tightening.
     const withParameters = all.filter(([, query]) => queryParameters(query).length > 0);
     expect(withParameters.map(([name]) => name).sort()).toEqual([
       'EVENTS_QUERY',
+      'PAST_EVENTS_QUERY',
       'POSTS_QUERY',
     ]);
     expect(queryParameters(EVENTS_QUERY)).toEqual(['now']);
+    expect(queryParameters(PAST_EVENTS_QUERY)).toEqual(['now']);
     expect(queryParameters(POSTS_QUERY)).toEqual(['now']);
+    expect(queryParameters(ALL_EVENTS_QUERY)).toEqual([]);
   });
 
   it('ignores a `$` that is text rather than a reference', async () => {

@@ -94,12 +94,57 @@ export const event = defineType({
       type: 'localeString',
       validation: (Rule) => Rule.required(),
     }),
+    /**
+     * **The slug is the event's permanent address, so the year is in it** (MUSE-24).
+     *
+     * `source: 'title.hr'` was the obvious thing and it has one failure, which is the
+     * failure a studio actually hits: a party held every August produces the same slug
+     * twice. Sanity's own uniqueness check then refuses the second one, and what Mina
+     * reads is a complaint about a slug rather than about the year — so the way out is to
+     * accept `noc-bachate-2`, which is then the URL of that edition for ever.
+     *
+     * So the source is a function that prefixes the year from `startsAt`:
+     * `2026-noc-bachate`. Two editions differ without anybody thinking about it, and the
+     * prefix reads as an edition rather than as a tie-break. The month and day are
+     * deliberately not in it — an annual party that moves from August to September is the
+     * same edition, and a slug carrying the day would look wrong the moment a date is
+     * corrected.
+     *
+     * A slug is **generated once and then stored**, which is the whole reason it is this
+     * and not a path derived at build time: `/events/<slug>/` has to keep resolving after
+     * the event has passed (that is the archive's entire job), and a derived path would
+     * move the moment Mina fixed a typo in the date. The year is therefore a *starting
+     * suggestion* rather than a guarantee, and nothing downstream parses it — see the
+     * slug section of `src/lib/events.ts`.
+     *
+     * The order matters in the Studio: this field sits above `startsAt`, so a new document
+     * has no date when the title is typed. The `Generate` button is what Mina presses
+     * after filling the form in, and the fallback keeps it useful before then rather than
+     * producing `undefined-noc-bachate`.
+     */
     defineField({
       name: 'slug',
       title: 'Adresa (slug)',
       type: 'slug',
-      description: 'Zadnji dio adrese. Oba jezika dijele isti slug.',
-      options: { source: 'title.hr', maxLength: 72 },
+      description:
+        'Zadnji dio adrese, npr. „2026-noc-bachate”. Oba jezika dijele isti slug. ' +
+        'Pritisni „Generate” nakon što upišeš naziv i datum i godina se doda sama — tako ' +
+        'se isti party sljedeće godine ne tuče s ovogodišnjim. ' +
+        'Adresa je trajna: stranica događaja ostaje na njoj i nakon što događaj prođe, pa ' +
+        'je mijenjaj prije objave, ne poslije. ' +
+        'Ne može biti „archive” — to je adresa arhive.',
+      options: {
+        maxLength: 72,
+        // `doc` is Sanity's own `SanityDocument`, so every field is `unknown` and is read
+        // as such. The alternative — a hand-written document type — would be a fourth
+        // description of the `event` shape, and the one that nothing checks.
+        source: (doc) => {
+          const title = (doc.title as { hr?: string } | undefined)?.hr ?? '';
+          const startsAt = typeof doc.startsAt === 'string' ? doc.startsAt : '';
+          const year = startsAt.slice(0, 4);
+          return /^\d{4}$/.test(year) ? `${year} ${title}` : title;
+        },
+      },
       validation: (Rule) => Rule.required().error('Slug je obavezan.'),
     }),
     defineField({

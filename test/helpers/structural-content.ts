@@ -1050,3 +1050,164 @@ export const PRICING_NONE_FEATURED: FixtureDoc[] = withFixtures(
   PRICING_TIER_B,
   PRICING_TIER_C,
 );
+
+/* ---------------------------------------------------------------- events (MUSE-24) */
+
+/**
+ * **Events for `test/events.test.ts`, which renders the real components against them.**
+ *
+ * `EVENT_PAST` … `EVENT_FUTURE` above are shaped for `test/projections.test.ts`: they pin
+ * the `$now` boundary to the millisecond, and their titles come out of `localeString()` as
+ * `HR event future`. These are shaped for the other questions — *is the date on the card
+ * the date in the CMS, is a past-dated event in the archive, does its URL still resolve* —
+ * so every value here is one a human can check by eye in a failure message, every one
+ * differs from every other, and the HR and EN halves differ.
+ *
+ * Two rules, both inherited and both load-bearing.
+ *
+ * **Nothing here may read as an event the studio might hold.** MUSE-36 is live right now
+ * because invented-but-plausible placeholder content escaped a fixture, and an *event* is
+ * among the worst candidates: a party with a date, a venue and a line-up is a commercial
+ * announcement, and somebody would turn up. So the names are `Event One`, the venues are
+ * `Venue One`, the guests are `Guest One A`, and the ticket links are
+ * `https://example.invalid/…`. If any of these strings ever appears in `dist`, that is the
+ * bug, and it should be obvious at a glance that it is.
+ *
+ * **The dates are relative to the wall clock, not to {@link NOW}.** A *build* calls
+ * `new Date()` — nothing can pin it, and nothing should: „a past-dated event lands in the
+ * archive" is a claim about the build's own instant, and a fixture dated 2020 would make it
+ * a claim about the year 2020 instead. The offsets are ±30 days and ±7 days, which is far
+ * enough from any boundary that no clock skew or slow suite can move a row between lists,
+ * and the clock is read **once** per process so every document in one run agrees.
+ */
+const RENDER_CLOCK = Date.now();
+
+/** An ISO instant offset from the moment this module loaded. */
+export function fromRenderClock(offsetMs: number): string {
+  return new Date(RENDER_CLOCK + offsetMs).toISOString();
+}
+
+const DAY = 24 * HOUR;
+
+interface EventShape {
+  slug: string;
+  eventType: string;
+  startsAt: string;
+  endsAt?: string;
+  lineup?: readonly string[];
+  ticketUrl?: string;
+}
+
+function eventDoc(tag: string, shape: EventShape): FixtureDoc {
+  const doc: FixtureDoc = {
+    _id: `event-render-${shape.slug}`,
+    _type: 'event',
+    title: { _type: 'localeString', hr: `Event ${tag} HR`, en: `Event ${tag} EN` },
+    slug: slug(shape.slug),
+    eventType: shape.eventType,
+    startsAt: shape.startsAt,
+    venue: `Venue ${tag}`,
+    description: {
+      _type: 'localeText',
+      hr: `Opis ${tag} HR.\n\nDrugi odlomak ${tag} HR.`,
+      en: `Description ${tag} EN.\n\nSecond paragraph ${tag} EN.`,
+    },
+    image: imageOf(`Render${tag}`, [0.31, 0.32, 0.33, 0.34], [0.01, 0.02, 0.03, 0.04]),
+  };
+  if (shape.endsAt !== undefined) doc.endsAt = shape.endsAt;
+  if (shape.lineup !== undefined) doc.lineup = [...shape.lineup];
+  if (shape.ticketUrl !== undefined) doc.ticketUrl = shape.ticketUrl;
+  return doc;
+}
+
+/**
+ * The nearest upcoming one, carrying **none** of the optional fields.
+ *
+ * No `endsAt`, no `lineup`, no `ticketUrl` — so it exercises the three branches a card and
+ * a detail page take when the dataset is thin, which is the state every real event will
+ * start in: one line of „when" with no end time, no line-up block, and `/contact` as the
+ * call to action rather than a ticket link.
+ */
+export const EVENT_RENDER_SOON: FixtureDoc = eventDoc('One', {
+  slug: 'event-one',
+  eventType: 'workshop',
+  startsAt: fromRenderClock(7 * DAY),
+});
+
+/** The furthest upcoming one, carrying **every** optional field, so dropping one shows. */
+export const EVENT_RENDER_LATER: FixtureDoc = eventDoc('Two', {
+  slug: 'event-two',
+  eventType: 'party',
+  startsAt: fromRenderClock(30 * DAY),
+  endsAt: fromRenderClock(30 * DAY + 4 * HOUR),
+  lineup: ['Guest Two A', 'Guest Two B'],
+  ticketUrl: 'https://example.invalid/event-two',
+});
+
+/**
+ * One that has happened — the row the whole ticket turns on.
+ *
+ * It carries a `ticketUrl`, deliberately: a past event must **not** offer it, and a fixture
+ * without one would make that assertion pass for the wrong reason.
+ */
+export const EVENT_RENDER_PAST: FixtureDoc = eventDoc('Three', {
+  slug: 'event-three',
+  eventType: 'social',
+  startsAt: fromRenderClock(-30 * DAY),
+  endsAt: fromRenderClock(-30 * DAY + 4 * HOUR),
+  lineup: ['Guest Three A'],
+  ticketUrl: 'https://example.invalid/event-three',
+});
+
+/** The three, plus everything a real `astro build` of the whole site needs. */
+export const EVENTS_RENDERED: FixtureDoc[] = [
+  SITE_SETTINGS_DOC,
+  ...PAGE_DOCS,
+  ...PROSE_PAGE_DOCS,
+  STUDIO_STORY_DOC,
+  INSTRUCTOR_A,
+  INSTRUCTOR_B,
+  CLASS_ONE,
+  SLOT_ONE,
+  TIER_ONE,
+  EVENT_RENDER_SOON,
+  EVENT_RENDER_LATER,
+  EVENT_RENDER_PAST,
+];
+
+/**
+ * The same three events with **every string moved** — MUSE-50's instrument.
+ *
+ * Comparing a rendered page to the fixture it just read asserts nothing: every equality
+ * test passes while a literal in the component still happens to match. So the suite renders
+ * twice, against two datasets that share no string, and demands the first set's words
+ * appear nowhere in the second rendering. That is the only assertion a hardcoded venue, a
+ * hardcoded date or a hardcoded title fails.
+ */
+export const EVENTS_REWRITTEN: FixtureDoc[] = [
+  EVENT_RENDER_SOON,
+  EVENT_RENDER_LATER,
+  EVENT_RENDER_PAST,
+].map((doc) => ({
+  ...doc,
+  title: { _type: 'localeString', hr: `Preimenovan ${doc._id} HR`, en: `Renamed ${doc._id} EN` },
+  venue: `Preseljeno ${doc._id}`,
+  description: {
+    _type: 'localeText',
+    hr: `Prepisan opis ${doc._id} HR.`,
+    en: `Rewritten description ${doc._id} EN.`,
+  },
+}));
+
+/**
+ * An event slugged `archive`, which is the URL `/events/archive/` already answers.
+ *
+ * Astro gives the static route priority, so this builds a page nothing can reach —
+ * published, invisible, and no error anywhere. `assertEventSlugs` is what turns it into a
+ * named build failure, and this is the row it is pointed at.
+ */
+export const EVENT_RESERVED_SLUG: FixtureDoc = eventDoc('Reserved', {
+  slug: 'archive',
+  eventType: 'party',
+  startsAt: fromRenderClock(14 * DAY),
+});

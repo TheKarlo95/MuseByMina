@@ -1,5 +1,6 @@
-import { LEVELS, LEVEL_NAME, WEEKDAYS, WEEKDAY_NAME } from '../../src/lib/schedule';
+import { EVENT_TYPES, EVENT_TYPE_NAME } from '../../src/lib/events';
 import { ROUTES } from '../../src/lib/pages';
+import { LEVELS, LEVEL_NAME, WEEKDAYS, WEEKDAY_NAME } from '../../src/lib/schedule';
 
 /**
  * The closed sets, imported from the code that owns them rather than retyped here.
@@ -206,15 +207,26 @@ export const PRICE_PERIOD_OPTIONS: readonly EnumOption[] = [
   { title: 'paket', value: 'package' },
 ];
 
-/** Event kinds, matching the card variants in design system §7.3. */
-export const EVENT_TYPES = ['party', 'workshop', 'bootcamp', 'social'] as const;
+/**
+ * Event kinds, matching the card variants in design system §7.3.
+ *
+ * **The values and their labels moved to `src/lib/events.ts` in MUSE-24, and the option
+ * list is derived from them** — the shape `LEVEL_OPTIONS` and `WEEKDAY_OPTIONS` already
+ * have, for the reason stated at the top of this file. They were written out here while
+ * nothing in `src/` branched on them; `/events` now renders the label on every card, so a
+ * hand-written list beside a hand-written renderer would be two copies of four words.
+ * MUSE-76 is what happens when a closed set has two homes.
+ *
+ * The labels are the same string in both locales — see `EVENT_TYPE_NAME` for why — so the
+ * Croatian half is the right title for a Croatian-speaking editor by construction rather
+ * than by coincidence.
+ */
+export const EVENT_TYPE_OPTIONS: readonly EnumOption[] = EVENT_TYPES.map((eventType) => ({
+  title: EVENT_TYPE_NAME.hr[eventType],
+  value: eventType,
+}));
 
-export const EVENT_TYPE_OPTIONS: readonly EnumOption[] = [
-  { title: 'Party', value: 'party' },
-  { title: 'Workshop', value: 'workshop' },
-  { title: 'Bootcamp', value: 'bootcamp' },
-  { title: 'Social', value: 'social' },
-];
+export { EVENT_TYPES };
 
 /**
  * Where the footer's social links can point (design system §7.1).
