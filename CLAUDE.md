@@ -51,6 +51,7 @@ npm run sanity:check   # the fast gate `npm run build` runs first
 npm run sanity:read    # every query against the live dataset: OK / EMPTY / BROKEN
 npm run sanity:seed    # import content/seed.ndjson into the dataset (by _id)
 npm run sanity:seed:check  # does the live dataset still say what the seed says?
+npm run sanity:seed:release  # …and did *this branch* author the difference? (MUSE-78)
 npm run sanity:dev     # the Studio locally, on localhost:3333
 npm run sanity:build   # bundle the Studio into .sanity/studio — what CI runs
 npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
@@ -937,6 +938,44 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   authoritative at build time, and a document nobody reviewed is a page nobody
   reviewed.** `npm run sanity:seed:check` is how you find that out before merging, and
   it is worth reading rather than glancing at.
+- **Editing content in a branch is two steps and the order is the whole of it: import,
+  then merge** (MUSE-78). An *added* document is safe by accident — the build refuses to
+  run without it, so the deploy cannot publish stale content. An **edit to a document
+  that already exists publishes the old value successfully**, and had no signal anywhere:
+  green PR, green suite, the new text in the diff, the old text on the page. So, for a
+  branch that touches `content/seed.ndjson`:
+
+  1. `npm run sanity:seed` — **before the merge**, not after. `--replace` is keyed on
+     `_id` and the documents already exist, so importing content whose PR has not landed
+     is safe; it is an edit to copy, and the site reads copy from the dataset either way.
+  2. Merge. The push deploy is a build, and a build is the only thing that reads the
+     dataset, so that build is the one that publishes it. No stale window.
+
+  **Importing after the merge is not enough, and that is the part that caught somebody.**
+  MUSE-71 merged at 08:34, the deploy fetched the dataset immediately, the import ran at
+  08:41, and the live page still carried the retired claim at 08:42 — everything green.
+  Left alone it would have corrected at the next scheduled rebuild, up to
+  `MAX_WAIT_HOURS` later, with nothing indicating staleness; it took a
+  `workflow_dispatch`. So merging first makes it **three** steps — merge, import, then
+  Actions → Deploy to GitHub Pages → Run workflow — and the last is the forgettable one,
+  because the import succeeds and looks like the end of the job.
+
+  `npm run sanity:seed:release` is the gate, a step in `ci.yml`'s `sanity` job, and it
+  **blocks** — which `sanity:seed:check` beside it still must not (MUSE-45: a Studio edit
+  may never fail a deploy). The two are different claims and the difference is
+  *direction*. `DRIFTED` is one word for the dataset being ahead, which is Mina editing
+  and is nobody's blocker, and the seed being ahead, which is our unshipped change and
+  is. The seed is in git, so authorship comes from the diff against the merge base and
+  needs no credential: **a value that differs from the dataset *and* from the merge base
+  is ours.** A branch that does not touch the seed cannot fail the gate however far the
+  dataset has drifted. When both have moved the message says so instead of choosing — on
+  one field it prints all three values and asks for the decision to be written into the
+  seed; on different fields it warns that the import is `--replace` over the **whole
+  file**, so shipping our two fields reverts whatever else Mina changed. It fails open on
+  an unreachable API (`npm run build` is already red everywhere on an outage) and it is
+  structurally read-only: **auto-seeding on merge was rejected**, because it needs a
+  content-write token in CI and MUSE-21 and MUSE-45 both exist to keep one from
+  appearing. Do not add one.
 - **`/whatisbachata` says what the dance is, and nothing about the curriculum**
   (MUSE-65). It is the one of MUSE-27's four trust pages that could be written without
   Mina, because its subject is general knowledge; the other three are studio facts and
