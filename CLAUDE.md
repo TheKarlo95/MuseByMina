@@ -162,15 +162,27 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   six faces were preloaded on no page at all.
 
   **The set is therefore per page, and `src/lib/fonts.ts` is the only place it is
-  decided.** Three `latin` subsets always and Jost's and Inter's `latin-ext` on every
-  Croatian page are *structural* — the skip link and the footer's quick links carry
-  diacritics in those two faces on every page, from code. Cormorant's `latin-ext` is the
-  one content-dependent bit, so it is four lines of data with the evidence beside each and
-  a default that **preloads** for anything unlisted, because waste is the cheaper mistake
-  and the error page needs no entry that way. Read the long note there before changing it:
-  the exact question is "which text on this page is in which family", answering it at
-  build time means modelling the cascade, and a model of the engine passes whenever the
-  model is wrong.
+  decided.** A Croatian page gets all six; an English page gets the three `latin` subsets
+  plus whatever `EN_LATIN_EXT` names. **No list may say a page does *not* need a subset** —
+  that list existed, for Cormorant's `latin-ext` per route, and two content PRs
+  invalidated it on one day (MUSE-71 put a `đ` in `/schedule`'s display heading; MUSE-72
+  put „Ožegovića" into the *English* privacy notice, making `/en/privacy` the first
+  English page to need `inter-latin-ext`). A list that can say "does not need" is wrong in
+  the direction a visitor reads; one that can only add is wrong in the direction the
+  budget counts. The cost is measured and paid: 33.0 KB of Cormorant on the three Croatian
+  pages whose headings are diacritic-free today.
+
+  English is additive-only because the same default there costs 135.9 KB against a 109.8 KB
+  payload, and because **a Croatian proper noun inside an English sentence will keep
+  happening** — a street, an instructor's name, a quoted phrase — and no locale rule
+  predicts it. Two things not to retry, both measured rather than assumed: the rendered
+  text does **not** answer the question, because it is per *face* and `/pricing/` carries
+  „Što je bachata" in `.navList a`, which is Cormorant and `display: none` at the measured
+  width; and `Astro.slots.render()`, which does expose the body before `<head>` is emitted,
+  **silently drops every component's hoisted `<script>`** — eight of fifteen pages lost
+  theirs. Residual risk, stated in the file: `npm test` gates pull requests, the scheduled
+  rebuild does not, so a *Sanity* edit putting a Croatian name into English copy can stale
+  `EN_LATIN_EXT` and deploy.
 - **There is a performance budget, it is `scripts/budget.mjs`, and it is deliberately
   not Lighthouse** (MUSE-63). The original plan listed `lighthouse` among the blocking
   checks; it was never built, and the only size guard was a `du -sm dist` step watching
