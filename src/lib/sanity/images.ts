@@ -89,6 +89,27 @@ export interface ImageSrcOptions {
 }
 
 /**
+ * The pixel box the CDN serves — the whole asset, or what Mina's manual crop left of it.
+ *
+ * Sanity stores a crop as four fractional insets off the original and `rect` wants
+ * pixels on the original, so this is the one conversion, in one place: `imageSrc` turns
+ * it into the query parameter and `imageSize` measures it.
+ */
+function croppedPixels(
+  asset: Asset,
+  crop: ImageRef['crop'],
+): { left: number; top: number; width: number; height: number } {
+  if (!crop) return { left: 0, top: 0, width: asset.width, height: asset.height };
+  const { top, bottom, left, right } = crop;
+  return {
+    left: Math.round(left * asset.width),
+    top: Math.round(top * asset.height),
+    width: Math.round((1 - left - right) * asset.width),
+    height: Math.round((1 - top - bottom) * asset.height),
+  };
+}
+
+/**
  * The URL to put in `src`.
  *
  * `rect` is applied when — and only when — Mina has dragged the crop handles. Sanity
@@ -114,14 +135,8 @@ export function imageSrc(ref: ImageRef, { width }: ImageSrcOptions): string {
   const params: string[] = [];
 
   if (ref.crop) {
-    const { top, bottom, left, right } = ref.crop;
-    const rect = [
-      Math.round(left * asset.width),
-      Math.round(top * asset.height),
-      Math.round((1 - left - right) * asset.width),
-      Math.round((1 - top - bottom) * asset.height),
-    ];
-    params.push(`rect=${rect.join(',')}`);
+    const box = croppedPixels(asset, ref.crop);
+    params.push(`rect=${[box.left, box.top, box.width, box.height].join(',')}`);
   }
 
   params.push(`w=${Math.round(width)}`);
@@ -130,6 +145,35 @@ export function imageSrc(ref: ImageRef, { width }: ImageSrcOptions): string {
   params.push(`q=${QUALITY}`);
 
   return `${IMAGE_CDN}${path}?${params.join('&')}`;
+}
+
+/**
+ * **The pixel size the CDN will actually answer `imageSrc` with** (MUSE-69).
+ *
+ * For a page this is unnecessary — the browser measures the file it fetched, and
+ * `aspect-ratio` reserves the box before it arrives. For a **link preview** nothing
+ * measures anything: Facebook's documentation is explicit that without `og:image:width`
+ * and `og:image:height` the first share of a URL renders with no image at all, because
+ * the card is laid out before the scraper has fetched the file. So the one consumer is
+ * `src/lib/share-card.ts`, and what it needs is not "the size we asked for" but the size
+ * the bytes will have.
+ *
+ * Hence the clamp. `width` is a request, and the CDN will not invent detail that is not
+ * in the asset, so an upload narrower than the width asked for comes back at its own
+ * width — and a declared size that disagrees with the file is worse than no declaration,
+ * since a scraper that trusts it letterboxes or stretches the card. Pass the returned
+ * `width` back into `imageSrc` and the two cannot disagree.
+ *
+ * The height follows from the **cropped** box, not the original: `rect` has already
+ * trimmed the asset by the time a pixel is served.
+ */
+export function imageSize(
+  ref: ImageRef,
+  { width }: ImageSrcOptions,
+): { width: number; height: number } {
+  const box = croppedPixels(assetOf(ref), ref.crop);
+  const served = Math.min(Math.round(width), box.width);
+  return { width: served, height: Math.round((served * box.height) / box.width) };
 }
 
 /** Where the subject is, as the two percentages `object-position` takes. */

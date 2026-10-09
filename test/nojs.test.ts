@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { ICONS } from '../src/lib/icon';
+import { SHARE_CARD_FILE } from '../src/lib/share-card';
 import { buildSite, PAGES_DEPLOY, type Build } from './helpers/build';
 
 /**
@@ -66,10 +67,10 @@ describe('the built site ships no JavaScript files and no CMS client', () => {
   });
 
   /**
-   * Every PNG in the output is a registered icon, emitted through the asset graph.
+   * Every PNG in the output is a registered raster, emitted through the asset graph.
    *
    * The direction matters. `test/icon.test.ts` asserts that each icon in `ICONS` reaches
-   * the output, which says nothing about a *sixth* PNG arriving beside them — a source
+   * the output, which says nothing about a *seventh* PNG arriving beside them — a source
    * raster dropped into a recreated `public/`, an unused export, `logo/` copied wholesale.
    * This is the other direction, and it is the half the extension allow-list used to
    * provide for free.
@@ -77,9 +78,19 @@ describe('the built site ships no JavaScript files and no CMS client', () => {
    * The content hash is part of the claim, not decoration: a file Vite emitted has one,
    * and a file that was copied verbatim out of `public/` does not. That is precisely the
    * distinction MUSE-35 was about.
+   *
+   * The registry is the five tab icons **plus the share card** (MUSE-69), which is a PNG
+   * for the same reason an apple-touch-icon is: the audience is somebody else's software.
+   * A link-preview scraper is not a browser and cannot be content-negotiated with, so
+   * `webp` is not available here either. It is added as `SHARE_CARD_FILE` rather than as
+   * a literal, so the entry cannot outlive the asset.
    */
-  it('emits no PNG that is not a registered icon from the asset graph', () => {
-    const stems = new Set(ICONS.map((icon) => icon.file.replace(/\.png$/, '')));
+  it('emits no PNG that is not a registered raster from the asset graph', () => {
+    const stems = new Set(
+      [...ICONS.map((icon) => icon.file), SHARE_CARD_FILE].map((file) =>
+        file.replace(/\.png$/, ''),
+      ),
+    );
 
     const unexpected = build
       .allFiles()
