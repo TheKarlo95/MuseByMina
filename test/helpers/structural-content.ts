@@ -74,14 +74,34 @@ function reference(id: string): { _type: string; _ref: string } {
   return { _type: 'reference', _ref: id };
 }
 
-function richText(tag: string): { _type: string; hr: unknown[]; en: unknown[] } {
-  const block = (text: string): unknown => ({
+/** One paragraph of Portable Text, as Sanity's block editor stores one. */
+function paragraph(tag: string, text: string): unknown {
+  return {
     _type: 'block',
     _key: `b-${tag}`,
     style: 'normal',
-    children: [{ _type: 'span', _key: `s-${tag}`, text }],
-  });
-  return { _type: 'localeRichText', hr: [block(`HR ${tag}.`)], en: [block(`EN ${tag}.`)] };
+    children: [{ _type: 'span', _key: `s-${tag}`, text, marks: [] }],
+    markDefs: [],
+  };
+}
+
+/**
+ * One `postTranslation` — the shape a post's text takes per locale since MUSE-26.
+ *
+ * `localeRichText` is gone with it: a post is one document carrying up to two of these,
+ * rather than three bilingual fields, so that a post written in one language is a document
+ * with one of them. `sanity/schemaTypes/objects/locale.ts` has the argument.
+ */
+function postText(
+  tag: string,
+  locale: 'HR' | 'EN',
+): { _type: string; title: string; excerpt: string; body: unknown[] } {
+  return {
+    _type: 'postTranslation',
+    title: `${locale} ${tag}`,
+    excerpt: `${locale} ${tag} excerpt.`,
+    body: [paragraph(`${tag}-${locale}`, `${locale} ${tag}.`)],
+  };
 }
 
 /**
@@ -633,35 +653,50 @@ export const GALLERY_TWO: FixtureDoc = {
 export const POST_EARLIER: FixtureDoc = {
   _id: 'post-earlier',
   _type: 'post',
-  title: localeString('post earlier'),
   slug: slug('post-earlier'),
   publishedAt: at(-48 * HOUR),
-  excerpt: localeText('post earlier'),
   author: reference('instructor-a'),
   coverImage: imageOf('PostEarlier', [0.91, 0.92, 0.93, 0.94], [0.31, 0.32, 0.33, 0.34]),
-  body: richText('post earlier'),
+  hr: postText('post earlier', 'HR'),
+  en: postText('post earlier', 'EN'),
 };
 
 export const POST_NOW: FixtureDoc = {
   _id: 'post-now',
   _type: 'post',
-  title: localeString('post now'),
   slug: slug('post-now'),
   publishedAt: at(0),
-  excerpt: localeText('post now'),
   coverImage: imageOf('PostNow', [0.92, 0.93, 0.94, 0.95], [0.32, 0.33, 0.34, 0.35]),
-  body: richText('post now'),
+  hr: postText('post now', 'HR'),
+  en: postText('post now', 'EN'),
 };
 
 export const POST_FUTURE: FixtureDoc = {
   _id: 'post-future',
   _type: 'post',
-  title: localeString('post future'),
   slug: slug('post-future'),
   publishedAt: at(HOUR),
-  excerpt: localeText('post future'),
   coverImage: imageOf('PostFuture', [0.93, 0.94, 0.95, 0.96], [0.33, 0.34, 0.35, 0.36]),
-  body: richText('post future'),
+  hr: postText('post future', 'HR'),
+  en: postText('post future', 'EN'),
+};
+
+/**
+ * **A post written in Croatian and not in English** — the row MUSE-26's hardest question
+ * turns on, and the one `POSTS_QUERY`'s `en{…}` projection must answer `null` for.
+ *
+ * It is here among the projection fixtures rather than only among the render ones, because
+ * „the projection answers null for an absent translation" is a fact about the *query*, and
+ * `en{title, excerpt, body}` over a missing object is exactly the shape a typo in that
+ * projection would also produce.
+ */
+export const POST_ONE_LOCALE: FixtureDoc = {
+  _id: 'post-one-locale',
+  _type: 'post',
+  slug: slug('post-one-locale'),
+  publishedAt: at(-72 * HOUR),
+  coverImage: imageOf('PostOneLocale', [0.95, 0.96, 0.97, 0.98], [0.35, 0.36, 0.37, 0.38]),
+  hr: postText('post one locale', 'HR'),
 };
 
 /** `order` on the question that sorts second, so the two sort clauses disagree. */
@@ -770,6 +805,7 @@ export const FULL: FixtureDoc[] = [
   POST_EARLIER,
   POST_NOW,
   POST_FUTURE,
+  POST_ONE_LOCALE,
   FAQ_ONE,
   FAQ_TWO,
   // Drafts, which every query must behave as if it cannot see. In here rather than in a
@@ -797,7 +833,7 @@ export const FULL_COUNTS: Record<string, number> = {
   pricingTier: 2,
   event: 5,
   galleryImage: 2,
-  post: 3,
+  post: 4,
   faq: 2,
 };
 
@@ -881,13 +917,12 @@ export const SLOT_WITH_DANGLING_TEACHER: FixtureDoc = {
 export const POST_DANGLING_AUTHOR: FixtureDoc = {
   _id: 'post-dangling-author',
   _type: 'post',
-  title: localeString('post dangling author'),
   slug: slug('post-dangling-author'),
   publishedAt: at(-24 * HOUR),
-  excerpt: localeText('post dangling author'),
   author: reference(DELETED_INSTRUCTOR_ID),
   coverImage: imageOf('PostDangling', [0.94, 0.95, 0.96, 0.97], [0.34, 0.35, 0.36, 0.37]),
-  body: richText('post dangling author'),
+  hr: postText('post dangling author', 'HR'),
+  en: postText('post dangling author', 'EN'),
 };
 
 /**
@@ -1161,6 +1196,196 @@ export const EVENT_RENDER_PAST: FixtureDoc = eventDoc('Three', {
 
 /** The three, plus everything a real `astro build` of the whole site needs. */
 export const EVENTS_RENDERED: FixtureDoc[] = [
+/* ------------------------------------------------------------------ posts (MUSE-26) */
+
+/**
+ * **Posts for `test/blog.test.ts`, which renders the real components against them.**
+ *
+ * `POST_EARLIER` … `POST_ONE_LOCALE` above are shaped for `test/projections.test.ts`: they
+ * pin the `$now` boundary to the millisecond and their titles come out as `HR post now`.
+ * These are shaped for the other questions — *does the index list this locale's posts, does
+ * a one-locale post have one URL, does the renderer map every construct, does the byline
+ * fall back to the studio* — so every value differs from every other and every one is
+ * checkable by eye in a failure message.
+ *
+ * Two rules, both inherited and both load-bearing.
+ *
+ * **Nothing here may read as something the studio wrote.** MUSE-36 is live right now
+ * because invented-but-plausible placeholder content escaped a fixture, and a *blog post*
+ * is as bad a candidate as an event: a paragraph of advice about a first class, under the
+ * studio's byline, is a claim the studio did not make. So the titles are `Post One`, the
+ * prose is `HR body One`, and the links are `https://example.invalid/…`. If any of these
+ * strings appears in `dist` outside this suite's own build, that is the bug.
+ *
+ * **The dates are relative to the wall clock, not to {@link NOW}.** A *build* calls
+ * `new Date()`, nothing can pin it, and „a future-dated post has no page" is a claim about
+ * the build's own instant — a fixture dated 2020 would make it a claim about 2020 instead.
+ * The offsets are ±30 days, far enough that no clock skew can move a row across the
+ * boundary, and {@link fromRenderClock} — shared with the event fixtures above, and the
+ * reason it is exported — reads the clock once per process so every document in one run
+ * agrees.
+ */
+const POST_DAY = DAY;
+
+/**
+ * **Every construct `postBlockMember` offers, in one body.**
+ *
+ * The three block styles, the bullet list *with a nested level*, both decorators and the
+ * link annotation — so `test/blog.test.ts` can assert the renderer maps all of them and
+ * `PostPage.astro` can be required to style all of them. A fixture carrying only
+ * paragraphs would make both of those pass by not exercising anything.
+ *
+ * The long token is the 390px case the ticket names: a post is the most likely page to
+ * carry a pasted URL as link text, and a 200-character unbroken string is what tests
+ * whether the measure holds. It is `example.invalid`, so it is visibly not a real link.
+ */
+const LONG_TOKEN = `https://example.invalid/${'x'.repeat(170)}`;
+
+function richBody(tag: string): unknown[] {
+  const span = (key: string, text: string, marks: string[] = []): unknown => ({
+    _type: 'span',
+    _key: key,
+    text,
+    marks,
+  });
+  return [
+    {
+      _type: 'block',
+      _key: `${tag}-p1`,
+      style: 'normal',
+      markDefs: [{ _type: 'link', _key: `${tag}-link`, href: 'https://example.invalid/linked' }],
+      children: [
+        span(`${tag}-s1`, `${tag} opening `),
+        span(`${tag}-s2`, `${tag} bold`, ['strong']),
+        span(`${tag}-s3`, ' and '),
+        span(`${tag}-s4`, `${tag} italic`, ['em']),
+        span(`${tag}-s5`, ' and '),
+        span(`${tag}-s6`, `${tag} linked`, [`${tag}-link`]),
+        span(`${tag}-s7`, '.'),
+      ],
+    },
+    {
+      _type: 'block',
+      _key: `${tag}-h`,
+      style: 'h3',
+      markDefs: [],
+      children: [span(`${tag}-hs`, `${tag} subheading`)],
+    },
+    {
+      _type: 'block',
+      _key: `${tag}-q`,
+      style: 'blockquote',
+      markDefs: [],
+      children: [span(`${tag}-qs`, `${tag} quoted`)],
+    },
+    {
+      _type: 'block',
+      _key: `${tag}-l1`,
+      listItem: 'bullet',
+      level: 1,
+      markDefs: [],
+      children: [span(`${tag}-l1s`, `${tag} bullet one`)],
+    },
+    {
+      _type: 'block',
+      _key: `${tag}-l2`,
+      listItem: 'bullet',
+      level: 2,
+      markDefs: [],
+      children: [span(`${tag}-l2s`, `${tag} bullet nested`)],
+    },
+    // An empty paragraph, which the renderer drops: a keystroke rather than content.
+    {
+      _type: 'block',
+      _key: `${tag}-blank`,
+      style: 'normal',
+      markDefs: [],
+      children: [span(`${tag}-blanks`, '   ')],
+    },
+    {
+      _type: 'block',
+      _key: `${tag}-p2`,
+      style: 'normal',
+      markDefs: [{ _type: 'link', _key: `${tag}-long`, href: LONG_TOKEN }],
+      children: [span(`${tag}-s8`, LONG_TOKEN, [`${tag}-long`])],
+    },
+  ];
+}
+
+function renderedText(
+  tag: string,
+  locale: 'HR' | 'EN',
+): { _type: string; title: string; excerpt: string; body: unknown[] } {
+  return {
+    _type: 'postTranslation',
+    title: `Post ${tag} ${locale}`,
+    excerpt: `Summary ${tag} ${locale}.`,
+    body: richBody(`${tag}${locale}`),
+  };
+}
+
+/**
+ * A post in both languages, by a named instructor, with a cover.
+ *
+ * The furnished case: every optional field filled, so dropping one shows. It is also the
+ * one post whose `hreflang` cluster has two members and whose language switcher renders.
+ */
+export const POST_RENDER_BOTH: FixtureDoc = {
+  _id: 'post-render-both',
+  _type: 'post',
+  slug: slug('post-both'),
+  publishedAt: fromRenderClock(-2 * POST_DAY),
+  author: reference('instructor-a'),
+  coverImage: imageOf('PostBoth', [0.41, 0.42, 0.43, 0.44], [0.05, 0.06, 0.07, 0.08]),
+  hr: renderedText('One', 'HR'),
+  en: renderedText('One', 'EN'),
+};
+
+/**
+ * **A post written in Croatian only, signed by nobody, with no cover.**
+ *
+ * The row MUSE-26's hardest question turns on, and it carries the other two "thin dataset"
+ * states with it so the three branches are exercised on one page: no `author`, so the
+ * byline is the studio's name off `siteSettings` (MUSE-49's documented default); no
+ * `coverImage`, so the page is prose, which is the state every post Mina writes will start
+ * in while the studio has no photography.
+ */
+export const POST_RENDER_HR_ONLY: FixtureDoc = {
+  _id: 'post-render-hr-only',
+  _type: 'post',
+  slug: slug('post-hr-only'),
+  publishedAt: fromRenderClock(-5 * POST_DAY),
+  hr: renderedText('Two', 'HR'),
+};
+
+/** A post written in English only — the same case from the other side, so neither locale is privileged. */
+export const POST_RENDER_EN_ONLY: FixtureDoc = {
+  _id: 'post-render-en-only',
+  _type: 'post',
+  slug: slug('post-en-only'),
+  publishedAt: fromRenderClock(-9 * POST_DAY),
+  en: renderedText('Three', 'EN'),
+};
+
+/**
+ * One dated for later, which must have **no page in either locale and appear on no index**.
+ *
+ * It is bilingual and otherwise complete, so „it is absent" cannot pass for the wrong
+ * reason — the only thing wrong with it is the date.
+ */
+export const POST_RENDER_SCHEDULED: FixtureDoc = {
+  _id: 'post-render-scheduled',
+  _type: 'post',
+  slug: slug('post-scheduled'),
+  publishedAt: fromRenderClock(30 * POST_DAY),
+  author: reference('instructor-b'),
+  coverImage: imageOf('PostScheduled', [0.44, 0.45, 0.46, 0.47], [0.08, 0.09, 0.1, 0.11]),
+  hr: renderedText('Four', 'HR'),
+  en: renderedText('Four', 'EN'),
+};
+
+/** The four, plus everything a real `astro build` of the whole site needs. */
+export const POSTS_RENDERED: FixtureDoc[] = [
   SITE_SETTINGS_DOC,
   ...PAGE_DOCS,
   ...PROSE_PAGE_DOCS,
@@ -1177,6 +1402,15 @@ export const EVENTS_RENDERED: FixtureDoc[] = [
 
 /**
  * The same three events with **every string moved** — MUSE-50's instrument.
+
+  POST_RENDER_BOTH,
+  POST_RENDER_HR_ONLY,
+  POST_RENDER_EN_ONLY,
+  POST_RENDER_SCHEDULED,
+];
+
+/**
+ * The same posts with **every string moved** — MUSE-50's instrument.
  *
  * Comparing a rendered page to the fixture it just read asserts nothing: every equality
  * test passes while a literal in the component still happens to match. So the suite renders
@@ -1211,3 +1445,65 @@ export const EVENT_RESERVED_SLUG: FixtureDoc = eventDoc('Reserved', {
   eventType: 'party',
   startsAt: fromRenderClock(14 * DAY),
 });
+
+ * appear nowhere in the second rendering. That is the only assertion a hardcoded title, a
+ * hardcoded summary or a hardcoded paragraph fails.
+ */
+export const POSTS_REWRITTEN: FixtureDoc[] = [
+  POST_RENDER_BOTH,
+  POST_RENDER_HR_ONLY,
+  POST_RENDER_EN_ONLY,
+].map((doc) => {
+  const moved = (locale: 'HR' | 'EN', tag: string): unknown => ({
+    _type: 'postTranslation',
+    title: `Moved ${tag} ${locale}`,
+    excerpt: `Replaced ${tag} ${locale}.`,
+    body: richBody(`Moved${tag}${locale}`),
+  });
+  const next: FixtureDoc = { ...doc };
+  if (doc.hr !== undefined) next.hr = moved('HR', doc._id);
+  if (doc.en !== undefined) next.en = moved('EN', doc._id);
+  return next;
+});
+
+/**
+ * **A post carrying a Portable Text block type nothing maps** — the renderer's own teeth.
+ *
+ * An `image` block, which is one of the two constructs the ticket names as most likely to
+ * break the 68ch measure, and which `postBlockMember` deliberately does not offer. The
+ * schema cannot produce it; `npm run sanity:seed` and a hand-built import can, and
+ * `renderPortableText` is what turns it into a named failure instead of a wide picture or a
+ * line of developer prose inside the article.
+ */
+export const POST_UNMAPPED_BLOCK: FixtureDoc = {
+  _id: 'post-unmapped-block',
+  _type: 'post',
+  slug: slug('post-unmapped-block'),
+  publishedAt: fromRenderClock(-1 * POST_DAY),
+  hr: {
+    _type: 'postTranslation',
+    title: 'Post Unmapped HR',
+    excerpt: 'Summary Unmapped HR.',
+    body: [
+      {
+        _type: 'image',
+        _key: 'unmapped-image',
+        asset: { _type: 'reference', _ref: 'image-fixtureUnmapped-1600x900-jpg' },
+      },
+    ],
+  },
+};
+
+/** Two posts claiming one URL, which is what `assertPostSlugs` exists to refuse. */
+export const POSTS_DUPLICATE_SLUG: FixtureDoc[] = [
+  { ...POST_RENDER_BOTH, _id: 'post-duplicate-a', slug: slug('post-twice') },
+  { ...POST_RENDER_HR_ONLY, _id: 'post-duplicate-b', slug: slug('post-twice') },
+];
+
+/** A post with neither language filled in, which is published nowhere and so is refused. */
+export const POST_NO_LANGUAGE: FixtureDoc = {
+  _id: 'post-no-language',
+  _type: 'post',
+  slug: slug('post-no-language'),
+  publishedAt: fromRenderClock(-3 * POST_DAY),
+};

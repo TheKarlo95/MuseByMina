@@ -57,15 +57,16 @@ const PAGES_DIR = join(ROOT, 'src/pages');
  *
  *   - **`/404`** is a page the build emits and `@astrojs/sitemap` is right to leave out,
  *     so it is not a hole in `ROUTES` either.
- *   - **`/events/[slug]`** is not a page at all — it is a **template** (MUSE-24). The pages
- *     it produces are one per `event` document, so which pages exist is content rather than
- *     structure: `ROUTES` could not list them, the Studio's route dropdown could not offer
- *     them, and there is no `page` document per event (the `<title>` is derived from the
- *     event — see `src/pages/events/[slug].astro`). Its *index* and its *archive* are
- *     ordinary routes and are in `ROUTES`; this is the one entry under `src/pages/` whose
- *     route key carries a parameter, and the assertion below pins that it does.
+ *   - **`/events/[slug]` and `/blog/[slug]`** are not pages at all — they are **templates**
+ *     (MUSE-24, MUSE-26). The pages each produces are one per `event` or `post` document,
+ *     so which pages exist is content rather than structure: `ROUTES` could not list them,
+ *     the Studio's route dropdown could not offer them, and there is no `page` document per
+ *     event or per post (the `<title>` is derived — see `src/pages/events/[slug].astro` and
+ *     `src/pages/blog/[slug].astro`). Their *indexes* — and `/events/archive` — are ordinary
+ *     routes and are in `ROUTES`; these are the only entries under `src/pages/` whose route
+ *     key carries a parameter, and the assertion below pins that they are.
  */
-const NOT_A_ROUTE = new Set(['/404', '/events/[slug]']);
+const NOT_A_ROUTE = new Set(['/404', '/events/[slug]', '/blog/[slug]']);
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
@@ -156,10 +157,10 @@ describe('`ROUTES` and `src/pages/` describe the same site', () => {
 
   /**
    * A dynamic template is excluded because it is a template, and that is checked rather
-   * than asserted in a comment (MUSE-24).
+   * than asserted in a comment (MUSE-24, MUSE-26).
    *
    * The exclusion is the one that could rot into a blanket: `/404` is a fixed filename and
-   * `/events/[slug]` is a *shape*, so the thing to pin is that every excluded entry which
+   * a `[slug]` entry is a *shape*, so the thing to pin is that every excluded entry which
    * is not `/404` really does carry a parameter, and that the parameterised entries on disk
    * are exactly the ones excluded. A new `[id].astro` added without an entry here fails
    * `declares every page the build serves as a route` below; one added *with* an entry but
@@ -169,15 +170,17 @@ describe('`ROUTES` and `src/pages/` describe the same site', () => {
     const parameterised = routesUnderSrcPagesRaw().filter((route) => /\[[^\]]+\]/.test(route));
     expect(parameterised, 'no dynamic template on disk to exclude').not.toEqual([]);
     expect(parameterised).toContain('/events/[slug]');
+    expect(parameterised).toContain('/blog/[slug]');
 
     const excludedTemplates = [...NOT_A_ROUTE].filter((route) => /\[[^\]]+\]/.test(route));
     expect(excludedTemplates.sort()).toEqual(parameterised.sort());
 
-    // And the template's own index and archive are real routes, so excluding the template
-    // does not quietly excuse the pages around it.
+    // And each template's own index is a real route, so excluding the template does not
+    // quietly excuse the pages around it.
     const declared = ROUTES.map(({ route }) => route);
     expect(declared).toContain('/events');
     expect(declared).toContain('/events/archive');
+    expect(declared).toContain('/blog');
   });
 
   it('declares every page the build serves as a route', () => {

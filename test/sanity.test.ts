@@ -277,8 +277,12 @@ describe('the Studio Mina opens', () => {
       'event.title',
       'event.endsAt',
       'event.description',
-      'post.title',
-      'post.body',
+      // A post's words live in `postTranslation` since MUSE-26, and the object itself
+      // carries the explanation that matters — which language is published and what
+      // happens to one left empty. „Naslov" and „Tekst" are the whole story for the two
+      // fields under it; `excerpt` is not, so it keeps its description.
+      'postTranslation.title',
+      'postTranslation.body',
       'pricingTier.name',
       'faq.question',
       'faq.answer',
@@ -381,9 +385,42 @@ describe('the Studio Mina opens', () => {
   it('requires both locales of every bilingual value, not just one', () => {
     // The whole point of two named fields over a plugin's array: `required()` can say
     // this, and an array of `{_key, value}` cannot.
-    for (const type of ['localeString', 'localeText', 'localeRichText']) {
+    //
+    // **`localeRichText` was the third and MUSE-26 deleted it**, and the deletion makes
+    // this assertion stronger rather than narrower. It had exactly one consumer,
+    // `post.body`, and requiring both halves of it meant a Croatian post was unpublishable
+    // until an English one existed — a `required()` field with nothing to put in it, which
+    // can only be satisfied with a machine translation (MUSE-36's shape). A post's text is
+    // a `postTranslation` per language now, so the rule here applies to every type it
+    // still applies to, with no carve-out: both bilingual *string* types require both
+    // locales, and the one type that may be monolingual is not a bilingual value at all.
+    for (const type of ['localeString', 'localeText']) {
       expect(requiredFieldsOf(type), type).toEqual([...LOCALES].sort());
     }
+    expect(
+      types.map((type) => type.name),
+      '`localeRichText` is back; see MUSE-26 before re-adding a bilingual rich-text type',
+    ).not.toContain('localeRichText');
+  });
+
+  it('lets a post be written in one language, and refuses half of one (MUSE-26)', () => {
+    /**
+     * The schema half of the ticket's hardest question, from both sides.
+     *
+     * Neither `hr` nor `en` is required on `post`, which is what makes a monolingual post
+     * publishable — and all three fields *inside* `postTranslation` are, which is what
+     * makes a half-translated one refused. Sanity validates a nested `required()` only
+     * when the parent object is present, which was measured against its real validator
+     * rather than assumed; `requiredFieldsOf` reads the extracted schema, so this is the
+     * declaration and `test/blog.test.ts` drives the behaviour.
+     *
+     * `slug` and `publishedAt` are required because they are facts about the post rather
+     * than about a language, and `coverImage` and `author` are not: no photography of this
+     * studio exists (the `instructor.portrait` decision), and „Ostavi prazno i objava je
+     * potpisana studijem" is the author field's own documented default.
+     */
+    expect(requiredFieldsOf('post')).toEqual(['publishedAt', 'slug']);
+    expect(requiredFieldsOf('postTranslation')).toEqual(['body', 'excerpt', 'title']);
   });
 
   it('turns the hotspot on for every image, with no exceptions', () => {
@@ -1174,6 +1211,11 @@ describe('the generated types cannot go stale unnoticed', () => {
       // all, which is part of why a dangling `author` went unnoticed: nothing in the type
       // layer was looking at the one optional *dereference* on the site.
       'post',
+      // `postTranslation` joined in MUSE-26: a post's text is one object per language it is
+      // written in, and the three fields inside one are asserted separately from the two
+      // fields of the post itself — because „the object may be absent" and „the object is
+      // complete" are two different claims (`OptionalIn` and `Guaranteed` respectively).
+      'postTranslation',
       'pricingTier',
       // `prosePage` joined in MUSE-65, with the type. Its `sections` assertion is a `Same<>`
       // rather than a `Guaranteed<>`, for `AssertScheduleInstructorsAreAList`'s reason: the
@@ -1199,6 +1241,12 @@ describe('the generated types cannot go stale unnoticed', () => {
      */
     expect(SCHEMA_ASSERTIONS.postAuthorRef).toBe(true);
     expect(SCHEMA_ASSERTIONS.postAuthorOptional).toBe(true);
+    // MUSE-26's four: each translation asserted *as* optional, the cover image too, and
+    // the two translations asserted identical so one cannot drift from the other.
+    expect(SCHEMA_ASSERTIONS.postCroatianOptional).toBe(true);
+    expect(SCHEMA_ASSERTIONS.postEnglishOptional).toBe(true);
+    expect(SCHEMA_ASSERTIONS.postCoverImageOptional).toBe(true);
+    expect(SCHEMA_ASSERTIONS.postTranslationsMatch).toBe(true);
     expect(SCHEMA_ASSERTIONS.slotClassRef).toBe(true);
     expect(SCHEMA_ASSERTIONS.slotInstructorRefs).toBe(true);
     expect(SCHEMA_ASSERTIONS.classInstructorRefs).toBe(true);

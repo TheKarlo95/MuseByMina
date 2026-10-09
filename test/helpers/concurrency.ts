@@ -61,8 +61,8 @@ export { CENSUS_ENV, HEAVY_KINDS, recordHeavyOperation } from '../../scripts/hea
 /**
  * **The recorded total, and a ratchet on it. Not a safety line — read this.**
  *
- * `81` is what this tree performs, measured — 69 `astro build`s, 4 `astro dev` servers
- * and 8 browser launches across 30 of the 35 files. It is **not** the point below which
+ * `82` is what this tree performs, measured — 70 `astro build`s, 4 `astro dev` servers
+ * and 8 browser launches across 31 of the 36 files. It is **not** the point below which
  * the suite is safe, and the number must never be described as though it were, because
  * the measurement says there is no such point:
  *
@@ -77,6 +77,7 @@ export { CENSUS_ENV, HEAVY_KINDS, recordHeavyOperation } from '../../scripts/hea
  * | **80** — `test/share.test.ts`, now merged | 15 | 4 | 1 | MUSE-69, its branch |
  * | **80** — this tree, rebased | 15 | 5 | 1 | MUSE-68, idle box |
  * | **81** — `test/events.test.ts` | 15 | **5** | **0** | MUSE-24, idle box, after MUSE-70 |
+ * | **82** — `test/blog.test.ts`   | 15 | **6** | **0** | MUSE-26, idle box, after MUSE-70 |
  *
  * Every failure in that table is the same test and the same error: `test/localeswitch.
  * test.ts`'s middle-click, `page.waitForEvent: Timeout 20000ms exceeded while waiting for
@@ -130,6 +131,23 @@ export { CENSUS_ENV, HEAVY_KINDS, recordHeavyOperation } from '../../scripts/hea
  * against was real, nothing has disproved it, and the next author to need an operation
  * should have to say so here.
  *
+ * **MUSE-26 is the third, and it landed on top of MUSE-24 rather than instead of it.**
+ * `/blog` needs one build whose dataset holds posts: `getStaticPaths` over a dynamic
+ * route, the URL through the host model, the emitted stylesheet for the prose rules, the
+ * sitemap's `xhtml:link` groups and the `<head>`'s `hreflang` cluster are the five things
+ * Astro's container API structurally cannot see, and no build in the tree has ever had a
+ * post in it. It could not borrow `test/events.test.ts`'s build either — the two fixtures
+ * hold different document types. The rest of that suite is container renders and pure
+ * functions, which is why the entry is 1 and not 3. Measured at **82**: 6 runs, 0
+ * failures, on an idle box at a pool of 15.
+ *
+ * Read that `0` the way MUSE-24's row has to be read — it says „the defect MUSE-70 fixed
+ * is still fixed", not „there is headroom". **Two tickets have now each taken one, which
+ * is the pattern to watch**: a page type whose content is unbounded needs a build with
+ * that content in it, and the next one will too. If a third arrives, the question to ask
+ * first is whether the three can share one build against a dataset holding all three
+ * document types — not whether 83 is fine.
+ *
  * ## Why the worker count is not the divisor
  *
  * MUSE-68 asked for this number to be derived from the worker count, from the model *"ten
@@ -146,7 +164,7 @@ export { CENSUS_ENV, HEAVY_KINDS, recordHeavyOperation } from '../../scripts/hea
  * size is stated in `vitest.config.ts` so it has one home and the reporter can print it
  * beside this total; it is not in the arithmetic.
  */
-export const BUDGET = 81;
+export const BUDGET = 82;
 
 /**
  * Every test file that performs heavyweight work, and how much.
@@ -253,6 +271,16 @@ export const DECLARED: ReadonlyMap<string, { ops: number; why: string }> = new M
         'one build against a dataset holding events — `getStaticPaths`, the URL through ' +
         'the host model, and the emitted CSS are the three things Astro’s container API ' +
         'structurally cannot see, and no existing build has an event in it (MUSE-24)',
+  ],
+  [
+    'test/blog.test.ts',
+    {
+      ops: 1,
+      why:
+        'one build against a dataset holding posts — `getStaticPaths`, the URL through ' +
+        'the host model, the emitted prose CSS, the sitemap’s alternates and the ' +
+        '`hreflang` cluster are what Astro’s container API structurally cannot see, and ' +
+        'no existing build has a post in it (MUSE-26)',
     },
   ],
   ['test/nojs.test.ts', { ops: 1, why: 'one build' }],

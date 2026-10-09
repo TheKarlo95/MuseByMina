@@ -277,6 +277,18 @@ const ADDED_AFTER_THE_MIGRATION: { route: string; ticket: string; because: strin
       'too, and says so.',
   },
   {
+    route: '/blog',
+    ticket: 'MUSE-26',
+    because:
+      'The blog index. The route was one of MUSE-13\u2019s dead links and nothing was ' +
+      'behind it: `post.body` was Portable Text that no renderer on this site read, so ' +
+      '`/blog` arrived long after this receipt was written \u2014 **and it ships empty**, ' +
+      'because no post has been written. There is nothing frozen to compare it to and ' +
+      'nothing published to freeze; its words are asserted in `test/blog.test.ts`, ' +
+      'including that the empty state says there is nothing rather than promising a post ' +
+      'nobody has written.',
+  },
+  {
     route: '/aboutus',
     ticket: 'MUSE-60',
     because:
@@ -541,6 +553,12 @@ describe('the migration is a committed artefact, not a Studio session', () => {
      * type was designed for MUSE-27's other three. A second `prosePage` appearing here
      * before one of those ships is a page nobody routed.
      *
+     * MUSE-26 added the eighth `page` document and **no `post`**: the blog ships empty,
+     * which is the whole reason it could ship at all, and a `post` appearing in this
+     * census is an invented article under the studio's byline — MUSE-36 with a reading
+     * time on it. `test/nojs.test.ts` says the same thing from the other side, against
+     * the pages a build of the seed emits.
+     *
      * MUSE-60 added the sixth `page` document and the `studioStory` singleton. The
      * instructor count staying at **two** is the load-bearing half of that one: the page
      * it routes is the roster, and a third instructor appearing here is a person who does
@@ -552,10 +570,11 @@ describe('the migration is a committed artefact, not a Studio session', () => {
     expect([...byType.entries()].sort()).toEqual([
       ['class', 4],
       ['instructor', 2],
-      // Nine since MUSE-24: `/events` and `/events/archive`. **No `event` document**, and
-      // that is the point of the number — an events page with nothing on it is the state
-      // the site ships in, and seeding a party to furnish it is MUSE-36.
-      ['page', 9],
+      // Ten since MUSE-26: `/events`, `/events/archive` and `/blog`. **No `event` and no
+      // `post` document**, and that is the point of the number — a page with nothing on it
+      // is the state both of them ship in, and seeding a party or an article to furnish
+      // one is MUSE-36.
+      ['page', 10],
       ['pricingTier', 3],
       ['prosePage', 1],
       ['scheduleSlot', 4],
