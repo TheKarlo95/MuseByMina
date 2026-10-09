@@ -38,9 +38,11 @@ import { seedDocs, type SeedDoc } from './helpers/seed';
  *
  * Three claims, three instruments, because they fail in three different ways:
  *
- *   1. **The tags are on the page and the URL is absolute and derived.** Against `dist`.
- *      A root-relative `og:image` is silently ignored by most scrapers, and a hand-written
- *      host is the one thing `CLAUDE.md` forbids outright (MUSE-29/MUSE-42).
+ *   1. **The tags are on the page, and the URL is absolute and base-joined.** Against
+ *      `dist`. A root-relative `og:image` is silently ignored by most scrapers. That the
+ *      host was *derived* rather than written is a claim about two targets and is checked
+ *      in `test/seo.test.ts`, not here — see below, and MUSE-77 for the test name that
+ *      used to say otherwise.
  *   2. **The upload wins and the brand card is the default.** Against the *function*, and
  *      — for the half that has to survive a real build — against a second build reading an
  *      edited fixture, the `test/structured-data.test.ts` technique. A branch asserted only
@@ -267,9 +269,9 @@ describe('AC1: every built page declares a link preview card', () => {
   });
 });
 
-/* ----------------------------------------------- AC1: absolute, derived, non-redirecting */
+/* --------------------------------------------- AC1: absolute, base-joined, non-redirecting */
 
-describe('AC1: the card URL is absolute, derived from SITE, and resolves without a redirect', () => {
+describe('AC1: the card URL is absolute, base-joined, and resolves without a redirect', () => {
   it('is an absolute https URL on the deploy origin', () => {
     for (const page of build.htmlFiles()) {
       const url = meta(build.read(page), 'og:image')!;
@@ -281,17 +283,44 @@ describe('AC1: the card URL is absolute, derived from SITE, and resolves without
   });
 
   /**
-   * It is the *build's* origin rather than a string, which is how "derived" is said here.
+   * **This checks the shape of the URL, not that the host was derived** — and it used to
+   * be named as though it checked the second (MUSE-77).
    *
-   * `build.origin` is composed by the harness from the `SITE`/`BASE` it passed in, so this
-   * fails the moment the layout starts spelling a host of its own — and `test/seo.test.ts`
-   * makes the complementary claim under a second target, that the first host appears in no
-   * byte of the output.
+   * It read `names no host of its own: the URL moves with SITE and BASE`, which it cannot
+   * see: both builds in this file are `PAGES_DEPLOY`, so there is one origin to compare
+   * against and `'https://thekarlo95.github.io' + card.src` written into
+   * `BaseLayout.astro` **passes it**. There is no coverage hole — `test/seo.test.ts`
+   * catches that mutation twice, in `dist` and by naming the file — and the delegation is
+   * argued in this file's header. The name was the defect: if that suite is ever weakened,
+   * a name like the old one reads as cover that was never here, which is the one thing a
+   * guard must not do.
+   *
+   * So it says what it does. The claim is still worth making here, beside the three
+   * assertions that share its subject: the card URL carries the deploy's origin and sits
+   * under its base prefix, which is the base-path join `og:image` has to be.
    */
-  it('names no host of its own: the URL moves with SITE and BASE', () => {
+  it('carries this build’s origin and base path on the front', () => {
     const url = meta(build.read('index.html'), 'og:image')!;
     expect(url.slice(0, build.origin.length)).toBe(build.origin);
     expect(new URL(url).pathname.startsWith(basePath(build))).toBe(true);
+  });
+
+  /**
+   * The fact the name above is calibrated against, as an assertion rather than as a note.
+   *
+   * Both builds are the same deploy target — the second varies the *dataset*, not
+   * `SITE`/`BASE` — so nothing in this file can tell a derived host from a written one.
+   * Point `uploaded` at the apex and this goes red, which is the moment to re-read the
+   * name above, the header's "what is deliberately not here", and `DECLARED`'s reason in
+   * `test/helpers/concurrency.ts`, all three of which say "one target, twice".
+   *
+   * Not a comment, because a comment is what MUSE-77 found: three statements of one fact
+   * with nothing holding them to it. And raising the count is not free either — MUSE-68's
+   * census is at headroom 0.
+   */
+  it('builds one deploy target twice, which is why the claim above is the weaker one', () => {
+    expect(uploaded.origin).toBe(build.origin);
+    expect(basePath(uploaded)).toBe(basePath(build));
   });
 
   /**

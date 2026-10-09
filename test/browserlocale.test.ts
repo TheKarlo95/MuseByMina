@@ -342,17 +342,17 @@ describe('the locale it pins is the site’s own', () => {
   });
 
   it('refuses a locale it has no browser language for', async () => {
-    await expect(
-      openCheckPage(browser, preview, '/', { locale: 'de' }),
-    ).rejects.toThrow(/NAVIGATOR_LOCALE/);
+    await expect(openCheckPage(browser, preview, '/', { locale: 'de' })).rejects.toThrow(
+      /NAVIGATOR_LOCALE/,
+    );
   });
 
   it('makes the probe door name its browser language rather than default it', async () => {
     // The one door that does not pin anything is the one that may not be handed a
     // default: the whole bug is a browser language nobody chose.
-    await expect(
-      openRedirectProbe(browser, {} as { navigatorLocale: string }),
-    ).rejects.toThrow(/MUSE-48/);
+    await expect(openRedirectProbe(browser, {} as { navigatorLocale: string })).rejects.toThrow(
+      /MUSE-48/,
+    );
   });
 });
 
@@ -403,6 +403,26 @@ describe('nothing can open a browser context of its own', () => {
   const suites = (): string[] => browserFiles('test', '.ts');
   const source = (file: string): string => readFileSync(join(ROOT, file), 'utf8');
 
+  /**
+   * Where `needle` appears in `file`, as `file:line`, or `[]`.
+   *
+   * `expect(source(file)).not.toContain(needle)` is the same rule and prints the **whole
+   * file** as its diff — 150 lines of `scripts/a11y.mjs`, inside which the planted
+   * context call is one line nothing points at, with a stray comment landing at the top of
+   * the excerpt as the only visible context (MUSE-77). The needle and the file name were in
+   * the message; the offending line was not. Every other guard in this repository names
+   * `file:line`, so this one does too.
+   *
+   * And note why the sentence above does not quote the token: this file is itself checked
+   * by the loops below, so a forbidden string spelled literally in prose here fails its own
+   * guard. Measured — that is how the first draft of this comment reddened the run.
+   */
+  function occurrences(file: string, needle: string): string[] {
+    return source(file)
+      .split('\n')
+      .flatMap((line, index) => (line.includes(needle) ? [`${file}:${index + 1}`] : []));
+  }
+
   it('finds every browser check and browser suite there is', () => {
     // The loops below are `for` loops over these lists. A discovery that silently stops
     // matching does not fail them — it makes them pass over nothing, which is the exact
@@ -428,24 +448,23 @@ describe('nothing can open a browser context of its own', () => {
 
   it('lets none of them build a context, a page or an init script', () => {
     for (const file of [...scripts(), ...suites()]) {
-      const text = source(file);
       // Opening a context is where the locale is decided, and deciding it by omission is
       // the bug. One module opens them.
-      expect(text, file).not.toContain(FORBIDDEN.newContext);
-      expect(text, file).not.toContain(FORBIDDEN.newPage);
+      expect(occurrences(file, FORBIDDEN.newContext), file).toEqual([]);
+      expect(occurrences(file, FORBIDDEN.newPage), file).toEqual([]);
       // Seeding storage by hand is how the two defended scripts defended themselves —
       // a line each, that nothing made the third script copy. Both ways in are closed:
       // an init script, and a `setItem` from the page once it is open. Reading the key is
       // fine and several suites do it — what the module owns is the write, because a
       // write is a decision about which language the page is being measured as.
-      expect(text, file).not.toContain(FORBIDDEN.initScript);
-      expect(text, file).not.toContain(FORBIDDEN.setItem);
+      expect(occurrences(file, FORBIDDEN.initScript), file).toEqual([]);
+      expect(occurrences(file, FORBIDDEN.setItem), file).toEqual([]);
     }
   });
 
   it('lets none of them launch a browser for itself', () => {
     for (const file of [...scripts(), ...suites()]) {
-      expect(source(file), file).not.toContain(FORBIDDEN.launch);
+      expect(occurrences(file, FORBIDDEN.launch), file).toEqual([]);
     }
   });
 

@@ -21,6 +21,7 @@ import HookFailureReporter from './helpers/hook-failure-reporter';
 import {
   astroBuild,
   astroBuildOutside,
+  buildErrorHeadline,
   cacheDirFor,
   claimOutDir,
   SCRATCH,
@@ -389,6 +390,11 @@ describe('a build stages its prerendered output where it writes it', () => {
     expect(output).toContain(outDir);
     expect(output).not.toContain('EXDEV:');
     expect(output).not.toContain('ssrMoveAssets');
+
+    // And `astroBuild`'s headline finds the cause in this — a *real* build log rather
+    // than a quoted one, which is what keeps the three samples below honest as Astro's
+    // log format moves (MUSE-77). This build is already being run; the assertion is free.
+    expect(buildErrorHeadline(output)).toContain('MUSE-41');
 
     // And nothing was staged, so there is no 233KB of orphaned entry chunk to find
     // later: the build never got as far as emitting one.
@@ -808,11 +814,7 @@ describe('the run reports a dead hook rather than swallowing it', () => {
    */
   it('names a file whose tests never ran', () => {
     const output = reportOn([
-      failedModule('test/contact.test.ts', [
-        neverRanTest(),
-        neverRanTest(),
-        neverRanTest(),
-      ]),
+      failedModule('test/contact.test.ts', [neverRanTest(), neverRanTest(), neverRanTest()]),
     ]);
 
     expect(output).toContain('test/contact.test.ts');
@@ -838,6 +840,60 @@ describe('the run reports a dead hook rather than swallowing it', () => {
 
   it('says nothing at all about a clean run', () => {
     expect(reportOn([passedModule('test/contact.test.ts', [ranTest('passed')])])).toBe('');
+  });
+
+  /**
+   * **And the hook's own headline says why** (MUSE-77).
+   *
+   * The reporter above names the file whose `beforeAll` died and how many tests never
+   * ran. What it cannot do is say *what broke*, and until this ticket neither could the
+   * error: the first line — the one a runner prints beside the file name — was
+   * `astro build failed (outDir …)` and nothing more, with `[UNRESOLVED_IMPORT] Could not
+   * resolve '…' in src/lib/icon.ts` buried in the folded-in log. Three real failures were
+   * captured off this tree to state the rule against; they are quoted here verbatim,
+   * because a rule written against a log format needs the format in front of it.
+   */
+  describe('and a failed build says why on its first line', () => {
+    it('lifts the cause out of a banner that carries none', () => {
+      // Shape 1: a deleted `src/assets/icon/muse-icon-white-32.png`. The marker line is
+      // Vite's banner and the next line is the whole of the news.
+      const headline = buildErrorHeadline(
+        [
+          '09:36:55 [ERROR] [vite] ✗ Build failed in 212ms',
+          "[UNRESOLVED_IMPORT] Could not resolve '../assets/icon/muse-icon-white-32.png?url&no-inline' in src/lib/icon.ts",
+          '    ╭─[ src/lib/icon.ts:55:21 ]',
+        ].join('\n'),
+      );
+
+      expect(headline).toContain('UNRESOLVED_IMPORT');
+      expect(headline).toContain('src/lib/icon.ts');
+      // The code frame is context, not cause, and does not reach the headline.
+      expect(headline).not.toContain('╭');
+    });
+
+    it('stops at a stack frame when the marker line is already the cause', () => {
+      // Shape 3: a missing document. `at requireDocument (…)` would be noise.
+      const headline = buildErrorHeadline(
+        [
+          '09:37:34 [ERROR] SanityContentError: There is no `siteSettings` document in the dataset.',
+          '    at requireDocument (file:///…/sanity_DqL-D1bb.mjs:597:44)',
+        ].join('\n'),
+      );
+
+      expect(headline).toBe(
+        'SanityContentError: There is no `siteSettings` document in the dataset.',
+      );
+    });
+
+    it('answers nothing for output that names no error, rather than guessing', () => {
+      // The honest failure mode: an unrecognised log leaves the headline exactly as it
+      // was. A wrong line number is worse than none (this ticket), and so is a wrong
+      // cause — so there is no fallback that picks "the last line" or "the longest one".
+      expect(buildErrorHeadline('--- stdout ---\n09:36:54 [build] output: "static"\n')).toBe(
+        '',
+      );
+      expect(buildErrorHeadline('')).toBe('');
+    });
   });
 });
 
@@ -1078,9 +1134,7 @@ interface StagingRules {
  * outcome: the model in `astro.config.mjs` is a model of this function, and an Astro
  * upgrade is exactly when somebody needs to look at it again. The message says so.
  */
-async function astroStagingResolver(): Promise<
-  (outDir: string, cwd: string) => string
-> {
+async function astroStagingResolver(): Promise<(outDir: string, cwd: string) => string> {
   const entry = createRequire(import.meta.url).resolve('astro');
   const utils = new URL('./prerender/utils.js', pathToFileURL(entry));
 
@@ -1166,7 +1220,10 @@ function reportOn(modules: TestModule[]): string {
 
 /** A test vitest was asked to run that never produced a result: a hook above it died. */
 function neverRanTest(): TestCase {
-  return { options: { mode: 'run' }, result: () => ({ state: 'skipped' }) } as unknown as TestCase;
+  return {
+    options: { mode: 'run' },
+    result: () => ({ state: 'skipped' }),
+  } as unknown as TestCase;
 }
 
 /** A test its author skipped on purpose. */
