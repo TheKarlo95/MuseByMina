@@ -144,16 +144,33 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   resolves every reference to it in both environments, with no base-path join anywhere.
   `src/styles/fonts.css` uses a relative `url()` into `src/assets/`; `BaseLayout.astro`
   preloads the *same files* via `?url` imports.
-- **A preload must name the same URL as the thing it preloads, and must be a face the
-  page actually needs.** Two different failures, both silent. Point the preload at a
-  second copy of the font and both URLs are 200, both resolve, and the browser downloads
+- **A preload must name the same URL as the thing it preloads, and the preloaded set must
+  be exactly the set the page asks for.** Three failures, all silent. Point the preload at
+  a second copy of the font and both URLs are 200, both resolve, and the browser downloads
   each face twice. Point it at a declared-but-unused subset (`-latin-ext` instead of
   `-latin`) and you pay for bytes the page never paints with and lose the preload on the
-  ones it does. `test/assets.test.ts` catches the first against `dist`;
-  `test/fonts.test.ts` catches the second by loading each page **with the preload tags
-  stripped** and recording what the CSS engine then asks for — the only way to measure
-  it, since a preload is itself a request and so "was it requested" is true by
-  construction.
+  ones it does. **Leave a needed face out and the page paints a word in two typefaces**
+  (MUSE-74): `@font-face` subsets split on `unicode-range`, every Croatian diacritic lives
+  in `latin-ext`, and `font-display: swap` paints the latin half of „Do**đ**i" in Cormorant
+  while the `đ` comes from the system fallback — measured at 221 ms on a throttled cold
+  load, 4 ms once both halves are preloaded together. `test/assets.test.ts` catches the
+  first against `dist`; `test/fonts.test.ts` catches the other two by loading each page
+  **with the preload tags stripped** and recording what the CSS engine then asks for — the
+  only way to measure it, since a preload is itself a request and so "was it requested" is
+  true by construction — and it compares the two sets **both ways**. The one-directional
+  version (`preloaded ⊆ needed`) was green for the life of the project while four of the
+  six faces were preloaded on no page at all.
+
+  **The set is therefore per page, and `src/lib/fonts.ts` is the only place it is
+  decided.** Three `latin` subsets always and Jost's and Inter's `latin-ext` on every
+  Croatian page are *structural* — the skip link and the footer's quick links carry
+  diacritics in those two faces on every page, from code. Cormorant's `latin-ext` is the
+  one content-dependent bit, so it is four lines of data with the evidence beside each and
+  a default that **preloads** for anything unlisted, because waste is the cheaper mistake
+  and the error page needs no entry that way. Read the long note there before changing it:
+  the exact question is "which text on this page is in which family", answering it at
+  build time means modelling the cascade, and a model of the engine passes whenever the
+  model is wrong.
 - **There is a performance budget, it is `scripts/budget.mjs`, and it is deliberately
   not Lighthouse** (MUSE-63). The original plan listed `lighthouse` among the blocking
   checks; it was never built, and the only size guard was a `du -sm dist` step watching
