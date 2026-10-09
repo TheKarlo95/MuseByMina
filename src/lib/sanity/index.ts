@@ -136,7 +136,7 @@ export type { SanitySource } from './client';
  * decision. `./images.ts` has the long note on why the ratio crop is CSS's job and the
  * CDN is only asked for a width.
  */
-export { imageFocus, imageSize, imageSrc } from './images';
+export { imageFocus, imageSize, imageSrc, imageSrcSet } from './images';
 export type { ImageFocus, ImageSrcOptions } from './images';
 
 /** Which project and dataset this build is reading from. For build logs. */

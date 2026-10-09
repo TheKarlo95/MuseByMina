@@ -209,6 +209,32 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   *total* ceiling did not move, which is the shape to copy: raise the one kind on its own
   merits and let the sum stay honest.
 
+  **That negotiation happened in MUSE-25, and the answer was neither a raise nor a
+  per-route exemption — it was to budget images per image.** `/gallery` was built against
+  a fixture at four album sizes and weighed in a browser with every `cdn.sanity.io`
+  request answered by a real photograph encoded at the width the URL asked for. Three
+  things came out of it. The weight is **linear in the number of photographs** — 1,023,
+  997 and 981 bytes of document per `<img>`, which is six Sanity URLs of `srcset` each, so
+  48 KB of html binds at about fifteen pictures, 360 KB of total at fourteen, and 14
+  requests at **four**. The multiplier is **editorial**: album size is Mina's decision,
+  taken in a Studio, with no pull request — and CI builds from the seed, which has no
+  photographs, so a flat raise would be a gate that stays green until the shoot and then
+  fails on her upload in `deploy.yml`, where nobody is reading. And the two halves have
+  different owners: *how many* pictures is hers, *how big each one is* is ours.
+
+  So `bytes.image` is gone as a per-page sum and `imageResponse` replaces it — **32 KB,
+  the heaviest single image response on any page** — which is stricter than the old line
+  everywhere except a gallery, fires on every page, and does not move with content. The
+  three content-sensitive lines carry a **`perImage` allowance** instead of a raise:
+  1,280 bytes on `html` and on `total`, one on `requests`, per `<img>` the document holds,
+  counted off the markup so there is still no list anywhere. `total` is additionally
+  compared **without photography**, which is why that ceiling did not have to move at all:
+  the heaviest page on the site is 307 KB on that basis whether the gallery holds nothing
+  or forty-eight. The cost is slack on image-heavy pages — a twenty-four-picture gallery
+  is allowed 110 KB of document and uses 65 — and that is the right side to be wrong on,
+  because the thing the line protects against is a page growing a *feature*, and a feature
+  is still 48 KB whatever the album is.
+
   The **font count has a floor, and the floor is the half that finds things.** It is
   MUSE-35: all six faces 404ed under `astro dev` for the life of the project, so
   reproduced against a build that is six requests and **zero faces served** — which is why
@@ -616,9 +642,9 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   It used to answer the status and invent the body, so no browser suite in the repo could
   reach the error page at all and an all-Croatian 404 was only reproducible against the
   deployed site. Drive it with `test/helpers/preview.ts` and an unknown path.
-- **A test never chooses where it builds.** `npm test` performs **82 heavyweight
-  operations — 70 real `astro build`s, 4 `astro dev` servers and 8 browser launches —
-  across 31 of its 36 files**, in a pool of `availableParallelism() - 1` workers, which
+- **A test never chooses where it builds.** `npm test` performs **84 heavyweight
+  operations — 71 real `astro build`s, 4 `astro dev` servers and 9 browser launches —
+  across 32 of its 40 files**, in a pool of `availableParallelism() - 1` workers, which
   is 15 on a developer box and 3 on `ubuntu-latest`. (It said *"ten real `astro build`s
   in parallel workers"* until MUSE-68 counted; nothing had ever made that true, and
   `test/lockup.test.ts` reasoned from it.) `test/helpers/scratch.ts` mints a directory
@@ -1235,6 +1261,68 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   source**: the schema imports `EVENT_TYPES`/`EVENT_TYPE_NAME` out of it, so it is in
   `check-sanity.mjs`'s `SOURCES` *and* in `studio.yml`'s `paths:` — two lists, asserted
   equal, and no third.
+- **`/gallery` ships with no photographs, and that is the honest hard case** (MUSE-25).
+  `/events` and `/blog` ship empty too, and the difference is worth stating because it is
+  what the design had to answer: **their purpose survives having no content and a
+  gallery's does not.** An events page with nothing on it still tells you the studio runs
+  a weekly timetable; a gallery with nothing on it tells a visitor nothing they came for.
+  So the page is thin and is not disguised — no placeholder tiles, no decorative frames,
+  no stock imagery, and **no lede**, which is the one thing this empty state withholds
+  that `/events` keeps, because a lede here could only describe photographs that do not
+  exist. It says „Nema objavljenih fotografija.", renders no grid and no section heading,
+  states a present fact (the studio has not been photographed) rather than a promise, and
+  offers `/schedule` and `/contact`. The words are `GALLERY_COPY` in `src/lib/gallery.ts`
+  and are **code, not CMS**, for `EVENT_COPY`'s reason. No `galleryImage` in the seed; the
+  fixtures are `GALLERY_RENDERED` under `test/`.
+
+  **It is in `MORE_NAV` and not in the desktop bar**, and that is the ticket's own
+  instruction rather than the four-link budget alone: a „Galerija" entry in the masthead
+  of all fourteen pages, promising pictures, leading to a page that says there are none,
+  is an invitation the site cannot honour repeated fourteen times. Promoting it is the
+  shoot's ticket, which is how „the photographs landed" shows up in a diff.
+
+  **The lightbox is a native `<dialog>` opened with `showModal()`, and the reason is one
+  word: inertness.** The built output has zero `.js` files, so the mechanism had to be
+  CSS, markup or an inline `<script>`, and the three candidates are argued in
+  `Gallery.astro`. `:target` cannot trap focus at all and spends the Back button — twelve
+  history entries for twelve photographs. `popover="auto"` needs no script, light-dismisses
+  and returns focus, and is **specified not to make the rest of the document inert**, so
+  Tab walks straight out of a thing that looks, reads and announces as modal. `showModal()`
+  gives the trap, Escape, and focus returned to the thumbnail, from the platform — so the
+  script writes none of them, and the test for the trap is a test of *inertness* (focus a
+  tile behind the dialog; nothing happens) rather than a test that a handler wrapped an
+  index. **With scripting off the grid is the gallery**: every photograph is on the page
+  with its alt text, and each tile is an `<a href>` to that picture's own 1200w CDN URL, so
+  a tap opens the browser's own image view. A `:target` panel underneath was rejected for
+  MUSE-38's reason — two mechanisms answering one question, only one of them ever audited.
+
+  **`.frame[hidden] { display: none }` is load-bearing and its absence is silent.**
+  `[hidden]` is a *user-agent* rule and any author `display` beats the UA stylesheet, so
+  `.frame { display: grid }` quietly put all seven photographs in the layout at once and
+  fetched every full-size file the moment the lightbox opened — a stage 5,002px tall in a
+  900px viewport, with the picture that was asked for 636px above the top of the screen.
+  Found by measuring boxes, not by looking; `test/gallery.test.ts` counts layout boxes and
+  full-size requests with the lightbox open, which is why both numbers are pinned.
+
+  **`npm run a11y` only sees a page at rest, so the open lightbox is audited in the
+  suite** — both themes, no tag filter, `test/contact.test.ts`'s precedent for the trial
+  form's error state and the gap this ticket names.
+
+  **`imageSrcSet` arrived here** (`src/lib/sanity/images.ts`), with the ladders in
+  `src/lib/gallery.ts` derived from the boxes the layout can paint rather than rounded —
+  three rungs each, every box covered within 1.21× in the grid, nothing above 600w for a
+  tile. `test/gallery.test.ts` measures `img.currentSrc` against the painted box in a real
+  browser at 390 and 1280, because a model of the selection algorithm passes whenever the
+  model is wrong. **§7.4 and §9 disagree about the grid and §9 wins**: §7.4 says „mixed
+  aspect ratios", §9 rule 4 says 1:1 for a gallery, the Studio field promises Mina 1:1 and
+  the ticket asks for 1:1 — noted in `Gallery.astro` rather than silently resolved.
+
+  Two things raised and not fixed, both in `Gallery.astro`: a modal `<dialog>` does not
+  lock the page behind it, and the CSS-only fix (`:has()` plus `overflow: hidden`) costs a
+  visible 15px jolt on close unless `scrollbar-gutter: stable` goes on every page of the
+  site, which is a layout change that does not belong in this ticket; and nothing here has
+  seen Sanity's own encoder, because no photograph has ever been uploaded to this dataset —
+  the budget's bytes are a real encoder at the real widths, but not *their* encoder.
 - **`/pricing` publishes the studio's three rates, and that is the whole rate card**
   (MUSE-73). 55 € regular monthly, 40 € student monthly, 20 € drop-in — confirmed by the
   owner on 2026-10-09, in those words, after being asked for the complete card.

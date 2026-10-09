@@ -4,7 +4,7 @@
     "sanity.cli.ts": "583ad020a0a25c8a",
     "sanity.config.ts": "0f1309c72a3cdbe8",
     "sanity/badges.ts": "94bfc16c448375fa",
-    "sanity/schema.json": "72d618058054c0fc",
+    "sanity/schema.json": "cb063d4ff6df9f5e",
     "sanity/schemaTypes/documents/media.ts": "5d9449f115fc416f",
     "sanity/schemaTypes/documents/offering.ts": "21673b97e804b932",
     "sanity/schemaTypes/documents/prose.ts": "9d58ff2b83325381",
@@ -16,7 +16,7 @@
     "sanity/schemaTypes/objects/locale.ts": "ba522dd96abc277c",
     "sanity/structure.ts": "7464b960d336ab93",
     "src/lib/events.ts": "d1c2f6da3247c015",
-    "src/lib/pages.ts": "07557fe12982cd43",
+    "src/lib/pages.ts": "303cd80ebff01b31",
     "src/lib/sanity/queries.ts": "feeea35e6391f757",
     "src/lib/schedule.ts": "325f13a8dcfeabe9"
   }

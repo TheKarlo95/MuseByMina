@@ -61,8 +61,8 @@ export { CENSUS_ENV, HEAVY_KINDS, recordHeavyOperation } from '../../scripts/hea
 /**
  * **The recorded total, and a ratchet on it. Not a safety line — read this.**
  *
- * `82` is what this tree performs, measured — 70 `astro build`s, 4 `astro dev` servers
- * and 8 browser launches across 31 of the 36 files. It is **not** the point below which
+ * `84` is what this tree performs, measured — 71 `astro build`s, 4 `astro dev` servers
+ * and 9 browser launches across 32 of the 40 files. It is **not** the point below which
  * the suite is safe, and the number must never be described as though it were, because
  * the measurement says there is no such point:
  *
@@ -78,6 +78,7 @@ export { CENSUS_ENV, HEAVY_KINDS, recordHeavyOperation } from '../../scripts/hea
  * | **80** — this tree, rebased | 15 | 5 | 1 | MUSE-68, idle box |
  * | **81** — `test/events.test.ts` | 15 | **5** | **0** | MUSE-24, idle box, after MUSE-70 |
  * | **82** — `test/blog.test.ts`   | 15 | **6** | **0** | MUSE-26, idle box, after MUSE-70 |
+ * | **84** — `test/gallery.test.ts`, a build **and** a browser | 15 | **6** | **0** | MUSE-25, idle box |
  *
  * Every failure in that table is the same test and the same error: `test/localeswitch.
  * test.ts`'s middle-click, `page.waitForEvent: Timeout 20000ms exceeded while waiting for
@@ -148,11 +149,34 @@ export { CENSUS_ENV, HEAVY_KINDS, recordHeavyOperation } from '../../scripts/hea
  * first is whether the three can share one build against a dataset holding all three
  * document types — not whether 83 is fine.
  *
+ * **MUSE-25 is that third, it takes two rather than one, and the question above was asked
+ * first.** The answer is no today, and the reason is structural rather than a preference:
+ * **vitest runs each test file in its own worker process**, so three suites cannot share
+ * a build without something that builds *before* the pool starts and hands the path in —
+ * a `globalSetup` artefact, which serialises one build ahead of every worker, has to
+ * decide a single dataset that satisfies all three fixtures, and makes a suite's content
+ * somebody else's file. That is a design change worth doing when there are five of these,
+ * not three; it is written down here so the next author inherits the reasoning rather
+ * than the question. What *can* be shared is already shared: the other ninety assertions
+ * in `test/gallery.test.ts` are container renders and cost nothing, which is MUSE-24's
+ * split.
+ *
+ * The second operation is a **browser**, and it is the one that could not be avoided at
+ * all. `/gallery`'s acceptance criteria are „focus is trapped inside the lightbox and
+ * returned to the thumbnail it opened from", arrow-key navigation, Escape, and `npm run
+ * a11y` passing with the lightbox **open** — every one of them a claim about what happens
+ * after a key is pressed in a real engine. The container API renders markup; it does not
+ * have a focus ring. And a browser is per-file for the same reason a build is.
+ *
+ * Measured at 84: **6 runs, 0 failures**, idle box, pool of 15. Read that `0` the way
+ * MUSE-24's and MUSE-26's rows have to be read — it says the defect MUSE-70 fixed is
+ * still fixed, not that there is headroom above 82.
+ *
  * ## Why the worker count is not the divisor
  *
  * MUSE-68 asked for this number to be derived from the worker count, from the model *"ten
- * builds, ten workers, an eleventh is one too many"*. The run performs **68 builds, 4 dev
- * servers and 8 browser launches** across a pool of `availableParallelism() - 1` —
+ * builds, ten workers, an eleventh is one too many"*. The run performs **71 builds, 4 dev
+ * servers and 9 browser launches** across a pool of `availableParallelism() - 1` —
  * **fifteen** here and **three** on `ubuntu-latest`. So the model is wrong about both
  * numbers, and dividing by the pool would make the same tree pass on a laptop and fail on
  * a runner, which is a guard pointing backwards.
@@ -164,7 +188,7 @@ export { CENSUS_ENV, HEAVY_KINDS, recordHeavyOperation } from '../../scripts/hea
  * size is stated in `vitest.config.ts` so it has one home and the reporter can print it
  * beside this total; it is not in the arithmetic.
  */
-export const BUDGET = 82;
+export const BUDGET = 84;
 
 /**
  * Every test file that performs heavyweight work, and how much.
@@ -286,6 +310,17 @@ export const DECLARED: ReadonlyMap<string, { ops: number; why: string }> = new M
   ],
   ['test/nojs.test.ts', { ops: 1, why: 'one build' }],
   ['test/schedule.test.ts', { ops: 1, why: 'one build' }],
+  [
+    'test/gallery.test.ts',
+    {
+      ops: 2,
+      why:
+        'a served build whose dataset holds photographs, and a browser — the lightbox is ' +
+        'a modal `<dialog>`, so the focus trap, the arrow keys and the axe audit of the ' +
+        'open state can only be measured by pressing keys in a real engine, and no ' +
+        'existing build in the tree has a `galleryImage` in it (MUSE-25)',
+    },
+  ],
 ]);
 
 /** What `DECLARED` adds up to. */

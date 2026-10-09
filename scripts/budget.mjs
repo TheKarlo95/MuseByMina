@@ -140,6 +140,13 @@ export const BUDGET = {
      * 48 KB is ~1.55× the worst page, 17.1 KB of headroom. Not looser than that, because
      * HTML here is hand-written markup rendered at build time: a page needing 48 KB of it
      * has grown a feature, not a paragraph, and a feature is a decision worth noticing.
+     *
+     * **Plus `perImage.html` per `<img>` the document holds** (MUSE-25), because a
+     * responsive image ladder is paid in the document: measured 1,023 bytes per `<img>`
+     * on `/gallery`, six Sanity URLs per photograph at ~160 characters each. The base is
+     * unchanged — it is still what says „this page has grown a feature" — and the term is
+     * what stops the line being a trap that fires at the fifteenth photograph. The
+     * accounting is beside `perImage`.
      */
     html: 48 * 1024,
     /**
@@ -177,49 +184,125 @@ export const BUDGET = {
      * well as weighing them. Two instruments, because this one cannot see that case.
      */
     font: 288 * 1024,
-    /**
-     * Images: measured worst is **11.1 KB on every page** — the brand lockup in the
-     * footer, and the only image the site has.
-     *
-     * This line was `0` until MUSE-64, which is the ticket the tripwire was set for: "the
-     * first ticket that puts an image on a page raises this line, in this file, with a
-     * sentence saying what it measured and why." So, the measurement.
-     *
-     * One file, `muse-lockup-white.*.webp`, 11,356 bytes, 320px wide, emitted once and
-     * used by the footer of all twelve pages at 160 CSS px — 2× for a retina display.
-     * Deliberately **no `srcset`**: a `densities={[1, 2]}` pair would save ~7 KB on a 1×
-     * display, and it would also mean this gate measured the 160px file (Playwright runs
-     * at `deviceScaleFactor: 1`) while nearly every real visitor downloaded the 320px
-     * one. A budget that measures a file the audience does not fetch is worse than a
-     * looser budget. The reasoning is in `src/lib/lockup.ts`.
-     *
-     * **16 KB is ~1.44×, 4.9 KB of headroom**, and the headroom is sized for one thing:
-     * the icon-only mark and the favicon (MUSE-40), which are small square assets and
-     * are the next images this site is going to grow. It is deliberately **not** enough
-     * for a second lockup-sized asset, and nowhere near a photograph — the style cards'
-     * 4:5 images and the hero (§7.2, §9) will each be larger than this entire line, so
-     * the ticket that lands the first one re-measures here rather than squeezing under.
-     *
-     * The thing this number cannot see is an image that is correctly sized and simply
-     * wrong — a logo served at 2000px would blow past it, a logo served at 320px and
-     * painted at 40px would not. `test/lockup.test.ts` owns that half, by pinning the
-     * emitted width to the width the component draws.
-     */
-    image: 16 * 1024,
   },
   /**
-   * Total decompressed bytes. Measured worst is `/` at **307.8 KB**, 79% of it webfont.
+   * **What one more image on a page is allowed to add, per `<img>` the document holds**
+   * (MUSE-25).
    *
-   * 360 KB is ~1.17×, 52.2 KB of headroom, and deliberately **tighter than the sum of the
-   * per-kind lines** (392 KB): without this, two kinds each growing to the top of its own
-   * budget would be a page nobody agreed to and nothing red.
+   * MUSE-63 wrote that *"after the gallery and the portraits land the same numbers are a
+   * negotiation about which page to exempt"*, and predicted the answer would be a
+   * per-route exemption. `/gallery` is that ticket, and the negotiation produced a third
+   * answer: **the lines a gallery moves are moved per image rather than per route.**
    *
-   * **The ceiling did not move when the lockup landed** (MUSE-64) — the measurement under
-   * it did, from 296.1 KB to 307.8 KB, and the headroom absorbed the 11.1 KB. That is the
-   * line doing its job rather than needing maintenance: a per-kind budget can be raised
-   * on its own merits while this one keeps the page as a whole honest about the sum. It
-   * is also now the tighter of the two constraints on the next image, which is the right
-   * way round.
+   * The measurement is why. A populated `/gallery` was built against a fixture at four
+   * album sizes and weighed in a real browser, with every `cdn.sanity.io` request answered
+   * by a real photograph encoded at the width the URL asked for (`webp q80`, which is what
+   * `auto=format&q=80` performs):
+   *
+   * | photographs | `<img>` | html | image | requests | total |
+   * |---|---|---|---|---|---|
+   * | 0 (the shipped page) | 2 | 18.6 KB | 12.7 KB | 11 | 296.5 KB |
+   * | 7 | 16 | 32.6 KB | ~93 KB | 18 | ~391 KB |
+   * | 12 | 26 | 42.0 KB | 151.3 KB | 23 | 458.4 KB |
+   * | 24 | 50 | 64.6 KB | — | — | — |
+   *
+   * Three things that table settles.
+   *
+   * **It is linear in the number of photographs, and the slope is `srcset`.** 1,023, 997
+   * and 981 bytes of document per `<img>` across the three populated builds — six URLs per
+   * photograph at ~160 characters each, which is the cost of the ticket's own „use Sanity's
+   * image pipeline for responsive sizes" requirement. A flat ceiling therefore does not
+   * fail *at* some weight, it fails at some **album size**: 48 KB binds at about fifteen
+   * photographs, 360 KB of total at about fourteen, and 14 requests at four.
+   *
+   * **Album size is an editorial decision, taken in a Studio, with no pull request.** So a
+   * flat raise is not a budget, it is a **trap with a date on it**: CI builds from the seed,
+   * which has no photographs, so the gate would stay green until the shoot — and then fail
+   * on Mina's upload, in `deploy.yml`, where nobody is reading. A number that cannot be
+   * exceeded by anything a developer does and will certainly be exceeded by something an
+   * editor does is worse than no number.
+   *
+   * **A per-route exemption was the alternative and is refused**, for the reason written at
+   * the top of this file: the page set is read off the build, so there is no list to extend
+   * and nothing to forget, and seven guards in this repository have already had to be
+   * replaced for having one. Per `<img>` keeps that property exactly — the count comes out
+   * of the document the browser parsed, the rule is the same on every page, and a route
+   * that lands tomorrow is budgeted the day it builds.
+   *
+   * **1,280 bytes** is ~1.25× the measured 1,023, applied to `html` and to `total`.
+   * `requests` gets **1**, which is one fetch per image and no more — the failure it still
+   * catches is the same image fetched twice.
+   *
+   * The cost, stated plainly rather than discovered later: on a page with two images the
+   * allowance adds 2.5 KB to a 48 KB line, which is nothing — but on an image-heavy page
+   * the *base* is slack, because the base is sized for `/`'s inline JSON-LD and theme stamp
+   * and a gallery's own markup is 18.6 KB. A twenty-four-photograph gallery is allowed
+   * 110 KB of document and uses 65 KB. That slack is the price of never trapping, and it is
+   * the right side to be wrong on: the thing this line protects against is *a page growing
+   * a feature*, and a feature is still 48 KB whatever the album is.
+   */
+  perImage: { html: 1280, total: 1280, requests: 1 },
+  /**
+   * **The heaviest single image response, on any page — and this is the line with teeth**
+   * (MUSE-25).
+   *
+   * `bytes.image` was a per-page *sum* and is gone, because a sum conflates two things
+   * that fail in opposite directions and have different owners: **how many photographs are
+   * on the page**, which is Mina's decision and is unbounded by design, and **how big each
+   * one is**, which is ours. Once the first is editorial, the second is the only half a
+   * budget can honestly hold — and holding it per response is strictly *stronger* than the
+   * old sum on every page except a gallery, because the old 16 KB would have passed a
+   * single 15 KB logo and this refuses anything over 32 KB anywhere.
+   *
+   * Measured, at `deviceScaleFactor: 1`, on the populated builds above:
+   *
+   *   - `muse-lockup-white.*.webp` — **11.1 KB**, the footer lockup on every page (MUSE-64)
+   *   - `muse-mark-white.*.webp` — 1.6 KB, the masthead mark (MUSE-67)
+   *   - a gallery tile at the `350w` rung the engine selects for a 290 px box — **4.0 KB**
+   *     to **11.5 KB** across two real camera photographs, the second a warm, low-light
+   *     evening frame, which is the register §9 asks for
+   *
+   * **32 KB is ~2.8× the measured worst**, and what it buys is the ability to say no to the
+   * failure the ticket names: a 2000w original measures 104–297 KB, a 1200w one 61–107 KB,
+   * and a 600w tile on a 2× phone 23.6 KB. So an unoptimised photograph fails here on
+   * *whatever* page it appears, and the headroom stops at the point where a visitor would
+   * be downloading a lightbox-sized file to paint a thumbnail.
+   *
+   * Two limits, stated rather than left to be discovered. This is measured **at page
+   * load**, so the full-size frame the lightbox fetches when a visitor opens it is outside
+   * it — `/gallery`'s dialog keeps every frame `hidden`, which is what makes a closed
+   * lightbox cost nothing, and `test/gallery.test.ts` asserts that no candidate above the
+   * grid's top rung is fetched while it is closed. And the gate runs at 1×, so it measures
+   * the rung a 1× display selects; the rungs themselves are bounded in
+   * `src/lib/gallery.ts`, where the ladder is derived from the boxes the layout can paint
+   * and `test/gallery.test.ts` measures the engine's selection against the painted box.
+   */
+  imageResponse: 32 * 1024,
+  /**
+   * **Total decompressed bytes, excluding photography, plus `perImage.total` per `<img>`.**
+   *
+   * Measured worst is `/` at 307.8 KB, 79% of it webfont — 296.7 KB of it once the footer
+   * lockup is taken out. A populated `/gallery` weighs 458.4 KB and **307.1 KB** on the
+   * same basis, which is the point: with photography excluded the heaviest page on the site
+   * is the same weight it has always been, and the ceiling does not have to move for a
+   * gallery at all.
+   *
+   * 360 KB is ~1.17× of that, 52.9 KB of headroom, and deliberately **tighter than the sum
+   * of the per-kind lines** (376 KB): without this, two kinds each growing to the top of
+   * its own budget would be a page nobody agreed to and nothing red.
+   *
+   * **Why photography comes out rather than the ceiling going up** (MUSE-25). Including it
+   * makes this number a function of how many photographs Mina has published — 458 KB at
+   * twelve, and rising — so it would have to be raised to a figure that is 150 KB of pure
+   * slack on all twenty other pages and *still* a trap at some album size. Excluded, the
+   * line keeps its full value for every page and every byte that is ours to decide, and
+   * the photography is held by `imageResponse` above, per response, which is the half a
+   * budget can actually hold. The `perImage.total` term is still here because a
+   * photograph's `srcset` is paid in the **document**, and that part is not photography.
+   *
+   * **The ceiling did not move when the lockup landed** (MUSE-64) and it has not moved for
+   * the gallery either — the measurement under it moved, twice, and the headroom absorbed
+   * it both times. That is the line doing its job rather than needing maintenance.
    */
   total: 360 * 1024,
   /**
@@ -234,6 +317,14 @@ export const BUDGET = {
    * Budgeted beside the bytes rather than instead of them, because the two fail in
    * opposite directions: an unoptimised image moves the bytes and not this, and a gallery
    * of correctly-sized thumbnails moves this and barely the bytes.
+   *
+   * **Plus `perImage.requests` — one — per `<img>` the document holds** (MUSE-25). A
+   * populated `/gallery` measured 23 requests at twelve photographs, of which 14 were
+   * images and 9 were the page itself; at twenty-four it would be past 40. So a flat 14
+   * binds at **four photographs**, which makes it the first line a gallery breaks and the
+   * clearest case for an allowance rather than a raise. One per image is the honest
+   * relation and it still refuses the failure this line exists for: the same photograph
+   * fetched twice, or a request for something nobody put on the page.
    */
   requests: 14,
   /**
@@ -405,6 +496,7 @@ export async function measurePage(browser, site, route) {
     const html = await page.content();
     assertDocumentIsItself(route, measured.url, html);
     const blocking = renderBlocking(html);
+    const images = imagesIn(html);
     // The condition, not a duration: every face the page has text for has either loaded
     // or failed by the time this resolves, so the request log below is complete.
     await page.evaluate(() => document.fonts.ready);
@@ -444,6 +536,10 @@ export async function measurePage(browser, site, route) {
       bytes,
       total: served.reduce((sum, response) => sum + response.bytes, 0),
       requests: served.length,
+      images,
+      imageResponses: served
+        .filter((response) => response.kind === 'image')
+        .map(({ url, bytes: size }) => ({ url, bytes: size })),
       renderBlocking: blocking.count,
       blocking: blocking.what,
       missing: responses
@@ -455,6 +551,26 @@ export async function measurePage(browser, site, route) {
   } finally {
     await close();
   }
+}
+
+/**
+ * **How many images the document holds** — the multiplier for `BUDGET.perImage`.
+ *
+ * Read off the markup, for `renderBlocking`'s reason: it is a property of the output, the
+ * same on an idle runner and a melting one, and it does not depend on what the browser
+ * chose to fetch. That last part is deliberate — the allowance is for what the *document*
+ * costs, and a `<img>` inside a closed `<dialog>` is 160 characters of `srcset` whether or
+ * not a byte is ever requested for it.
+ *
+ * `<img>` and nothing else. A CSS `background-image` costs no markup, and a `<source>`
+ * inside a `<picture>` would — there are none on this site, and the day there is one this
+ * undercounts rather than overcounts, which is the direction a budget should be wrong in.
+ *
+ * @param {string} html
+ * @returns {number}
+ */
+export function imagesIn(html) {
+  return [...html.matchAll(/<img\b/g)].length;
 }
 
 /**
@@ -592,7 +708,22 @@ export function checkBudget(page) {
       })`,
     );
 
+  /**
+   * A per-page ceiling plus whatever the document's images are allowed to add (MUSE-25).
+   *
+   * `page.images` is counted off the markup, so the allowance is the same number on an
+   * idle runner and a melting one — and it is one rule for every page rather than a list
+   * of routes that may be heavier. The accounting is beside `BUDGET.perImage`.
+   */
+  const allowed = (kind, base) => base + (BUDGET.perImage[kind] ?? 0) * page.images;
+
   for (const [kind, actual] of Object.entries(page.bytes).sort()) {
+    // Photography is budgeted per response rather than summed — see `BUDGET.imageResponse`.
+    // Skipped here and *not* reported as unbudgeted, which is the one thing this loop must
+    // not do: „no budget exists for image" would be a true sentence about a kind that has
+    // a stricter budget than it used to.
+    if (kind === 'image') continue;
+
     const budget = BUDGET.bytes[kind];
     if (budget === undefined) {
       problems.push(
@@ -602,12 +733,36 @@ export function checkBudget(page) {
       );
       continue;
     }
-    if (actual > budget) over(kind, actual, budget);
+    if (actual > allowed(kind, budget)) over(kind, actual, allowed(kind, budget));
   }
 
-  if (page.total > BUDGET.total) over('total', page.total, BUDGET.total);
-  if (page.requests > BUDGET.requests)
-    over('requests', page.requests, BUDGET.requests, 'count');
+  /**
+   * Every image response, one at a time, naming the file.
+   *
+   * The sum would say „this page carries 400 KB of photography", which on a gallery is a
+   * sentence about how many pictures Mina published. This says „*this* photograph is
+   * 300 KB", which is a sentence about something somebody can fix — and it fires on every
+   * page, not only the one with a grid on it.
+   */
+  for (const image of page.imageResponses ?? []) {
+    if (image.bytes <= BUDGET.imageResponse) continue;
+    problems.push(
+      `${page.route}  image response  budget ${formatBytes(BUDGET.imageResponse)}  actual ` +
+        `${formatBytes(image.bytes)}  (over by ${formatBytes(image.bytes - BUDGET.imageResponse)}` +
+        ` — ${image.url.slice(image.url.lastIndexOf('/') + 1)}. One file, not the page's ` +
+        'total: how many photographs a page shows is an editorial decision and is not ' +
+        'budgeted, how big each one is, is ours. Ask the CDN for a width the layout can ' +
+        'paint — see the ladders in src/lib/gallery.ts)',
+    );
+  }
+
+  // Photography out of the total, for the reason written beside `BUDGET.total`: with it in,
+  // this number is a function of how many pictures are published.
+  const unphotographed = page.total - (page.bytes.image ?? 0);
+  if (unphotographed > allowed('total', BUDGET.total))
+    over('total', unphotographed, allowed('total', BUDGET.total));
+  if (page.requests > allowed('requests', BUDGET.requests))
+    over('requests', page.requests, allowed('requests', BUDGET.requests), 'count');
   if (page.renderBlocking > BUDGET.renderBlocking)
     over('render-blocking', page.renderBlocking, BUDGET.renderBlocking, 'count');
 
@@ -650,14 +805,33 @@ export function report(pages) {
   const columns = [...KINDS, 'total'];
   const widest = (pick) => Math.max(...pages.map(pick));
   const bytesOf = (page, kind) => (kind === 'total' ? page.total : (page.bytes[kind] ?? 0));
-  const budgetOf = (kind) => (kind === 'total' ? BUDGET.total : BUDGET.bytes[kind]);
+
+  /**
+   * The allowance the worst page was actually judged against, images and all (MUSE-25).
+   *
+   * Not `BUDGET.bytes[kind]` on its own: `html`, `total` and `requests` carry a per-`<img>`
+   * term, so printing the base alone would show a headroom the gate does not use — which
+   * is the one thing this table must never do, because MUSE-63's second criterion is that
+   * the next ticket reads its room off here rather than discovering it by going red.
+   */
+  const mostImages = pages.length === 0 ? 0 : widest((page) => page.images ?? 0);
+  const allowance = (kind, base) => base + (BUDGET.perImage[kind] ?? 0) * mostImages;
+
+  /** What `total` is compared against: the page without its photography. */
+  const unphotographed = (page) => page.total - (page.bytes.image ?? 0);
+  /** The single heaviest image response on a page, which is how `image` is budgeted. */
+  const heaviestImage = (page) =>
+    Math.max(0, ...(page.imageResponses ?? []).map((image) => image.bytes));
+
+  const budgetOf = (kind) =>
+    kind === 'total' ? allowance('total', BUDGET.total) : allowance(kind, BUDGET.bytes[kind]);
 
   /** One line of the table: a label, the byte columns, then the counts. */
   const row = (label, cells, counts) =>
     `${label.padEnd(22)}${cells.map((cell) => String(cell).padStart(11)).join('')}` +
     counts.map((count) => String(count).padStart(7)).join('');
 
-  const lines = [row('page', columns, ['reqs', 'block', 'faces', 'load*'])];
+  const lines = [row('page', columns, ['imgs', 'reqs', 'block', 'faces', 'load*'])];
 
   for (const page of pages) {
     lines.push(
@@ -665,6 +839,7 @@ export function report(pages) {
         page.route,
         columns.map((kind) => formatBytes(bytesOf(page, kind))),
         [
+          page.images ?? 0,
           page.requests,
           page.renderBlocking,
           page.fonts.length,
@@ -678,9 +853,12 @@ export function report(pages) {
   lines.push(
     row(
       'budget',
-      columns.map((kind) => formatBytes(budgetOf(kind))),
+      columns.map((kind) =>
+        kind === 'image' ? `${formatBytes(BUDGET.imageResponse)} ea` : formatBytes(budgetOf(kind)),
+      ),
       [
-        BUDGET.requests,
+        '',
+        allowance('requests', BUDGET.requests),
         BUDGET.renderBlocking,
         `${BUDGET.fonts.min}-${BUDGET.fonts.max}`,
         'n/a',
@@ -690,8 +868,17 @@ export function report(pages) {
   lines.push(
     row(
       'worst page',
-      columns.map((kind) => formatBytes(widest((page) => bytesOf(page, kind)))),
+      columns.map((kind) =>
+        formatBytes(
+          kind === 'image'
+            ? widest(heaviestImage)
+            : kind === 'total'
+              ? widest(unphotographed)
+              : widest((page) => bytesOf(page, kind)),
+        ),
+      ),
       [
+        mostImages,
         widest((page) => page.requests),
         widest((page) => page.renderBlocking),
         widest((page) => page.fonts.length),
@@ -703,10 +890,17 @@ export function report(pages) {
     row(
       'headroom',
       columns.map((kind) =>
-        formatBytes(budgetOf(kind) - widest((page) => bytesOf(page, kind))),
+        formatBytes(
+          kind === 'image'
+            ? BUDGET.imageResponse - widest(heaviestImage)
+            : kind === 'total'
+              ? budgetOf(kind) - widest(unphotographed)
+              : budgetOf(kind) - widest((page) => bytesOf(page, kind)),
+        ),
       ),
       [
-        BUDGET.requests - widest((page) => page.requests),
+        '',
+        allowance('requests', BUDGET.requests) - widest((page) => page.requests),
         BUDGET.renderBlocking - widest((page) => page.renderBlocking),
         BUDGET.fonts.max - widest((page) => page.fonts.length),
         '',
@@ -717,6 +911,15 @@ export function report(pages) {
   lines.push(
     '* load is advisory and is asserted on by nothing \u2014 a timing moves with whatever ' +
       'else is on the runner (MUSE-63).',
+  );
+  lines.push(
+    `\u2020 image is budgeted per response, not per page, and total is compared without ` +
+      `photography: how many pictures a page shows is an editorial decision, how big each ` +
+      `one is, is ours (MUSE-25). The page row shows each page's real figures; budget and ` +
+      `headroom show what the gate compares. html, total and requests additionally allow ` +
+      `${formatBytes(BUDGET.perImage.html)}, ${formatBytes(BUDGET.perImage.total)} and ` +
+      `${BUDGET.perImage.requests} per <img> \u2014 shown here at the worst page's ` +
+      `${mostImages}.`,
   );
 
   return lines;
@@ -757,6 +960,8 @@ export function budgetedPages(targets) {
  * @property {string} route
  * @property {{ url: string, locale: string, lang: string | null }} measured
  * @property {Record<string, number>} bytes Decompressed bytes by resource kind.
+ * @property {number} images How many `<img>` the document holds — `BUDGET.perImage`'s multiplier.
+ * @property {{ url: string, bytes: number }[]} imageResponses Every image the host served, one by one.
  * @property {number} total
  * @property {number} requests How many 200s the page needed.
  * @property {number} renderBlocking

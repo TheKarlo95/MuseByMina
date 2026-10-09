@@ -3,6 +3,8 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 
+import { FIXTURE_ENV } from '../../src/lib/sanity/fixture';
+
 import { astroBuild } from './scratch';
 import { extensionOf, MIME, resolveRequest } from './serve';
 
@@ -67,6 +69,21 @@ export interface PreviewOptions {
    * in it — so a suite has to be able to ask for it.
    */
   endpoint?: string;
+  /**
+   * An ndjson fixture for this build to read instead of the live dataset (MUSE-25).
+   *
+   * `MUSE_CONTENT_FIXTURE`, which `vitest.config.ts` already sets for the committed seed —
+   * so leaving this unset builds the site a browser suite has always built, off
+   * `content/seed.ndjson`, and this option is only how a suite asks for a *different*
+   * dataset. Pass `fixtureOf(…)` from `./structural-content`, which is also what
+   * `buildSite` takes.
+   *
+   * It exists because `/gallery`'s subject is photographs and the seed has none: an empty
+   * gallery is the shipped page and a populated one is the only state in which a lightbox
+   * can be opened, focused, arrowed through and audited. `buildSite` could already do this
+   * and cannot serve the result to a browser, which is the half that was missing.
+   */
+  content?: string;
 }
 
 /**
@@ -108,6 +125,9 @@ export function buildPreview(label?: string, options: PreviewOptions = {}): stri
       SITE: PREVIEW_SITE,
       BASE: PREVIEW_BASE,
       PUBLIC_FORM_ENDPOINT: options.endpoint ?? STUB_ENDPOINT,
+      // Omitted rather than set to `undefined`-as-a-string when no fixture is asked for:
+      // `vitest.config.ts`'s value then survives and the build reads the committed seed.
+      ...(options.content === undefined ? {} : { [FIXTURE_ENV]: options.content }),
     },
     label,
   );

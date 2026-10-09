@@ -289,6 +289,18 @@ const ADDED_AFTER_THE_MIGRATION: { route: string; ticket: string; because: strin
       'nobody has written.',
   },
   {
+    route: '/gallery',
+    ticket: 'MUSE-25',
+    because:
+      'The gallery. `/gallery` was in the navigation and 404ed (MUSE-13), and it is the ' +
+      'page most dependent on photography that does not exist — unlike `/events`, whose ' +
+      "purpose survives having no content, a gallery's purpose *is* the images. It ships " +
+      'with none, saying so in words, because a real page that fills itself beats a 404 ' +
+      'in the menu; the shoot has not happened and no photograph is invented anywhere. ' +
+      'There is no frozen copy for it because the site never published it, and the empty ' +
+      'state is what `test/gallery.test.ts` asserts hardest.',
+  },
+  {
     route: '/aboutus',
     ticket: 'MUSE-60',
     because:
@@ -570,11 +582,14 @@ describe('the migration is a committed artefact, not a Studio session', () => {
     expect([...byType.entries()].sort()).toEqual([
       ['class', 4],
       ['instructor', 2],
-      // Ten since MUSE-26: `/events`, `/events/archive` and `/blog`. **No `event` and no
-      // `post` document**, and that is the point of the number — a page with nothing on it
-      // is the state both of them ship in, and seeding a party or an article to furnish
-      // one is MUSE-36.
-      ['page', 10],
+      // Eleven since MUSE-25: `/events`, `/events/archive`, `/blog` and `/gallery`. **No
+      // `event`, no `post` and no `galleryImage` document**, and that is the point of the
+      // number — a page with nothing on it is the state all three ship in, and seeding a
+      // party, an article or a photograph to furnish one is MUSE-36. It costs most on
+      // `/gallery`, whose whole purpose is the pictures; thin and honest is still the
+      // right answer, and a `galleryImage` here would be an invented photograph that
+      // `npm run sanity:seed` imports into Mina's dataset. The fixtures live under `test/`.
+      ['page', 11],
       ['pricingTier', 3],
       ['prosePage', 1],
       ['scheduleSlot', 4],

@@ -261,19 +261,21 @@ describe('an inert `page` document is recognised', () => {
   });
 
   it('finds a document whose route is not served, and names it', () => {
-    // `/gallery` is one of MUSE-13's twelve: a route the finished information
-    // architecture names and this site does not serve. It replaced `/aboutus` here when
-    // MUSE-60 routed that page — an inert-document fixture has to name a route `ROUTES`
-    // really does not have, or the test asserts the opposite of what it says.
+    // `/etiquette` is one of MUSE-13's twelve: a route the finished information
+    // architecture names and this site does not serve. It replaced `/gallery` here when
+    // MUSE-25 routed that page, which had replaced `/aboutus` when MUSE-60 routed that one
+    // — an inert-document fixture has to name a route `ROUTES` really does not have, or
+    // the test asserts the opposite of what it says. Every page ticket moves this fixture
+    // along by one; the thing to keep is that it is never a route in `ROUTES`.
     const documents = [...ROUTES.map(({ route }, i) => doc(`page-${i}`, route)),
-      doc('page-gallery', '/gallery', 'Galerija')];
+      doc('page-etiquette', '/etiquette', 'Etiketa')];
 
-    expect(inertRouteDocuments(documents).map((d) => d.id)).toEqual(['page-gallery']);
+    expect(inertRouteDocuments(documents).map((d) => d.id)).toEqual(['page-etiquette']);
 
     const warning = inertRouteWarning(documents);
     expect(warning).toContain(INERT_ROUTE_WARNING);
-    expect(warning).toContain('page-gallery');
-    expect(warning).toContain('/gallery');
+    expect(warning).toContain('page-etiquette');
+    expect(warning).toContain('/etiquette');
     // The remedy, both ways round, and the list to compare against. A warning that only
     // states the problem is one the reader has to go and research.
     expect(warning).toContain('src/pages/');
@@ -295,11 +297,11 @@ describe('an inert `page` document is recognised', () => {
 /* ------------------------------------------- an inert `page` document, in a real build */
 
 const GHOST = {
-  _id: 'page-ghost-gallery',
+  _id: 'page-ghost-etiquette',
   _type: 'page',
-  route: '/gallery',
-  name: { _type: 'localeString', hr: 'Galerija', en: 'Gallery' },
-  title: { _type: 'localeString', hr: 'Galerija — Muse by Mina', en: 'Gallery — Muse by Mina' },
+  route: '/etiquette',
+  name: { _type: 'localeString', hr: 'Etiketa', en: 'Etiquette' },
+  title: { _type: 'localeString', hr: 'Etiketa — Muse by Mina', en: 'Etiquette — Muse by Mina' },
   description: {
     _type: 'localeString',
     hr: 'Opis stranice koja ne postoji, upisan u Studiju.',
@@ -313,8 +315,8 @@ let ghosted: Build;
 beforeAll(() => {
   clean = buildSite(PAGES_DEPLOY);
   // The ticket's own reproduction: the committed seed plus one document describing a
-  // route this site does not serve. It was `/aboutus` until MUSE-60 routed that page;
-  // `/gallery` is one of MUSE-13's twelve and has no component, let alone a page.
+  // route this site does not serve. `/aboutus` until MUSE-60, `/gallery` until MUSE-25;
+  // `/etiquette` is one of MUSE-13's twelve and has no component, let alone a page.
   ghosted = buildSite(PAGES_DEPLOY, {
     [FIXTURE_ENV]: fixtureOf([...seedDocs(), GHOST], 'routes'),
   });
@@ -427,17 +429,18 @@ describe('the Studio refuses a route the site does not serve', () => {
   });
 
   it('refuses a route the site does not serve, however it got there', async () => {
-    // `/gallery` is MUSE-13's case — a route the finished information architecture names
+    // `/etiquette` is MUSE-13's case — a route the finished information architecture names
     // and this site does not serve. The others are what a paste produces: a full URL, a
     // trailing slash, a locale prefix.
     //
     // `/pricing` was in this list and MUSE-59 routed it; `/aboutus` was in it and MUSE-60
-    // routed it. Both moved to the positive control above — which is the list this one is
-    // derived against, and the reason that control exists. A route graduating from
-    // "refused" to "accepted" is what shipping a page looks like from here, and this list
-    // is now down to one real route plus three spellings no `ROUTES` entry may have.
+    // routed it; `/gallery` was in it and MUSE-25 routed it. All three moved to the
+    // positive control above — which is the list this one is derived against, and the
+    // reason that control exists. A route graduating from "refused" to "accepted" is what
+    // shipping a page looks like from here, and this list is now down to one real route
+    // plus three spellings no `ROUTES` entry may have.
     for (const route of [
-      '/gallery',
+      '/etiquette',
       'https://example.test/schedule',
       '/schedule/',
       '/en/schedule',
@@ -456,7 +459,7 @@ describe('the Studio refuses a route the site does not serve', () => {
     // already filled in. Asserted over the whole marker set rather than the first one,
     // because Sanity reports the inferred rule and the declared rule both and the order
     // between them is its business, not ours.
-    const wrong = (await routeErrors('/gallery')).join(' | ');
+    const wrong = (await routeErrors('/etiquette')).join(' | ');
     expect(wrong).toContain('nije među stranicama');
     expect(wrong).toContain('ne prikazuje se nigdje');
 

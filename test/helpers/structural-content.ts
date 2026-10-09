@@ -1519,3 +1519,138 @@ export const POST_NO_LANGUAGE: FixtureDoc = {
   slug: slug('post-no-language'),
   publishedAt: fromRenderClock(-3 * POST_DAY),
 };
+/* ------------------------------------------------------- the gallery, as it renders */
+
+/**
+ * **Seven photographs, which is a number rather than a round one** (MUSE-25).
+ *
+ * `/gallery` is a grid of 2, 3 and 4 columns (§7.4), and seven leaves a **partial last
+ * row at every one of those widths** — 3 of 4 on desktop, 1 of 3 on tablet, 1 of 2 on a
+ * phone. That is the ticket's „fewer than a full row of images does not stretch them to
+ * fill", and a round eight or twelve would make it unobservable at two breakpoints out of
+ * three. Seven is also enough for the lightbox's index arithmetic to be worth asserting:
+ * wrap-around off either end lands somewhere that is not adjacent.
+ *
+ * These are **fixtures under `test/`**, never seed documents. No photograph of this studio
+ * exists, and a `galleryImage` in `content/seed.ndjson` would be `npm run sanity:seed`
+ * importing an invented picture into Mina's dataset — MUSE-36's defect with an asset
+ * reference on it. `/events` took the same decision for the same reason.
+ *
+ * The optional fields are spread rather than filled uniformly, because each one has a
+ * silent fallback and uniform fixtures cannot see a dropped branch:
+ *
+ *   - `caption` is absent on two, so „the caption renders in the lightbox and never on the
+ *     grid" is asserted against a photograph that has one *and* one that does not;
+ *   - `takenAt` is absent on one, so `coalesce(order, 999) asc, takenAt desc` is exercised
+ *     with a null on the second sort key;
+ *   - `order` is set on one only, so manual order and date order disagree and the query's
+ *     precedence is observable.
+ */
+function galleryDoc(
+  tag: string,
+  extra: Partial<FixtureDoc> & { hotspot?: readonly [number, number, number, number] } = {},
+): FixtureDoc {
+  const { hotspot, ...rest } = extra;
+  return {
+    _id: `gallery-render-${tag.toLowerCase()}`,
+    _type: 'galleryImage',
+    // A zero crop rather than no crop: `imageOf` always writes one, and a crop of zero
+    // insets is what Sanity stores for an upload nobody has dragged the handles on — so
+    // `rect` is the whole asset and the `srcset` assertions stay about the width ladder.
+    // `GALLERY_CROPPED` below carries a real crop so that arithmetic is covered too.
+    image: imageOf(`Gallery${tag}`, hotspot ?? [0.5, 0.5, 0.4, 0.4], [0, 0, 0, 0]),
+    ...rest,
+  };
+}
+
+export const GALLERY_RENDERED_IMAGES: FixtureDoc[] = [
+  // `order: 0` and the *oldest* date: manual order has to beat `takenAt desc`.
+  galleryDoc('One', { caption: localeString('gallery render one'), takenAt: '2024-01-01', order: 0 }),
+  galleryDoc('Two', { caption: localeString('gallery render two'), takenAt: '2026-09-01' }),
+  // A hotspot away from the centre, so `object-position` is a measurable value and not 50/50.
+  galleryDoc('Three', {
+    caption: localeString('gallery render three'),
+    takenAt: '2026-08-01',
+    hotspot: [0.25, 0.75, 0.3, 0.3],
+  }),
+  // No caption: the lightbox must render the frame without a `<figcaption>`.
+  galleryDoc('Four', { takenAt: '2026-07-01' }),
+  galleryDoc('Five', { caption: localeString('gallery render five'), takenAt: '2026-06-01' }),
+  // No `takenAt` either, so the sort has a null on its second key.
+  galleryDoc('Six', { caption: localeString('gallery render six') }),
+  galleryDoc('Seven', { caption: localeString('gallery render seven'), takenAt: '2026-05-01' }),
+];
+
+/** The seven, plus everything a real `astro build` of the whole site needs. */
+export const GALLERY_RENDERED: FixtureDoc[] = [
+  SITE_SETTINGS_DOC,
+  ...PAGE_DOCS,
+  ...PROSE_PAGE_DOCS,
+  STUDIO_STORY_DOC,
+  INSTRUCTOR_A,
+  INSTRUCTOR_B,
+  CLASS_ONE,
+  SLOT_ONE,
+  TIER_ONE,
+  ...GALLERY_RENDERED_IMAGES,
+];
+
+/**
+ * The same seven with **every string moved** — MUSE-50's instrument.
+ *
+ * Comparing a rendered page to the fixture it just read asserts nothing: every equality
+ * test passes while a literal in the component still happens to match. So the page is
+ * rendered twice against two datasets sharing no string, and the first set's words have to
+ * appear nowhere in the second rendering. For a gallery the strings are the **alt text and
+ * the captions**, which is the whole of what the dataset contributes to this page, and alt
+ * text is the one that matters: it is also the accessible name of every tile.
+ */
+export const GALLERY_REWRITTEN: FixtureDoc[] = GALLERY_RENDERED_IMAGES.map((doc) => ({
+  ...doc,
+  caption:
+    doc.caption === undefined
+      ? undefined
+      : { _type: 'localeString', hr: `Prepisan potpis ${doc._id}`, en: `Rewritten caption ${doc._id}` },
+  image: {
+    ...(doc.image as Record<string, unknown>),
+    alt: { _type: 'localeString', hr: `Prepisan opis ${doc._id}`, en: `Rewritten alt ${doc._id}` },
+  },
+}));
+
+/** One photograph carrying a manual crop, so `rect` appears in every candidate URL. */
+export const GALLERY_CROPPED: FixtureDoc = {
+  _id: 'gallery-render-cropped',
+  _type: 'galleryImage',
+  caption: localeString('gallery render cropped'),
+  takenAt: '2026-04-01',
+  image: imageOf('GalleryCropped', [0.6, 0.4, 0.3, 0.3], [0.1, 0.2, 0.05, 0.15]),
+};
+
+/**
+ * A photograph whose alt text exists in Croatian and not in English.
+ *
+ * The one content failure this page has that no other page has: alt text is **required in
+ * both locales** (`imageField` in `sanity/schemaTypes/objects/image.ts`), and in a gallery
+ * almost nothing is decorative, so a half-translated description is a picture that is
+ * unlabelled for half the audience. `localised` in `src/lib/sanity/decode.ts` refuses it
+ * and names the field path.
+ */
+export const GALLERY_HALF_ALT: FixtureDoc = {
+  _id: 'gallery-half-alt',
+  _type: 'galleryImage',
+  image: {
+    _type: 'image',
+    asset: { _type: 'reference', _ref: 'image-fixtureGalleryHalfAlt-1600x900-jpg' },
+    alt: { _type: 'localeString', hr: 'Samo hrvatski opis' },
+  },
+};
+
+/** A photograph with no `alt` object at all — the other half of the same rule. */
+export const GALLERY_NO_ALT: FixtureDoc = {
+  _id: 'gallery-no-alt',
+  _type: 'galleryImage',
+  image: {
+    _type: 'image',
+    asset: { _type: 'reference', _ref: 'image-fixtureGalleryNoAlt-1600x900-jpg' },
+  },
+};

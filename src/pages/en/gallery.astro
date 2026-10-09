@@ -1,0 +1,15 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Gallery from '../../components/Gallery.astro';
+import { GALLERY_ROUTE } from '../../lib/gallery';
+import { getGallery, getPage } from '../../lib/sanity';
+
+const [meta, photographs] = await Promise.all([
+  getPage(GALLERY_ROUTE),
+  getGallery({ minimum: 0 }),
+]);
+---
+
+<BaseLayout locale="en" title={meta.title.en} description={meta.description.en}>
+  <Gallery locale="en" photographs={photographs} />
+</BaseLayout>

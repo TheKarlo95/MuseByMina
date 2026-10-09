@@ -78,6 +78,12 @@ export const ROUTES: SiteRoute[] = [
   // would otherwise build a page nothing can reach.
   { route: '/events', studioLabel: 'Događaji' },
   { route: '/events/archive', studioLabel: 'Arhiva događaja' },
+  // Behind „what is on" and ahead of „what it costs" (MUSE-25). The gallery answers the
+  // question somebody has once they know a class exists and before they decide to come —
+  // what the room is like — so it is next to the timetable rather than beside the trust
+  // pages. It ships with no photographs in it; that is a fact about the dataset and not
+  // about where the page belongs in the site's order.
+  { route: '/gallery', studioLabel: 'Galerija' },
   // Inserted rather than appended (MUSE-59, MUSE-60): the order here is the order
   // `llms.txt` lists the site in and the order the Studio's dropdown offers, and it is the
   // order a reader meets the pages — what the dance is, what is on, what it costs, who

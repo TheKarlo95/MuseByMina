@@ -154,6 +154,13 @@ describe('the built site ships no JavaScript files and no CMS client', () => {
     // no `event` and no `post`, so this list is still exhaustive. The two assertions below
     // say so out loud — a detail page appearing in this build would mean an invented event
     // or an invented article had reached the seed.
+    //
+    // MUSE-25 added `/gallery`, which carries the first inline script in the build that is
+    // a *modal* — the lightbox is a native `<dialog>` opened by `showModal()`. That is
+    // worth knowing here of all places: the whole behaviour is one hoisted `<script>` and
+    // zero `.js` files, which is what the rest of this file asserts, and the alternative
+    // mechanisms (`:target`, `popover`) were weighed in `src/components/Gallery.astro`
+    // against what they do to focus rather than against what they weigh.
     expect(build.htmlFiles()).toEqual([
       '404.html',
       'aboutus/index.html',
@@ -164,6 +171,7 @@ describe('the built site ships no JavaScript files and no CMS client', () => {
       'en/contact/index.html',
       'en/events/archive/index.html',
       'en/events/index.html',
+      'en/gallery/index.html',
       'en/index.html',
       'en/pricing/index.html',
       'en/privacy/index.html',
@@ -171,6 +179,7 @@ describe('the built site ships no JavaScript files and no CMS client', () => {
       'en/whatisbachata/index.html',
       'events/archive/index.html',
       'events/index.html',
+      'gallery/index.html',
       'index.html',
       'pricing/index.html',
       'privacy/index.html',
