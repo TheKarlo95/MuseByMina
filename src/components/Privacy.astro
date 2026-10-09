@@ -1,4 +1,5 @@
 ---
+import { FORM_HAS_PROCESSOR } from '../lib/forms';
 import { localeUrl, type Locale } from '../lib/i18n';
 import { getSiteSettings } from '../lib/sanity';
 
@@ -11,8 +12,37 @@ import { getSiteSettings } from '../lib/sanity';
  * any of it — an inbox is processing, and the studio is in Zagreb.
  *
  * It describes what the site actually does, not what a template says a privacy policy
- * says: no analytics, no cookies, one processor, one inbox. If any of that changes, this
- * page changes with it.
+ * says: no analytics, no cookies, one inbox, and a form provider only if one is
+ * configured. If any of that changes, this page changes with it.
+ *
+ * ---
+ *
+ * **MUSE-72 — three things this notice asserted that were not true, and what replaced
+ * them.** Accuracy beats completeness in a statutory document, everywhere the two
+ * conflict, so each of the three was replaced by the narrower claim that is defensible
+ * rather than by a better guess.
+ *
+ *   1. **AZOP's address.** It said „Selska cesta 136" — correct when written, wrong since
+ *      the Agency moved in May 2025. See `AZOP` below for the current one, where it was
+ *      read, and when.
+ *   2. **A processor that does not exist.** It named Formspark as the studio's processor,
+ *      claimed an Art. 28 agreement and said Formspark emailed the messages through, with
+ *      the endpoint unset and MUSE-12 recording that the form has never delivered a
+ *      message. The recipient paragraphs are now chosen by `FORM_HAS_PROCESSOR` — the
+ *      same configuration the form itself reads — so the notice and the form cannot
+ *      disagree. The flat „nema prijenosa u treću zemlju" is gone outright: Formspark's
+ *      own sub-processor list names Sentry and Mapbox in the US, so it was the site
+ *      asserting something the processor declines to assert.
+ *   3. **Retention.** „12 mjeseci" and „evidencija polaznika" were enforceable
+ *      commitments nobody had made, and inventing a replacement number would have been
+ *      the same mistake with a different digit. What is published is purpose limitation
+ *      and the erasure right, both of which are true without a policy decision.
+ *
+ * **Still outstanding, and Mina's to make — not engineering's:** how long an answered
+ * enquiry is kept, and whether student records exist as a system at all. Until she says,
+ * this notice must stay silent on both. Both „Koliko dugo ih čuvamo" sections carry the
+ * same note; if a specific period ever has to go in, it goes in there, beside the reason
+ * it was chosen and whoever chose it.
  */
 interface Props {
   locale: Locale;
@@ -20,11 +50,58 @@ interface Props {
 const { locale } = Astro.props;
 
 /**
- * The controller's name and inbox come from Sanity (MUSE-20) — they are the studio's
- * contact details, and they appear on four other pages too. The *notice* does not: legal
- * text needs a git history and a reviewer, so the wording below stays in code.
+ * **Why this notice is in code and not in Sanity** (MUSE-72, weighing MUSE-50).
+ *
+ * MUSE-50's argument transfers at first glance: a regulator's address and a provider's
+ * name are facts about the world that change without anyone touching this repository, and
+ * the street went into the CMS for exactly that reason. It was weighed and declined, for
+ * three reasons that are about this document rather than about CMSes.
+ *
+ * **A CMS field would move the staleness, not remove it.** `siteSettings.address` is
+ * watched — `test/contentdrift.test.ts` can check it because five surfaces render one
+ * field and must agree. AZOP's address has no second surface: there is nothing on this
+ * site, or in the dataset, that a test could compare it against, and the suite never
+ * touches the network. So moving it buys editability at the price of review and gains no
+ * watchability at all. What it can have is provenance — a dated source, below — which a
+ * reviewer sees on every diff and a Studio field does not carry.
+ *
+ * **The fact that genuinely varies is already in configuration, and configuration is a
+ * better home than a CMS field.** Whether a processor exists is `FORM_HAS_PROCESSOR`,
+ * which the form reads too, so the notice and the form are one fact. A Studio checkbox
+ * beside it would be a third place to keep in step and the first one able to contradict
+ * the running code.
+ *
+ * **And a legal notice Mina can edit is a legal notice Mina can break.** Not a hypothesis
+ * here: the two claims this ticket deleted were a retention period and a records system
+ * nobody had decided on, and a `required()` CMS field asking for a retention period can
+ * only be satisfied by writing a number down — which is MUSE-36's lesson, in the one
+ * document where the invented value is enforceable against the studio.
+ *
+ * So: structure and wording in code, reviewed, with a git history; the studio's own
+ * contact details from Sanity, because they are shared with five other surfaces; and the
+ * one varying fact from the configuration the form already reads.
  */
 const settings = await getSiteSettings();
+
+/**
+ * **The supervisory authority, and when its address was last read off `azop.hr`.**
+ *
+ * Checked at `https://azop.hr/kontakt/` on 2026-10-09, which gives *"Ulica Metela
+ * Ožegovića 16, HR – 10 000 Zagreb"*. The Agency has moved twice in the life of this
+ * kind of notice — Martićeva 14, then Selska cesta 136 (Dec 2019), then here (May 2025)
+ * — and MUSE-72 was filed because the page was one move behind and nothing noticed.
+ *
+ * No test can verify this: the suite never touches the network, and there is no second
+ * surface to compare it against. The date is therefore the whole of the guard — it is
+ * what lets a reviewer see how old the claim is instead of assuming somebody checked.
+ * **Re-read the page and move the date when you touch this.**
+ */
+const AZOP = {
+  street: 'Ulica Metela Ožegovića 16',
+  city: '10 000 Zagreb',
+  checked: '2026-10-09',
+} as const;
+const AZOP_ADDRESS = `${AZOP.street}, ${AZOP.city}`;
 
 const t = {
   hr: {
@@ -49,15 +126,26 @@ const t = {
       },
       {
         h: 'Kome se podaci prenose',
-        p: [
-          'Obrazac prenosi usluga Formspark, koja za nas djeluje kao izvršitelj obrade. Formspark podatke drži unutar Europskog gospodarskog prostora (Irska i Njemačka), pa nema prijenosa u treće zemlje.',
-          'Formspark nam poruku dostavlja e-mailom. Nakon toga živi samo u našem poštanskom sandučiću. Drugih primatelja nema — ne prodajemo i ne dijelimo podatke.',
-        ],
+        p: FORM_HAS_PROCESSOR
+          ? [
+              'Obrazac za nas prenosi vanjska usluga, koja pri tome djeluje kao izvršitelj obrade i poruku nam dostavlja e-mailom. Nakon toga poruka živi samo u našem poštanskom sandučiću. Drugih primatelja nema — ne prodajemo i ne dijelimo podatke.',
+              'Takva usluga može koristiti podizvođače i izvan Europskog gospodarskog prostora. Ako se podaci prenesu izvan EGP-a, prijenos se temelji na standardnim ugovornim klauzulama Europske komisije (čl. 46. GDPR-a).',
+            ]
+          : [
+              'Nikome. Obrazac trenutačno nije povezan ni s jednom vanjskom uslugom, pa tvoji podaci ne odlaze trećoj strani — ni u Hrvatskoj ni izvan nje.',
+              `Zato ti obrazac, kad ga pokušaš poslati, umjesto potvrde ponudi našu e-mail adresu: prijavu nam pošalji na ${settings.email} i poruka dolazi izravno u naš poštanski sandučić. U njemu i ostaje. Ne prodajemo i ne dijelimo podatke.`,
+            ],
       },
+      // **Mina's decision, outstanding** (MUSE-72): how long an answered enquiry is kept,
+      // and whether student records exist as a system. Purpose limitation and the erasure
+      // right are all that can be published without her — both true, both already
+      // promised elsewhere on this page. A number here would be enforceable against the
+      // studio, so do not add one until she has given it.
       {
         h: 'Koliko dugo ih čuvamo',
         p: [
-          'Upite na koje smo odgovorili, a iz kojih nije nastao upis u grupu, brišemo najkasnije 12 mjeseci nakon zadnje poruke. Ako se upišeš, podaci prelaze u evidenciju polaznika i čuvamo ih dok si član.',
+          'Ime, e-mail adresu, broj telefona i poruku koristimo samo da ti odgovorimo i dogovorimo termin. Čuvamo ih dok su za tu svrhu potrebni i ne dulje od toga.',
+          `Brisanje možeš zatražiti u svakom trenutku — dovoljan je e-mail na ${settings.email}.`,
         ],
       },
       {
@@ -65,7 +153,7 @@ const t = {
         p: [
           'Imaš pravo na pristup svojim podacima, ispravak, brisanje, ograničenje obrade, prigovor na obradu i prenosivost. Dovoljan je e-mail na ' +
             `${settings.email} i odgovaramo u roku od mjesec dana.`,
-          'Ako misliš da s podacima postupamo pogrešno, možeš se obratiti Agenciji za zaštitu osobnih podataka (AZOP), Selska cesta 136, 10000 Zagreb.',
+          `Ako misliš da s podacima postupamo pogrešno, možeš se obratiti Agenciji za zaštitu osobnih podataka (AZOP), ${AZOP_ADDRESS}.`,
         ],
       },
       {
@@ -99,22 +187,30 @@ const t = {
       },
       {
         h: 'Who the data is passed to',
-        p: [
-          'The form is delivered by Formspark, acting as our processor. Formspark keeps the data inside the European Economic Area (Ireland and Germany), so there is no transfer to a third country.',
-          'Formspark emails the message to us. After that it lives only in our inbox. There are no other recipients — we do not sell or share it.',
-        ],
+        p: FORM_HAS_PROCESSOR
+          ? [
+              'The form is delivered for us by an external service, which acts as our processor in doing so and emails the message to us. After that it lives only in our inbox. There are no other recipients — we do not sell or share it.',
+              'A service of that kind may use sub-processors outside the European Economic Area. If data is transferred outside the EEA, the transfer relies on the European Commission’s standard contractual clauses (GDPR Art. 46).',
+            ]
+          : [
+              'Nobody. The form is not currently connected to any external service, so nothing you type is passed to a third party — in Croatia or anywhere else.',
+              `That is why the form, when you try to send it, offers you our email address instead of a confirmation: write to ${settings.email} and the message reaches our inbox directly. It stays there. We do not sell or share it.`,
+            ],
       },
+      // The HR half of this section carries the note: the retention period and whether
+      // student records exist are Mina's outstanding decisions (MUSE-72).
       {
         h: 'How long we keep it',
         p: [
-          'Enquiries we have answered and that did not lead to someone joining a group are deleted no later than 12 months after the last message. If you do join, the data moves into our student records and is kept while you are a member.',
+          'We use your name, email address, phone number and message only to reply and arrange a time. We keep them for as long as that purpose needs and no longer.',
+          `You can ask us to delete them at any time — an email to ${settings.email} is enough.`,
         ],
       },
       {
         h: 'Your rights',
         p: [
           `You have the right of access, and to rectification, erasure, restriction, objection and portability. An email to ${settings.email} is enough, and we answer within one month.`,
-          'If you think we are handling your data badly, you can complain to the Croatian Personal Data Protection Agency (AZOP), Selska cesta 136, 10000 Zagreb.',
+          `If you think we are handling your data badly, you can complain to the Croatian Personal Data Protection Agency (AZOP), ${AZOP_ADDRESS}.`,
         ],
       },
       {

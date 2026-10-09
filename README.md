@@ -253,11 +253,21 @@ this is not something the build can fix.
 places — the homepage `#trial` band and `/contact/` — from a single component, so the two
 cannot drift apart. Field list and copy live in `src/lib/forms.ts`.
 
-There is no backend, so submissions go to **Formspark** (`submit-form.com`), chosen because
-it keeps submission data inside the EEA — Ireland and Germany — and its DPA is part of the
-terms rather than a paid add-on. Spam is handled by a `_gotcha` honeypot plus Formspark's
-own filtering: no CAPTCHA script, no third-party request on page load, and therefore no
-cookie banner.
+There is no backend, so a submission has to go to a form service. **Nothing is configured
+today** — `PUBLIC_FORM_ENDPOINT` is unset, MUSE-12 is parked, and no message has ever been
+delivered — so the studio has no provider and no processing agreement with one. **Formspark**
+(`submit-form.com`) is the candidate: it says it keeps submission data inside the EEA
+(Ireland and Germany) and includes its DPA in the terms rather than as a paid add-on, and
+the `_gotcha` honeypot below is the name it uses. Nothing has been signed. Spam is handled
+by that honeypot alone for now: no CAPTCHA script, no third-party request on page load, and
+therefore no cookie banner.
+
+Formspark's own sub-processor list names **Sentry and Mapbox in the US**, so "there is no
+transfer to a third country" is not a claim this repository may make on its behalf — it was
+in `/privacy/` and in this file, and MUSE-72 removed both. What the notice says about
+recipients is chosen by `FORM_HAS_PROCESSOR` in `src/lib/forms.ts`, which is the endpoint
+the form itself reads: configure one and the notice describes a processor, leave it unset
+and the notice says nobody receives the data. The two cannot disagree.
 
 ```bash
 PUBLIC_FORM_ENDPOINT=https://submit-form.com/<form-id> npm run build

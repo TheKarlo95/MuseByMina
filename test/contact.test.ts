@@ -891,7 +891,19 @@ describe('GDPR: the form says what happens to the data, and links to a notice', 
         expect(body.length, 'the notice is a placeholder').toBeGreaterThan(600);
         expect(body).toContain('dancestudio.muse@gmail.com');
         expect(body).toContain('GDPR');
-        expect(body, 'the processor that receives the form is not named').toContain('Formspark');
+        /**
+         * This used to be `toContain('Formspark')`, and that assertion is part of why the
+         * notice named a processor the studio has no relationship with for the life of the
+         * project (MUSE-72): it *demanded* the name, so correcting the notice could only
+         * have been done by making a test fail. The claim it was reaching for — the notice
+         * says where a submission goes — is now checked against the build's real endpoint
+         * configuration in both states, by the MUSE-72 suite at the end of
+         * `test/trialform.test.ts`. This preview is built with the stub endpoint, so what
+         * must be true here is that a recipient exists at all.
+         */
+        expect(body, 'the notice does not say where a submission goes').toContain(
+          target.locale === 'hr' ? 'vanjska usluga' : 'an external service',
+        );
         expect(body, 'no supervisory authority named').toContain('AZOP');
       } finally {
         await close();

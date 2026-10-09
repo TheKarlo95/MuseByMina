@@ -619,3 +619,178 @@ describe('D2: without JavaScript, the form is replaced by something that works',
     }
   }
 });
+
+/**
+ * **MUSE-72 — the notice and the form's configuration are one fact, proved in both states.**
+ *
+ * The defect this is the guard for: `/privacy/` asserted in the present tense, in both
+ * locales, that Formspark acted as the studio's processor, that a DPA was in place and that
+ * Formspark emailed the messages through — with `PUBLIC_FORM_ENDPOINT` unset for the life of
+ * the project and MUSE-12 recording that the form has never delivered a message. Three
+ * false claims in a statutory document, and the whole suite green, because the claim was
+ * prose in a component and the fact was an environment variable. **Nothing compared them.**
+ *
+ * This is that comparison, and it has to be a build to be worth anything: `FORM_HAS_PROCESSOR`
+ * is read at build time, so a unit test importing the module would measure the vitest
+ * process's environment rather than the page's.
+ *
+ * **It lives here rather than in a file of its own, and that is a deliberate trade.** The
+ * assertion needs the site built *both* ways and this is the one suite that already has
+ * both — `configured` and `unconfigured` in the `beforeAll` above, serving the two states
+ * MUSE-15 needed for the same reason. A new file would have cost two more `astro build`s
+ * against `test/helpers/concurrency.ts`'s zero headroom, which buys a tidier filename with
+ * a measurable worsening of MUSE-68's flake. The subject is the same either way: this file
+ * is where the form's endpoint configuration is driven, and the notice is now one of its
+ * readers.
+ *
+ * Both directions are asserted, which is the half that was missing. A guard that only
+ * checked the unset state would pass today and go quiet the moment MUSE-12 lands.
+ */
+describe('MUSE-72: the privacy notice describes the form that was actually built', () => {
+  /**
+   * Phrases that assert a *named* processor, an agreement with one, or a flat denial of
+   * third-country transfer.
+   *
+   * A named provider is the ticket's first defect and must appear in neither state: a URL
+   * in an environment variable says that *somebody* receives the data, never who, so no
+   * build can honestly name one. The no-third-country denial must appear in neither state
+   * either — Formspark's own sub-processor list puts Sentry and Mapbox in the US, so the
+   * claim is the site asserting something the processor declines to assert.
+   */
+  const NEVER = [
+    'Formspark',
+    'formspark',
+    'submit-form.com',
+    // The flat denial, both locales.
+    'nema prijenosa u treć',
+    'no transfer to a third country',
+    // The invented retention commitments.
+    '12 mjeseci',
+    '12 months',
+    'evidencija polaznika',
+    'evidenciju polaznika',
+    'student records',
+  ];
+
+  /**
+   * What the recipient paragraph says when a processor exists, and when none does.
+   *
+   * Read as *categories* rather than names — Art. 13(1)(e) takes either, and a category is
+   * the only thing derivable from a configured URL. Deliberately short phrases: the
+   * assertion is about which of the two paragraphs was rendered, not about the wording,
+   * which belongs to whoever reviews the notice.
+   */
+  const RECIPIENT = {
+    hr: { processor: 'vanjska usluga', none: 'nije povezan ni s jednom vanjskom uslugom' },
+    en: {
+      processor: 'an external service',
+      none: 'not currently connected to any external service',
+    },
+  } as const;
+
+  const NOTICES = [
+    { locale: 'hr', route: '/privacy' },
+    { locale: 'en', route: '/en/privacy' },
+  ] as const;
+
+  const STATES = [
+    { label: 'an endpoint configured', processor: true, preview: () => configured },
+    { label: 'no endpoint configured', processor: false, preview: () => unconfigured },
+  ] as const;
+
+  /** The notice as built, markup stripped so a phrase split by a tag still reads. */
+  async function notice(preview: Preview, route: string): Promise<string> {
+    const html = await (await fetch(preview.url(route))).text();
+    const main = /<main\b[^>]*>([\s\S]*?)<\/main>/.exec(html)?.[1];
+    expect(main, `${route} has no <main>`).toBeDefined();
+    return main!
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)))
+      .replace(/&amp;/g, '&')
+      .replace(/\s+/g, ' ');
+  }
+
+  for (const state of STATES) {
+    for (const { locale, route } of NOTICES) {
+      it(`${locale}, ${state.label}: the recipient paragraph matches the build`, async () => {
+        const body = await notice(state.preview(), route);
+        const expected = RECIPIENT[locale];
+
+        if (state.processor) {
+          expect(
+            body,
+            'an endpoint is configured, so submissions do reach a third party and the ' +
+              'notice has to say so',
+          ).toContain(expected.processor);
+          expect(
+            body,
+            'the notice still claims nobody receives the data while an endpoint is configured',
+          ).not.toContain(expected.none);
+        } else {
+          // The shipping state, and the one the defect was live in.
+          expect(
+            body,
+            'no endpoint is configured, so nothing is transmitted to anybody and the ' +
+              'notice must not describe a processor',
+          ).toContain(expected.none);
+          expect(
+            body,
+            'the notice describes a processor that this build has no endpoint for — the ' +
+              'MUSE-72 defect, exactly',
+          ).not.toContain(expected.processor);
+        }
+      });
+
+      it(`${locale}, ${state.label}: names no provider and denies no transfer`, async () => {
+        const body = await notice(state.preview(), route);
+        for (const phrase of NEVER) {
+          expect(
+            body,
+            `the notice says "${phrase}", which nothing here can support`,
+          ).not.toContain(phrase);
+        }
+      });
+    }
+  }
+
+  /**
+   * The erasure right and the purpose, which replaced the invented twelve months.
+   *
+   * Asserted as *present* rather than only as "the number is gone": deleting a retention
+   * claim and leaving the section empty would pass the `NEVER` list above and would be a
+   * worse notice than the wrong one, since Art. 13(2)(a) wants the criteria when the period
+   * itself cannot be given.
+   */
+  for (const { locale, route } of NOTICES) {
+    it(`${locale}: retention is stated as a purpose limit plus the erasure right`, async () => {
+      const body = await notice(unconfigured, route);
+      const criterion =
+        locale === 'hr' ? 'dok su za tu svrhu potrebni' : 'as long as that purpose needs';
+      const erasure = locale === 'hr' ? 'Brisanje možeš zatražiti' : 'ask us to delete them';
+      expect(body, 'no retention criterion at all').toContain(criterion);
+      expect(body, 'the erasure right is not offered where retention is described').toContain(
+        erasure,
+      );
+    });
+  }
+
+  /**
+   * AZOP's current address, in both locales and both states.
+   *
+   * No test can check this against the Agency — the suite never touches the network, and
+   * there is no second surface on the site to compare it with. What a test *can* pin is
+   * that the superseded address has not come back, and that the notice still names an
+   * authority at all: an address silently dropped is a reader with no route to a regulator.
+   * The dated provenance comment in `Privacy.astro` is the rest of the guard.
+   */
+  for (const { locale, route } of NOTICES) {
+    it(`${locale}: the supervisory authority has its post-May-2025 address`, async () => {
+      const body = await notice(unconfigured, route);
+      expect(body).toContain('AZOP');
+      expect(body, 'AZOP is named with no address to write to').toContain(
+        'Ulica Metela Ožegovića 16',
+      );
+      expect(body, 'the address AZOP moved out of in May 2025').not.toContain('Selska cesta');
+    });
+  }
+});
