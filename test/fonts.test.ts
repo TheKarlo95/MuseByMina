@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { launchChecks, openCheckPage } from '../scripts/browser-checks.mjs';
+import { launchChecks, localeOfRoute, openCheckPage } from '../scripts/browser-checks.mjs';
 import {
   APEX_DEPLOY,
   basePath,
@@ -327,58 +327,67 @@ describe.each(ENVIRONMENTS.map((name, index) => ({ name, index })))(
     });
 
     /**
-     * AC2 — **the faces a page preloads are exactly the faces it asks for.**
+     * AC2 — **every face the page asks for is preloaded, and nothing else is preloaded
+     * that is not a deliberate, bounded over-preload.**
      *
      * Stated behaviourally rather than as "the preload href equals some `@font-face`
      * src", because that weaker form is a subset test against all six declared faces,
      * and it passes when the layout preloads Inter's *latin-ext* subset instead of its
-     * latin one. Both are declared faces; only one is a face the page paints with. The
-     * site would download a subset it never uses and get no preload at all on the
-     * subset it does — a regression costing exactly what the preload was worth, with
-     * every URL still resolving and every file still present. That mutation was run
-     * against the subset version of this test and the whole suite stayed green.
+     * latin one. Both are declared faces; only one is a face the page paints with. That
+     * mutation was run against the subset version of this test and the suite stayed
+     * green.
      *
-     * Pinning the filenames would also catch it, and is what that replaced: the hashed
-     * names are unpredictable from outside the build, so a literal list is a
-     * transcription of the output rather than a statement about it.
+     * ## The direction that matters, and why it has no exceptions
      *
-     * ## Both directions, which is MUSE-74
+     * This asserted `preloaded ⊆ needed` and nothing else for its whole life, and said so
+     * in its own name: *"preloads only faces each page actually needs"*. The two preloads
+     * that existed were both faces every page needs, so it was green — while four of the
+     * six faces were preloaded on no page at all, and **every Croatian diacritic lives in
+     * one of them**. `font-display: swap` then paints the latin half of a word in
+     * Cormorant and the `đ` from the system fallback until the ext subset arrives: a
+     * different typeface mid-word, at 96px, in „Dođi na probni sat", for a window
+     * measured at 221 ms on a throttled cold load.
      *
-     * This asserted `preloaded ⊆ needed` and nothing else for its whole life, and said
-     * so in its own name: *"preloads only faces each page actually needs"*. The two
-     * preloads that existed were both faces every page needs, so it was green — while
-     * four of the six faces were preloaded on no page at all, and **every Croatian
-     * diacritic lives in one of them**. `font-display: swap` then paints the latin half
-     * of a word in Cormorant and the `đ` from the system fallback until the ext subset
-     * arrives: a different typeface mid-word, at 96px, in „Dođi na probni sat".
+     * So **`needed ⊆ preloaded` is absolute here**. No route may be exempt from it, there
+     * is no list it consults, and a failure names the page and the face.
      *
-     * Incompleteness was the direction the matching rule could not reach — this board's
-     * most repeated defect, and MUSE-62 fixed the other half of *this file* a day
-     * earlier. So the comparison is an equality now, and the failure names the page and
-     * the face in whichever direction it goes:
+     * ## The other direction is a property, not a list
      *
-     *   - a face the page requests and does not preload — the ticket's defect;
-     *   - a face it preloads and does not request — MUSE-8's and MUSE-35's waste, bytes
-     *     paid for and never painted with, and a preload that outbids something the page
-     *     does need.
+     * `preloaded ⊆ needed` cannot be an equality any more, and that is a decision rather
+     * than a gap. `src/lib/fonts.ts` preloads Cormorant's latin-ext on *every* Croatian
+     * page, including the three that do not paint a diacritic in the display face today,
+     * because the subtractive route list that used to know which three was invalidated by
+     * two content pull requests on one day — see that file. Waste is the direction the
+     * performance budget counts; a missing face is the direction a visitor reads.
+     *
+     * What is still refused is everything that is *not* that deliberate over-preload, and
+     * it is refused as a property derived from the rule rather than as a route table
+     * nobody maintains:
+     *
+     *   - a `latin` subset that the page does not ask for — impossible by part 1 of the
+     *     rule, so if it happens the rule has broken;
+     *   - **any** unused preload on an English page — English is additive-only, so an
+     *     unused face there means the table gained an entry that measurement does not
+     *     support;
+     *   - anything that is not one of the six declared faces at all.
+     *
+     * The permitted case therefore stays exactly as wide as the rule that creates it: a
+     * `latin-ext` subset, on a Croatian page. Preload all six on `/en/` and this fails.
      *
      * ## Every route, not a chosen one
      *
-     * The set is per page now (`src/lib/fonts.ts`), so "every page" is no longer just
-     * thoroughness — a single route could not see the rule at all. It mattered before
-     * this too, and in a way worth keeping on the record: picking one route means picking
-     * correctly, and on `/schedule/` the Croatian copy pulls *both* halves of Inter and
-     * Jost in, so the needed set is wide enough to contain the wrong subset and the
-     * mutation above survives. It is `/en/`, whose copy is plain ASCII, that pins Inter
-     * down to its latin subset.
+     * The set is per page, so "every page" is not thoroughness — a single route could not
+     * see the rule. It mattered before this too: on `/schedule/` the Croatian copy pulls
+     * both halves of Inter and Jost in, so the needed set is wide enough to contain the
+     * wrong subset and the mutation above survives. It is `/en/`, whose copy is plain
+     * ASCII, that pins Inter down to its latin subset.
      *
      * `404.html` is not in `routes` — the host serves it in place of an unknown path
-     * rather than at a URL of its own, so there is nothing to ask for. It is the one page
-     * whose set is not measured here, and `src/lib/fonts.ts` is arranged so that it needs
-     * no entry: an unlisted route gets the latin-ext preloads, which is the right answer
-     * for a page that renders both languages at once.
+     * rather than at a URL of its own, so there is nothing to ask for. It needs no entry
+     * anywhere either: it is Croatian, so the rule gives it all six, and it is bilingual
+     * by design so it paints all six.
      */
-    it('preloads exactly the faces each page asks for, and no others', async () => {
+    it('preloads every face each page asks for, and wastes nothing it should not', async () => {
       expect(routes.length, 'no routes to check').toBeGreaterThan(4);
 
       const problems: string[] = [];
@@ -401,26 +410,33 @@ describe.each(ENVIRONMENTS.map((name, index) => ({ name, index })))(
         const asks = `it asks for ${needed.map(faceName).sort().join(', ')}`;
         const sends = `it preloads ${preloaded.map(faceName).join(', ')}`;
 
-        for (const url of preloaded.filter((u) => !needed.includes(u))) {
-          problems.push(
-            `${route}: preloads ${faceName(url)}, which it never requests (${asks})`,
-          );
-        }
+        // The direction a visitor sees. Absolute.
         for (const url of needed.filter((u) => !preloaded.includes(u))) {
           problems.push(
             `${route}: asks for ${faceName(url)} and does not preload it (${sends})`,
+          );
+        }
+
+        // The direction the budget counts. Permitted only in the one shape the rule in
+        // `src/lib/fonts.ts` creates: a latin-ext subset on a Croatian page.
+        const croatian = localeOfRoute(route) !== 'en';
+        for (const url of preloaded.filter((u) => !needed.includes(u))) {
+          const name = faceName(url);
+          if (croatian && name.endsWith('-latin-ext')) continue;
+          problems.push(
+            `${route}: preloads ${name}, which it never requests and which is not the ` +
+              `deliberate Croatian latin-ext over-preload (${asks})`,
           );
         }
       }
 
       expect(problems, env().name).toEqual([]);
 
-      // The list is per page, and this is the cheapest statement of that (MUSE-74). The
-      // equality above already refuses any one fixed list — three faces fails on the
-      // Croatian pages, six fails on the English ones — so this cannot fail on its own
-      // today. It is here to say out loud what shape the answer has, so that a future
-      // change to `preloadFaces` that happens to be uniform is read as the regression it
-      // would be rather than as a simplification.
+      // The list is per page, and this is the cheapest statement of that. The assertions
+      // above already refuse any one fixed list — three faces fails on the Croatian
+      // pages, six fails on `/en/` — so this cannot fail on its own today. It is here so
+      // that a future change making the set uniform reads as the regression it would be
+      // rather than as a simplification.
       expect(
         [...sets].length,
         `${env().name}: every page preloads the same faces`,

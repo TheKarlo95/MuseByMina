@@ -27,63 +27,98 @@
  * its crossbar vanishes below that and *Dođi* reads as "Dodi" (design system §4); MUSE-35
  * was all six faces falling back to Georgia in dev; this is the subset half.
  *
- * ## The rule, and why it is a rule rather than a table of filenames
+ * ## The rule, and the one place a human still decides
  *
- * `preloadFaces` answers in three parts, each with a different kind of justification:
+ * `preloadFaces` answers in four parts, and **they are not equally trustworthy**. Saying
+ * which is which is the point of this comment, because the first version of this file got
+ * one of them wrong and shipped a second that went stale within a day.
  *
- *   1. **The three `latin` subsets, on every page.** Structural: the shell paints in all
- *      three families before any page content does — the masthead and the skip link in
- *      Jost, the heading in Cormorant, the footer in Inter — so there is no page of this
- *      site that does not need all three.
- *   2. **Jost's and Inter's `latin-ext`, on every Croatian page.** Also structural, and
- *      that is the part worth knowing: it does not depend on what the page says. The skip
- *      link `BaseLayout` renders on every page is „Preskoči na sadržaj" and it is set in
- *      the label face (`.skip-link`, `base.css`); the footer's quick links include
- *      „Početna" and „Što je bachata" in the body face. Both come from code — the layout
- *      itself and `src/lib/nav.ts` — so a Croatian page cannot be built without diacritics
- *      in both of those faces.
- *   3. **Cormorant's `latin-ext`, on a Croatian page unless this route's display copy is
- *      known to be plain latin.** This is the one part that is a fact about *content*, and
- *      `DISPLAY_WITHOUT_LATIN_EXT` below is where it is written down.
+ *   1. **The three `latin` subsets, on every page.** Structural, in the strong sense: the
+ *      shell paints in all three families before any page content does — the masthead and
+ *      the skip link in Jost, the heading in Cormorant, the footer in Inter. No copy
+ *      change can alter that.
+ *   2. **Jost's and Inter's `latin-ext`, on every Croatian page.** Structural and
+ *      *verified*: the skip link `BaseLayout` renders on every page is „Preskoči na
+ *      sadržaj", set in the label face (`.skip-link`, `base.css`); the footer's quick
+ *      links include „Početna" and „Što je bachata", set in the body face. Both strings
+ *      come from code — the layout itself and `src/lib/nav.ts` — so a Croatian page
+ *      cannot be built without diacritics in both faces.
+ *   3. **Cormorant's `latin-ext`, on every Croatian page.** *Not* structural — three
+ *      Croatian pages do not paint a diacritic in the display face today — but preloaded
+ *      unconditionally anyway. See the next section; this is the deliberate cost.
+ *   4. **English pages: the `latin` three, plus whatever `EN_LATIN_EXT` names.** The only
+ *      hand-maintained table left, and the only additive one.
  *
- * ## Why the exception list runs that way round
+ * ## Why there is no list that can say "does not need"
  *
- * Note the direction: an unlisted route **gets** the preload. The two ways this can be
- * wrong are not equally bad. Preloading a face the page does not paint with costs 33.7 KB
- * of download nobody looks at — MUSE-8's and MUSE-35's waste pointed the other way, and a
- * preload that outbids something the page does need. *Not* preloading one the page does
- * paint with is this ticket. So the default is the cheaper mistake, and a route comes off
- * the list only with a measurement. `test/fonts.test.ts` fails on both directions anyway,
- * naming the page and the face, which is what makes either one a red test rather than a
- * deploy.
+ * There was one, per route, for Cormorant's latin-ext. **Two pull requests merged on the
+ * day it was written and each invalidated it**, in two different ways:
  *
- * It also means the error page needs no special case. `404.astro` is served for every
- * unknown path (MUSE-38), so under `astro dev` its route key is whatever was asked for —
- * never a route this file could have listed. Defaulting to the preload makes the dev server
- * and the build agree about it, and the answer happens to be right for a second reason:
- * that page is bilingual by design, so its Croatian display heading („Ova stranica još ne
- * postoji.") is on it whatever else is.
+ *   - **MUSE-71** retired the offer claim `Schedule.astro`'s `trialLede` used to make
+ *     and replaced it with **„Dođi na probni sat."**, rendered `<h2 class="displayM">`.
+ *     The old wording had no diacritic in it; `/schedule` was listed here as having
+ *     plain-latin display copy, and now it sets a `đ` in Cormorant. (The retired string
+ *     is deliberately not quoted — `test/offerclaims.test.ts` scans prose too, and it is
+ *     right to.)
+ *   - **MUSE-72** corrected the regulator's address to **„Ulica Metela Ožegovića 16"**.
+ *     A street name is a proper noun, so it is not translated, and it appears verbatim in
+ *     the English privacy notice — making `/en/privacy` the first English page in the
+ *     project to need `inter-400-600-latin-ext`.
  *
- * ## What this file deliberately does not try to be
+ * Both were caught by the guard before anything deployed, which is the system working.
+ * But look at *what* was wrong in each case: a route explicitly recorded as **not
+ * needing** a subset. A list that can say "does not need" can be wrong in the direction a
+ * visitor sees — a different typeface mid-word, at 96px, measured at a 221 ms window on a
+ * throttled cold load. A list that can only *add* is wrong in the direction the
+ * performance budget already counts, in bytes, with a ceiling on them.
  *
- * The exact form of part 3 is "does any text on this page that is set in the display face
- * contain a latin-ext character", and answering *that* at build time means knowing which
- * text is in which family — which means a model of the cascade, because the three families
- * are assigned by a dozen scoped class names across eleven components, and one of them
- * (`.navList a`, the mobile panel) is `display: none` at the width anything measures at, so
- * its diacritics are not requested at all. A model of the engine passes whenever the model
- * is wrong, which is the reasoning `test/numerals.test.ts` and `test/fonts.test.ts` are both
- * already built on. So the model here is four lines of data with the evidence beside each,
- * and the *measurement* stays where it can be taken honestly: in a browser, with the
- * preload tags stripped out of the document first.
+ * So the subtractive list is gone. **Croatian pages preload all six faces**, and the three
+ * that do not need Cormorant's latin-ext today — `/aboutus`, `/pricing`, `/privacy` —
+ * carry 33.7 KB they will not paint with. That number was weighed and rejected once in
+ * this ticket, correctly, *given a list that could be relied on*; it cannot be, so it is
+ * paid. `test/fonts.test.ts` still refuses any other unused preload, and the budget
+ * measures what this costs per page.
  *
- * The cost of that choice, stated rather than buried: those four entries are about copy, and
- * some of that copy is Mina's. If she rewords `/schedule`'s heading to something with a `č`
- * in it, this file is stale and the build will not say so — `npm test` will, on the next
- * pull request. The alternative considered was preloading `latin-ext` on every Croatian
- * page, which can never go stale and can never be missing a face; measured, that is 33.7 KB
- * of Cormorant nobody paints with on four of the seven Croatian pages, and it fails this
- * ticket's own acceptance criterion in the other direction.
+ * English is the exception that cannot be ruled away, and `EN_LATIN_EXT` is additive for
+ * the reason written beside it: the same default there costs 135.9 KB on pages whose
+ * entire font payload is 109.8 KB.
+ *
+ * ## Why this is not derived from the rendered page, measured rather than assumed
+ *
+ * The obvious objection to any declaration is that the page's own text is knowable at
+ * build time. It was tried, and it fails on two independent rocks.
+ *
+ *   - **The rendered text does not answer the question.** The question is per *face* —
+ *     "does this page paint a latin-ext character **in Cormorant**" — and attributing a
+ *     character to a face means modelling the cascade. Not in the abstract: on
+ *     `/pricing/`, which the browser measures as **not** needing Cormorant's latin-ext,
+ *     the rendered HTML contains „Što je bachata" inside `.navList a`, and `.navList a`
+ *     *is* `var(--font-display)`. It is not requested only because `.nav` is
+ *     `display: none` at the width everything measures at. A model would have to know the
+ *     media queries and the computed visibility — it would have to be the engine — and a
+ *     model of the engine passes whenever the model is wrong, which is the reasoning
+ *     `test/numerals.test.ts` and `test/fonts.test.ts` already rest on.
+ *   - **The one hook that exposes the rendered body breaks the page.** `Astro.slots
+ *     .render('default')` does return the rendered slot inside this layout's frontmatter,
+ *     before `<head>` is emitted — so the body text *is* reachable there, contrary to the
+ *     obvious reading. But calling it silently drops every component's hoisted
+ *     `<script type="module">`. Measured against a clean build: eight of fifteen pages
+ *     lost theirs, including `/schedule/`'s level filters and `/contact/`'s form. A
+ *     preload list bought with a dead filter bar is not a trade.
+ *
+ * So the declaration stays small and additive, and the *measurement* stays where it can
+ * be taken honestly: in a browser, with the preload tags stripped out of the document
+ * first, by `test/fonts.test.ts`, per page, per locale, per deploy target.
+ *
+ * ## The residual risk, stated rather than buried
+ *
+ * `test/fonts.test.ts` runs on pull requests. **The scheduled rebuild (MUSE-21) runs
+ * `npm run build` and nothing else**, so a *Sanity* edit can stale `EN_LATIN_EXT` and
+ * deploy: an instructor named „Željka" on `/en/aboutus/` would want Inter's latin-ext and
+ * not get it. Both strings that broke the old tables were in code and so were gated; a
+ * Studio edit is not. Croatian pages are immune by construction now — parts 2 and 3 cover
+ * all three faces whatever Mina writes — so the exposure is exactly "a Croatian proper
+ * noun entering English copy from the CMS". That is the thing to fix next if it bites.
  */
 
 import type { Locale } from './i18n';
@@ -172,40 +207,54 @@ export const FACES: readonly Face[] = [
 ];
 
 /**
- * Croatian routes whose **display** copy is plain latin, with the evidence beside each.
+ * **English routes that paint a latin-ext character, and the face that paints it.**
  *
- * Measured, not reasoned: built, served, and opened in a real browser with the preload tags
- * stripped out of the document, which is the only way to ask what the CSS engine wants.
- * `npm test -- fonts` is that measurement and `npm run budget` prints the face count per
- * page. Each entry names the display text that makes it true, so a reader can check it
- * against the page rather than against this list.
+ * This is the only route table left, and it is **additive**: a route not listed here gets
+ * no latin-ext subset at all. That is the uncomfortable direction — an omission is a
+ * missing preload, which is this ticket's defect — and it is accepted here and nowhere
+ * else, for a reason the measurement settles. Defaulting an English page to all three
+ * latin-ext subsets costs **135.9 KB** against a current English font payload of 109.8 KB,
+ * and six of the seven English pages genuinely need none of them. More than doubling
+ * every English page to cover one is not a trade; on the Croatian side, where the same
+ * question costs 33.7 KB on three pages, it is, and that is why the two sides are
+ * written differently.
  *
- * The heading is not the only display text on these pages — `/pricing`'s prices,
- * `/aboutus`'s instructor names and `/schedule`'s class times are set in the display face
- * too — so each note names the heading and the claim is about all of it.
+ * **It replaces `locale === 'en'` meaning "no latin-ext"**, which was a claim about
+ * English copy presented in this file as a structural fact, and which was wrong within a
+ * day of being written. A Croatian proper noun inside an English sentence will keep
+ * happening — a street, an instructor's name, a quoted phrase — because proper nouns are
+ * not translated, and **no locale-based rule will ever predict it**. An additive list
+ * plus the guard is the honest answer: `test/fonts.test.ts` compares both directions on
+ * every page of every pull request, so an omission is a red CI rather than a deploy.
  *
- * Keyed by `routeKey`, so one entry covers both locales of a route. The English half never
- * reaches the map: `preloadFaces` answers the latin-ext question on the locale first.
+ * Measured, not reasoned: built, served, and opened in a real browser with the preload
+ * tags stripped out of the document. `npm test -- fonts` is that measurement.
  */
-const DISPLAY_WITHOUT_LATIN_EXT: ReadonlyMap<string, string> = new Map([
-  ['/schedule', '„Raspored" — the weekday headings are the label face, not this one'],
-  ['/pricing', '„Cijene", and the prices under it are figures'],
-  ['/aboutus', '„O nama", and the instructors are „Mina" and „Antonio"'],
-  ['/privacy', '„Pravila privatnosti"'],
+const EN_LATIN_EXT: ReadonlyMap<
+  string,
+  { readonly roles: readonly FontRole[]; readonly why: string }
+> = new Map([
+  [
+    '/privacy',
+    {
+      roles: ['body'],
+      why: "AZOP's \u201EUlica Metela O\u017Eegovi\u0107a 16\u201C \u2014 a street name, so untranslated, and it lands in running prose (MUSE-72)",
+    },
+  ],
 ]);
 
 /**
  * The faces `route` needs to paint its first screen in `locale`.
  *
- * `route` is a `routeKey` — locale prefix and deploy base already stripped — which is why
- * one map above serves both locales.
+ * `route` is a `routeKey` — locale prefix and deploy base already stripped — so the table
+ * above is keyed by route rather than by URL.
  */
 export function preloadFaces(route: string, locale: Locale): readonly Face[] {
-  const needsDisplayExt = locale !== 'en' && !DISPLAY_WITHOUT_LATIN_EXT.has(route);
+  const latinExt: readonly FontRole[] =
+    locale === 'en'
+      ? (EN_LATIN_EXT.get(route)?.roles ?? [])
+      : // Croatian: all three, by construction and with no route able to opt out.
+        ['display', 'label', 'body'];
 
-  return FACES.filter((face) => {
-    if (face.subset === 'latin') return true;
-    if (locale === 'en') return false;
-    return face.role === 'display' ? needsDisplayExt : true;
-  });
+  return FACES.filter((face) => face.subset === 'latin' || latinExt.includes(face.role));
 }

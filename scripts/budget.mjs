@@ -154,10 +154,21 @@ export const BUDGET = {
      */
     css: 40 * 1024,
     /**
-     * Fonts: measured worst is `/` and `/contact/` at 242.6 KB, which is **all six
-     * declared subsets** — the Croatian homepage's copy has enough diacritics to pull the
-     * latin-ext half of each family in. `/schedule/` takes five (209.6 KB) and the English
-     * pages take three (109.8 KB), their copy being plain ASCII.
+     * Fonts: measured worst is 242.6 KB, which is **all six declared subsets**, and
+     * **every Croatian page now transfers it** (MUSE-74). Five of the eight ask for all
+     * six because their copy has enough diacritics; the other three are handed Cormorant's
+     * latin-ext anyway, 33.0 KB they do not paint with, because the per-route list that
+     * used to know which three was invalidated by two content pull requests in one day —
+     * `src/lib/fonts.ts` has the argument. English pages take three (109.8 KB), except
+     * `/en/privacy/` at 192.9 KB: AZOP's street name is a Croatian proper noun and so is
+     * untranslated.
+     *
+     * **This line did not move for that.** The ceiling was already set at the whole
+     * declared set, so a page transferring all of it was always inside it; what the
+     * change spends is headroom in `total` below, 48.3 KB to 46.4 KB. Worth knowing when
+     * reading the table: the `faces` column is measured with the preload tags stripped,
+     * so it still reports what each page *asks* for — five where this says six — and the
+     * gap between the two columns is exactly the deliberate over-preload.
      *
      * 288 KB is the whole declared set plus ~19%, 45.4 KB of headroom: enough that a
      * seventh *subset* of a family already here is affordable, not enough for a fourth
