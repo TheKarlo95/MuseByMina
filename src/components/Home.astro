@@ -100,8 +100,16 @@ const doorNudge: Partial<Record<Level, string>> = t.doorNudge;
  * Which levels get a door. This list is the whole editorial decision, and the
  * only part of a door written on this page.
  *
- * "Two doors, not six" is the design brief's: the people who need telling where
- * to start are the one who has never danced and the one who is a year in.
+ * **„Dvoja vrata, ne šest." is this page's line, not the design brief's**
+ * (MUSE-80). The comment here used to cite the brief for it. The brief was then
+ * read: it contains no „vrata", no "door" and no "not six", and its only six is
+ * the six signature devices in §6. The words stay — they claim nothing about the
+ * studio and they are in the register §1 asks for, short and unsold — but the
+ * attribution is gone, because the next author would have trusted it instead of
+ * opening the file, which is how a fabricated citation outlives fabricated copy.
+ *
+ * The decision the line describes is this page's own: the people who need telling
+ * where to start are the one who has never danced and the one who is a year in.
  * Advanced dancers already know, so advanced deliberately has no door — which is
  * why this is a hand-picked pair of levels and not `LEVELS`.
  */
@@ -111,9 +119,9 @@ const DOOR_LEVELS = ['beginner', 'intermediate'] as const satisfies readonly Lev
  * There are four levels now and still two doors (MUSE-36).
  *
  * `improver` joined `LEVELS` with the real timetable, and it is deliberately *not* a
- * door: the brief's reason for picking two was who needs telling where to start, and
- * somebody a few months in already knows they are not a beginner. A door per level would
- * be four doors, which is the "six doors" the section's own heading rejects.
+ * door: the reason for picking two was who needs telling where to start, and somebody a
+ * few months in already knows they are not a beginner. A door per level would be four
+ * doors, which is the direction the section's own lede rejects.
  */
 
 /**

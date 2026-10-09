@@ -201,9 +201,11 @@ interface Door {
 /**
  * The homepage's "new to dancing?" doors.
  *
- * `data-door="<level key>"` marks one. "Two doors, not six" is an editorial
- * choice from the design brief, so the count is part of the contract: reading
- * the doors off the schedule must not turn into listing every class.
+ * `data-door="<level key>"` marks one. "Two doors, not six" is this page's own
+ * editorial choice and not the design brief's — the brief has no door in it at
+ * all, which MUSE-80 checked and `Home.astro` now records. The count is part of
+ * the contract either way: reading the doors off the schedule must not turn into
+ * listing every class.
  */
 function doors(html: string): Door[] {
   const found: Door[] = [];
@@ -727,8 +729,8 @@ describe('the homepage no longer describes three styles of bachata', () => {
 describe('the two beginner doors', () => {
   for (const locale of LOCALES) {
     it(`offers two doors, not six (${locale})`, () => {
-      // "Two doors, not six" is the design brief's choice. Deriving the doors
-      // from the schedule must not turn into listing every class.
+      // "Two doors, not six" is the page's own choice, not the brief's (MUSE-80).
+      // Deriving the doors from the schedule must not turn into listing every class.
       expect(doors(page[locale].home)).toHaveLength(2);
     });
 
