@@ -177,6 +177,15 @@ const UPLOADED_REF: ImageRef = {
   alt: { hr: UPLOADED.alt.hr, en: UPLOADED.alt.en },
 };
 
+/**
+ * A studio name nobody would type by accident, for the edited build below (MUSE-75).
+ *
+ * `og:site_name` is read off `siteSettings.studioName`, and every equality test in this
+ * file would still pass with that value written out as a literal in the layout — so the
+ * one assertion with teeth is a rebuild from a dataset that says something else.
+ */
+const EDITED_STUDIO_NAME = 'Studio Koje Ne Postoji';
+
 let build: Build;
 /** The same site, rebuilt with a `shareImage` set — "Mina uploaded one" as a build. */
 let uploaded: Build;
@@ -186,7 +195,7 @@ beforeAll(async () => {
   uploaded = buildSite(PAGES_DEPLOY, {
     MUSE_CONTENT_FIXTURE: fixtureOf([
       ...seedDocs().filter((doc) => doc._id !== 'siteSettings'),
-      { ...seededSettings(), shareImage: UPLOADED },
+      { ...seededSettings(), shareImage: UPLOADED, studioName: EDITED_STUDIO_NAME },
     ]),
   });
 }, 300_000);
@@ -426,6 +435,68 @@ describe('AC1: the page says which language it is in, and promises no negotiatio
       .htmlFiles()
       .filter((page) => metaContents(build.read(page), 'og:locale:alternate').length > 0);
     expect(offenders).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------- MUSE-75: who the scraper credits */
+
+/**
+ * **`og:site_name`, which was absent — so a real unfurl named the publisher „github.io".**
+ *
+ * MUSE-69 reasoned explicitly about `og:image:type` and `og:locale:alternate` and never
+ * considered this one, and nothing in `src/` or `test/` mentioned it. A scraper with no
+ * `og:site_name` falls back to the host, which on this deploy is the GitHub Pages domain
+ * — so every shared link credited GitHub rather than the studio, and MUSE-29's move to an
+ * apex domain would have changed the wrong answer into a different wrong answer.
+ *
+ * It lives here rather than in a suite of its own because it is the same build and the
+ * same question MUSE-69 is about: what somebody else's software says about this site when
+ * it is pasted into a chat. The census has no headroom for a build (MUSE-68) and needs
+ * none — the two builds this file already performs answer both halves.
+ */
+describe('MUSE-75: every page names its publisher, and the name comes from the CMS', () => {
+  it('declares exactly one og:site_name on every page, the error page included', () => {
+    const missing = build
+      .htmlFiles()
+      .filter((page) => metaContents(build.read(page), 'og:site_name').length !== 1);
+    expect(missing, 'og:site_name is the one Open Graph field about the publisher').toEqual([]);
+  });
+
+  it('publishes the studio name the dataset holds, not a literal', () => {
+    const seeded = seededSettings().studioName as string;
+    expect(seeded, 'the seed has no studioName to compare against').toBeTruthy();
+    for (const page of build.htmlFiles()) {
+      expect(meta(build.read(page), 'og:site_name'), page).toBe(seeded);
+    }
+  });
+
+  /**
+   * The assertion a hardcoded copy fails while every equality above still passes — the
+   * MUSE-50 shape. `uploaded` is this file's second build and carries an edited
+   * `studioName` as well as the upload, so the claim costs nothing the suite was not
+   * already paying for.
+   */
+  it('moves when the Studio does', () => {
+    expect(
+      seededSettings().studioName,
+      'the edited name must really differ from the seed, or this passes vacuously',
+    ).not.toBe(EDITED_STUDIO_NAME);
+    for (const page of uploaded.htmlFiles()) {
+      expect(meta(uploaded.read(page), 'og:site_name'), page).toBe(EDITED_STUDIO_NAME);
+    }
+  });
+
+  /**
+   * And it is the *same* string the page already shows, which is what keeps the block,
+   * the footer and the card one read of one field rather than three that happen to agree.
+   */
+  it('says the same thing the footer’s copyright line says', () => {
+    for (const page of build.htmlFiles()) {
+      const html = build.read(page);
+      expect(html, page).toContain(
+        `© ${new Date().getFullYear()} ${meta(html, 'og:site_name')}`,
+      );
+    }
   });
 });
 
