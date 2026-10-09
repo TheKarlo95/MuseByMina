@@ -34,12 +34,19 @@ export type Level = (typeof LEVELS)[number];
 /**
  * There is no `STYLES`, and that is a decision rather than an omission (MUSE-36).
  *
- * `['traditional', 'moderna', 'sensual']` was invented in the foundation commit alongside
- * the thirteen invented classes, and it shaped three style cards, a filter dimension, a
- * homepage section and a required `class.style` field in the Studio. The studio teaches
- * bachata and splits its classes by level only; there was never a style dimension to
- * model. If one ever appears it is a schema change and a product decision, not a constant
- * restored from git history.
+ * The three style names were invented in the foundation commit alongside the thirteen
+ * invented classes, and they shaped three style cards, a filter dimension, a homepage
+ * section and a required `class.style` field in the Studio. The studio teaches bachata and
+ * splits its classes by level only; there was never a style dimension to model. If one
+ * ever appears it is a schema change and a product decision, not a constant restored from
+ * git history.
+ *
+ * The values themselves are deliberately **not** written out here. They live in exactly
+ * one place — `WITHDRAWN_OPTION_SETS` in `sanity/schemaTypes/enums.ts` — which is the list
+ * `test/sanity.test.ts` reads to keep any fixed list in the schema from offering them
+ * again, under any field name. A second copy in this comment would be a second copy of a
+ * fact, and MUSE-76 is what happens when the thing that matters is written down in prose
+ * and asserted nowhere.
  */
 
 export interface ClassEntry {

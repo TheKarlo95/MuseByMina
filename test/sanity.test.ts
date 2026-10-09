@@ -14,7 +14,11 @@ import {
   SOURCE_GLOBS,
 } from '../scripts/check-sanity.mjs';
 import { schemaTypes, SINGLETON_TYPES } from '../sanity/schemaTypes';
-import { SOCIAL_PLATFORMS, SOCIAL_PLATFORM_NAME } from '../sanity/schemaTypes/enums';
+import {
+  SOCIAL_PLATFORMS,
+  SOCIAL_PLATFORM_NAME,
+  WITHDRAWN_OPTION_SETS,
+} from '../sanity/schemaTypes/enums';
 import { LEVELS, LEVEL_NAME, WEEKDAYS, WEEKDAY_NAME } from '../src/lib/schedule';
 import { ROUTES } from '../src/lib/pages';
 // The query text itself, as a module, so the parser cross-check below covers every
@@ -143,6 +147,47 @@ function allFields(): { path: string; field: FieldLike }[] {
   };
   for (const type of types) visit(type.name, type.fields);
   return out;
+}
+
+/**
+ * The values of a field's fixed list, lower-cased, or `[]` when it has no list.
+ *
+ * Sanity accepts a `list` of bare strings *or* of `{title, value}` objects, and this repo
+ * writes both (`PRICE_PERIOD_OPTIONS` is objects, a hand-written list could be strings).
+ * Reading only one shape is how a guard over option values would come to miss half of
+ * them, so both are read and anything else is dropped rather than stringified.
+ */
+function optionValues(field: FieldLike): string[] {
+  const list = field.options?.list;
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((entry) =>
+      typeof entry === 'string'
+        ? entry
+        : typeof (entry as { value?: unknown })?.value === 'string'
+          ? (entry as { value: string }).value
+          : null,
+    )
+    .filter((value): value is string => value !== null)
+    .map((value) => value.toLowerCase());
+}
+
+/**
+ * Every file the schema fingerprint covers, repo-relative — derived from `SOURCE_GLOBS`
+ * rather than listed, so a new schema source is scanned without anybody adding it here.
+ *
+ * `SOURCE_GLOBS` comes out of a `.mjs` module where `SOURCES`'s `file` key is optional, so
+ * TypeScript types the array `(string | undefined)[]`; a hole in it throws rather than
+ * being read as 'covers nothing', for the same reason `matchesGlob` refuses a glob shape
+ * it does not understand.
+ */
+function fingerprintedFiles(): string[] {
+  return (SOURCE_GLOBS as (string | undefined)[]).flatMap((glob) => {
+    if (typeof glob !== 'string') throw new Error('`SOURCE_GLOBS` holds a non-glob entry.');
+    return glob.endsWith('/**')
+      ? walkTree(join(ROOT, glob.slice(0, -3))).map((file) => relative(ROOT, file))
+      : [glob];
+  });
 }
 
 /**
@@ -409,31 +454,141 @@ describe('the closed sets stay in code, not in the CMS', () => {
     );
   });
 
-  it('models no style at all, on any type', () => {
+  it('models no withdrawn dimension, by name or by value, on any type', () => {
     /**
      * MUSE-36, asserted as an absence — the replacement for "offers exactly the styles
      * the site renders", which was a test that the Studio offered three values nobody
-     * had ever asked the studio about.
+     * had ever asked the studio about. A fixed list in the Studio made an invention look
+     * like a decision somebody had taken: a required radio button Mina had to pick from
+     * before she could save a class. The real timetable splits by level only.
      *
-     * `['traditional', 'moderna', 'sensual']` was invented in the foundation commit
-     * alongside the thirteen invented classes, and a fixed list in the Studio made it
-     * look like a decision somebody had taken: a required radio button Mina had to pick
-     * from before she could save a class. The real timetable splits by level only.
+     * **MUSE-76 is why this reads a registry instead of a word.** Until then the rule was
+     * `field.name.toLowerCase().includes('style')` — an *English identifier*, where what
+     * MUSE-36 withdrew was a *set of values*. Rename the field to `vrsta` (Croatian for
+     * „kind", and in a Croatian-first codebase the more natural name to reach for), keep
+     * the same three values, the same radio layout and the same place in the Studio, and
+     * all 1177 tests were green. Nothing else covered it either: `READ_CONTRACT`
+     * constrains which fields must *exist* per type and never the reverse, so a new
+     * unprojected field on an already-listed type is invisible to the build gate; and the
+     * only other needles for those three words in the repository are over page copy and
+     * route strings (`test/whatisbachata.test.ts`), not over the schema.
      *
-     * Checked across every field in the schema rather than on `class` alone, because the
-     * way this comes back is on a different type — a `style` on `event`, or on a future
-     * `course`. If the studio ever does teach by style, that is a product decision and a
-     * schema change, not a constant restored from git history.
+     * So: three layers, widest last.
+     *
+     *   1. **Named after it.** Kept from MUSE-36 unchanged in effect, because for the
+     *      obvious case it gives the clearest failure there is — one field path and
+     *      nothing else to read. It is not the guarantee; a third name defeats it.
+     *   2. **Offering the values**, in any fixed list, under any field name, on any type.
+     *      This is the guarantee, and the acceptance criterion is `vrsta` rather than
+     *      `style`.
+     *   3. **Naming the values anywhere in the schema source** — the test below. A closed
+     *      set does not have to be an `options.list`: this repo declares one through
+     *      `Rule.valid()` as well (`oneOf`, `page.route`), and `validation` is a function
+     *      that cannot be inspected without calling it. Layer 2 cannot see that; a text
+     *      scan can.
+     *
+     * The values, the names and the reason all come from `WITHDRAWN_OPTION_SETS` in
+     * `sanity/schemaTypes/enums.ts`. Nothing about bachata is written here.
      */
-    const stylish = allFields()
-      .filter(({ field }) => field.name.toLowerCase().includes('style'))
-      .map(({ path }) => path);
-    expect(
-      stylish,
-      'MUSE-36 deleted the style dimension: it was invented with the invented ' +
-        'schedule and the studio teaches by level. Read the note on this assertion ' +
-        'before adding it back.',
-    ).toEqual([]);
+    for (const withdrawn of WITHDRAWN_OPTION_SETS) {
+      const why =
+        `${withdrawn.ticket} withdrew the ${withdrawn.dimension} dimension: ` +
+        `${withdrawn.because}\n` +
+        'Read the note on `WITHDRAWN_OPTION_SETS` in sanity/schemaTypes/enums.ts ' +
+        'before putting it back.';
+
+      const named = allFields()
+        .filter(({ field }) =>
+          withdrawn.names.some((needle) => field.name.toLowerCase().includes(needle)),
+        )
+        .map(({ path }) => path);
+      expect(named, `a schema field is named after it. ${why}`).toEqual([]);
+
+      const offering = allFields()
+        .map(({ path, field }) => ({
+          path,
+          found: optionValues(field).filter((value) => withdrawn.values.includes(value)),
+        }))
+        .filter(({ found }) => found.length > 0)
+        .map(({ path, found }) => `${path} offers ${found.join(', ')}`);
+      expect(
+        offering,
+        `a fixed list in the schema offers the withdrawn values. ${why}`,
+      ).toEqual([]);
+    }
+  });
+
+  it('names no withdrawn value anywhere in the schema source, list or not', () => {
+    /**
+     * Layer 3, and a tripwire rather than a model of the schema (the same role the
+     * comment-blanked text scan plays in `test/helpers/source-guard.ts`).
+     *
+     * It exists because "a closed set" is not the same thing as "an `options.list`".
+     * `oneOf(Rule, ROUTE_VALUES)` declares one through `Rule.valid()` and this repo uses
+     * it on `page.route`; `initialValue: 'sensual'` declares one by habit; a field
+     * *description* naming the three styles puts the dimension in front of Mina with no
+     * field at all. None of those is reachable by walking `options`, and `validation` is
+     * a function that cannot be read without being called.
+     *
+     * Scanned over the files the schema fingerprint already covers, derived from
+     * `SOURCE_GLOBS` so that a new schema source is scanned without being listed twice.
+     * The failure names `file:line`, which a whole-schema assertion cannot.
+     *
+     * One exemption, and it is the registry itself — the one place the values are allowed
+     * to be written down. Two things about it are asserted rather than assumed (MUSE-42's
+     * rule, that an exemption has to still need to be one): the registry is still *inside*
+     * the scanned set, so moving it out cannot silently empty this check; and it still
+     * spells the values literally, so a `values:` assembled from a constant in some other
+     * schema source fails here, naming the registry, rather than over there naming a file
+     * whose job this is not.
+     *
+     * Note what is **not** exempted: `content/seed.ndjson` is outside this set entirely,
+     * which is why `/whatisbachata` may describe the three styles in prose. That is a fact
+     * about the dance, owned by nobody; the line between saying so and modelling it is the
+     * whole of MUSE-36.
+     */
+    const REGISTRY = 'sanity/schemaTypes/enums.ts';
+    const files = fingerprintedFiles();
+    expect(files, `${REGISTRY} is no longer a schema source — move the registry`).toContain(
+      REGISTRY,
+    );
+
+    const registry = readFileSync(join(ROOT, REGISTRY), 'utf8');
+
+    for (const withdrawn of WITHDRAWN_OPTION_SETS) {
+      for (const value of withdrawn.values) {
+        expect(
+          registry,
+          `the exemption for ${REGISTRY} is dead: it no longer names \`${value}\``,
+        ).toContain(value);
+      }
+
+      // Word-bounded so `moderna` does not match „modernat", and escaped so a withdrawn
+      // value is read as a string rather than as a pattern — a `.` in one would otherwise
+      // match every character and report every line of the schema.
+      const needles = withdrawn.values.map((value) => ({
+        value,
+        pattern: new RegExp(`\\b${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'),
+      }));
+
+      const hits: string[] = [];
+      for (const file of files) {
+        if (file === REGISTRY) continue;
+        const lines = readFileSync(join(ROOT, file), 'utf8').split('\n');
+        lines.forEach((line, index) => {
+          for (const { value, pattern } of needles) {
+            if (pattern.test(line)) hits.push(`${file}:${index + 1} names \`${value}\``);
+          }
+        });
+      }
+      expect(
+        hits,
+        'the schema source names a withdrawn value. ' +
+          `${withdrawn.ticket} withdrew the ${withdrawn.dimension} dimension: ` +
+          `${withdrawn.because}\n` +
+          `The values belong in \`WITHDRAWN_OPTION_SETS\` (${REGISTRY}) and nowhere else.`,
+      ).toEqual([]);
+    }
   });
 
   it('offers exactly the weekdays the schedule grid knows, Monday first', () => {

@@ -22,7 +22,9 @@ import { ROUTES } from '../../src/lib/pages';
  * never structure the studio taught by, they were invented in the foundation commit, and
  * putting them in the Studio as a fixed list made an invention look like a decision
  * somebody had made. A closed set belongs in code *because the site branches on it* —
- * not merely because it is short.
+ * not merely because it is short. The three values are registered as withdrawn in
+ * `WITHDRAWN_OPTION_SETS` below, which is the only place in the schema source that is
+ * allowed to hold them and the list `test/sanity.test.ts` reads to keep them out.
  *
  * So these stay in code, and the Studio offers them as a **fixed list**: Mina picks,
  * she cannot type. The option *titles* come from the same `LEVEL_NAME` / `WEEKDAY_NAME`
@@ -57,6 +59,73 @@ export interface EnumOption {
   readonly title: string;
   readonly value: string;
 }
+
+/**
+ * **The closed sets this project has withdrawn, and may not offer again under any name.**
+ *
+ * The negative counterpart of the option lists below, and a registry rather than a
+ * sentence in a test because of how MUSE-36 nearly came back. That ticket deleted `STYLE_OPTIONS`
+ * — `['traditional', 'moderna', 'sensual']` — as invented, and left behind a guard that
+ * matched the *identifier* `style`. Rename the field to `vrsta`, Croatian for „kind" and
+ * the more natural name to reach for in a Croatian-first codebase, keep the same three
+ * values, the same `layout: 'radio'` and the same place in the Studio, and all 1177 tests
+ * were green (MUSE-76). What was withdrawn was never a field name. It was a **set of
+ * values nobody had gathered**, offered to Mina as a fixed list — which is what made an
+ * invention look like a decision somebody had taken.
+ *
+ * So the values are the needle, the names are kept as a second needle because they give
+ * the obvious case the clearest message there is, and both live here rather than inside
+ * the test that reads them:
+ *
+ *   - This file is where *which closed sets the Studio may offer* is decided, and the
+ *     paragraph explaining why these three went is already in the note at the top of it.
+ *     A withdrawal is a statement in exactly that vocabulary.
+ *   - It is inside the schema fingerprint — `scripts/check-sanity.mjs` hashes every file
+ *     under `sanity/` — so editing a withdrawal is a schema change the build gate makes
+ *     you regenerate and commit, not a quiet edit to a test file.
+ *   - The next withdrawn dimension is one entry here rather than a new assertion. The
+ *     guard in `test/sanity.test.ts` iterates this list and knows nothing about bachata.
+ *
+ * `because` is required and is quoted verbatim by the failure, because this guard is not
+ * defending a settled decision. It is the thing that makes the conversation happen before
+ * a dimension reappears, and a message that only says „not allowed" cannot do that.
+ */
+export interface WithdrawnOptionSet {
+  /** The ticket that withdrew it. Named in the failure. */
+  readonly ticket: string;
+  /** What the dimension was, in words, for the failure message. */
+  readonly dimension: string;
+  /** Why it went, and what to do about it. Quoted verbatim by the failure. */
+  readonly because: string;
+  /**
+   * Substring needles for a field *name*, lower-case.
+   *
+   * Both spellings of the one word: the English identifier MUSE-36 deleted, and the
+   * Croatian one MUSE-76 demonstrated the hole with. Neither is the real needle — a third
+   * name defeats both — they are here for the message, and `values` is the guarantee.
+   */
+  readonly names: readonly string[];
+  /** The withdrawn values. A fixed list containing any of them is this set, back. */
+  readonly values: readonly string[];
+}
+
+export const WITHDRAWN_OPTION_SETS: readonly WithdrawnOptionSet[] = [
+  {
+    ticket: 'MUSE-36',
+    dimension: 'bachata style',
+    because:
+      'the three names were invented in the foundation commit alongside thirteen ' +
+      'invented classes, and the studio splits its classes by level only. This is ' +
+      'unsettled rather than settled, though: the design system brief does say the ' +
+      'studio teaches „traditional, moderna and sensual", with „Tri stila. Jedan ' +
+      'ritam." in its voice table, so one of those two documents is wrong. Ask the ' +
+      'studio which. If the answer is that it does teach by style, that is a product ' +
+      'decision and a schema change — delete this entry in the same commit, and say ' +
+      'in the message who confirmed it.',
+    names: ['style', 'stil'],
+    values: ['traditional', 'moderna', 'sensual'],
+  },
+];
 
 /**
  * Levels, labelled with the names the pages render.
