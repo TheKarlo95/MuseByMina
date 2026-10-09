@@ -201,12 +201,17 @@ const SUPERSEDED: { route: string; field: CopyField; ticket: string; because: st
   {
     route: '/contact',
     field: 'description',
-    ticket: 'MUSE-71',
+    ticket: 'MUSE-71, MUSE-80',
     because:
-      'The same claim in the same ticket, here as „besplatni probni sat" / "a free ' +
-      'bachata trial class" in the `<meta name="description">` of `/contact` and in its ' +
-      'two `llms.txt` lines. One word removed from each locale; the form, the reply ' +
-      'promise and everything else the sentence says are unchanged.',
+      'Two unsupported claims in one sentence, retired by two tickets. MUSE-71 took ' +
+      '„besplatni probni sat" / "a free bachata trial class" out of the ' +
+      '`<meta name="description">` of `/contact` and its two `llms.txt` lines — one word ' +
+      'from each locale. MUSE-80 then took the clause that followed it: „javljamo se u ' +
+      'roku od jednog radnog dana" / "we answer within one working day", a response time ' +
+      'nobody at the studio has set, promised beside a form that has never delivered a ' +
+      'message (`PUBLIC_FORM_ENDPOINT` is unset, MUSE-12). Both trace to agent-written ' +
+      'foundation copy; neither is in a ticket or in the brief. Nothing replaced the ' +
+      'clause with a different number, and what is left says only what the page does.',
   },
 ];
 
@@ -761,7 +766,7 @@ describe('AC1: every page renders the words `main` published', () => {
   });
 
   /**
-   * **MUSE-71 — the output half of the retired offer claim.**
+   * **MUSE-71 and MUSE-80 — the output half of the retired claims.**
    *
    * The rule lives in `test/helpers/offer-claims.ts` and `test/offerclaims.test.ts` applies
    * it to `src/`, `sanity/` and the seed, where it can name a `file:line`. This is the
@@ -775,10 +780,18 @@ describe('AC1: every page renders the words `main` published', () => {
    * is MUSE-50 exactly: its fifth address surface was a literal buried inside a longer
    * composed label, and the guard that missed it was looking for whole values in source.
    *
-   * The two `SUPERSEDED` entries above already prove the two descriptions are gone, string
-   * for string. This is the claim as a *class*, over every byte a visitor can read.
+   * The `SUPERSEDED` entries above already prove the three descriptions are gone, string
+   * for string. This is the claims as a *class*, over every byte a visitor can read.
+   *
+   * MUSE-80 added a second claim to the same registry — a reply promised inside a stated
+   * period — and it needed no change here at all, which is the argument for having put
+   * the rule in a helper rather than in this file. Its two `/contact` surfaces are worth
+   * knowing about: `sentBody` is rendered into a **hidden** confirmation panel that the
+   * page's script reveals after a submission, and `noscriptAsk` into a `<noscript>`. Both
+   * are in the markup of every visit either way, which is what this level reads and what
+   * a reviewer opening the page in a browser would not see.
    */
-  it('publishes no claim of a class at no cost, in either locale (MUSE-71)', () => {
+  it('publishes no retired offer or service claim, in either locale (MUSE-71, MUSE-80)', () => {
     const offences = build
       .allFiles()
       .filter((file) => /\.(html|txt|xml)$/.test(file))

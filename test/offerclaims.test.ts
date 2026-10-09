@@ -14,9 +14,16 @@ import {
 } from './helpers/offer-claims';
 
 /**
- * **MUSE-71 — the site offered a free first class and the studio does not.**
+ * **MUSE-71 and MUSE-80 — two promises the studio never made.**
  *
- * The claim and the evidence against it are written out in `test/helpers/offer-claims.ts`,
+ * A free first class (MUSE-71) and a reply within one working day (MUSE-80). Both were
+ * written by an agent, both are plausible, neither is in a ticket or in the brief, and the
+ * second was published beside a form that has never delivered a message. They share one
+ * registry rather than getting a mechanism each: they fail the same way, they would come
+ * back through the same doors, and two guards answering one question between them is how
+ * MUSE-38 happened.
+ *
+ * The claims and the evidence against them are written out in `test/helpers/offer-claims.ts`,
  * which holds the rule because two suites apply it: this one reads the *sources* a claim
  * could come back from, and `test/content.test.ts` reads the **built output**, using the
  * build it already performs. Splitting it that way is not tidiness — `npm test`'s
@@ -56,8 +63,10 @@ import {
  * every string field in the seed as CMS-owned or in-code and asserts that classification
  * is complete — and it could not have caught this, because `page.description` *was*
  * CMS-owned and the string *was* in the CMS. A registry can ask where a value lives; **it
- * cannot ask whether a human said it**, and neither can this file. So the claim is pinned
- * by name rather than by category, and prices are left alone: 55 € and 100 € are confirmed,
+ * cannot ask whether a human said it**, and neither can this file. So each claim is
+ * pinned by name rather than by category — which is also why MUSE-80 is a second set of
+ * needles here and not a broader rule: a needle for "any commitment" would match the
+ * GDPR deadline on `/privacy`, which is law and is true. Prices are left alone too: 55 € and 100 € are confirmed,
  * `/pricing` publishes them on purpose (`test/pricing.test.ts`'s `CONFIRMED_TIERS` is the
  * receipt for those), and a needle that matched any price would fail on the page whose job
  * is to show them.
@@ -100,7 +109,7 @@ function offencesIn(files: { file: string; text: string }[]): Offence[] {
   return files.flatMap(({ file, text }) => claimsIn(text, file));
 }
 
-describe('MUSE-71: the retired claim, as a rule with teeth', () => {
+describe('MUSE-71 and MUSE-80: the retired claims, as a rule with teeth', () => {
   it('catches every string the site actually published', () => {
     // The teeth. Without this the needles could be anything at all — including nothing,
     // which is how an empty guard passes for ever.
@@ -111,6 +120,32 @@ describe('MUSE-71: the retired claim, as a rule with teeth', () => {
           'site published at 6a67da9',
       ).not.toEqual([]);
     }
+  });
+
+  it('makes every needle say which ticket retired it and what is not true', () => {
+    // `report` prints these, and there are two claims now: a failure that cited MUSE-71
+    // for a response-time promise would send the next author to read an argument about a
+    // free class and find that it did not apply to their line.
+    for (const claim of RETIRED_CLAIMS) {
+      expect(claim.ticket, `${claim.what} needs the ticket that retired it`).toMatch(
+        /^MUSE-\d+$/,
+      );
+      expect(
+        claim.untrue.length,
+        `${claim.what} needs a sentence saying what is not true`,
+      ).toBeGreaterThan(30);
+      // A statement about the studio, not about the needle — it is read by somebody who
+      // has just been stopped and does not yet believe they are wrong.
+      expect(claim.untrue, `${claim.what}: untrue should not end in a full stop`).not.toMatch(
+        /\.$/,
+      );
+    }
+
+    // Both retired claims are actually in here. Deleting a needle is allowed — with who
+    // said so — but deleting the last needle of a ticket silently retires the guard.
+    expect(new Set(RETIRED_CLAIMS.map((claim) => claim.ticket))).toEqual(
+      new Set(['MUSE-71', 'MUSE-80']),
+    );
   });
 
   it('catches the examples beside each needle, so one cannot be quietly disarmed', () => {
@@ -127,13 +162,19 @@ describe('MUSE-71: the retired claim, as a rule with teeth', () => {
     }
   });
 
-  it('leaves alone the prose under `src/` that says "free" about something else', () => {
-    // The other direction, and the reason the English needles test adjacency rather than
-    // the word. Seven lines under `src/` use "free" about a URL fragment, Actions minutes,
-    // a wire format, a projection, JPEG quality and a layout — and a needle that read any
-    // of them as a price promise would be deleted rather than narrowed.
-    const src = scanned()
-      .filter(({ file }) => file.startsWith('src/'))
+  it('leaves alone the prose that says "free", or names a period, about something else', () => {
+    // The other direction, and the reason both sets of needles test adjacency rather than
+    // words. Seven lines use "free" about a URL fragment, Actions minutes, a wire format,
+    // a projection, JPEG quality and a layout; five more name a period of time — the
+    // GDPR's one-month deadline on `/privacy` in both locales, the rebuild cadence twice,
+    // the cron spacing and a nav disclosure's criteria. A needle that read any of them as
+    // a promise would be deleted rather than narrowed.
+    //
+    // Scanned over `src/` **and** `sanity/`, which is the whole corpus minus the seed: the
+    // nearest miss for the English reply needle is in `sanity/badges.ts`, and a check that
+    // could not reach it would shape the needles around half of what they run over.
+    const prose = scanned()
+      .filter(({ file }) => file.startsWith('src/') || file.startsWith('sanity/'))
       .map(({ text }) => text)
       .join('\n');
 
@@ -141,15 +182,16 @@ describe('MUSE-71: the retired claim, as a rule with teeth', () => {
       // Asserted *still there*, so this list is a record of real prose rather than a set of
       // hypotheticals that drifts into fiction — the shape `test/contentdrift.test.ts` uses
       // for its exemptions.
-      expect(src.includes(line), `INNOCENT names prose no longer under src/: ${line}`).toBe(
-        true,
-      );
+      expect(
+        prose.includes(line),
+        `INNOCENT names prose no longer under src/ or sanity/: ${line}`,
+      ).toBe(true);
       expect(report(claimsIn(line, 'innocent'))).toEqual([]);
     }
   });
 });
 
-describe('MUSE-71: nothing claims a class at no cost', () => {
+describe('MUSE-71 and MUSE-80: nothing claims a free class or a reply time', () => {
   const files = scanned();
 
   it('reads the whole of `src/`, `sanity/` and the seed', () => {

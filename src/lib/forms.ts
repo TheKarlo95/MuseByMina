@@ -372,8 +372,16 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
     },
     tooLong: 'Poruka je predugačka — skrati je, molimo.',
     sentTitle: 'Prijava je poslana.',
+    // MUSE-80: this used to open with a response time nobody at the studio had set, on a
+    // submission the site cannot currently transmit at all. The clause is gone and
+    // nothing replaced it: a smaller number, or a vaguer word, is the same defect with a
+    // different value. What is left is what the form does.
+    //
+    // Note what this comment does *not* do — spell the retired promise, even to explain
+    // it. That is MUSE-71's rule and there is no exemption list; the wording lives in
+    // `test/helpers/offer-claims.ts`, which is not scanned.
     sentBody:
-      'Javljamo se u roku od jednog radnog dana s terminom za probni sat. Ako ne vidiš naš odgovor, provjeri spam mapu.',
+      'Javljamo se s terminom za probni sat. Ako ne vidiš naš odgovor, provjeri spam mapu.',
     failTitle: 'Prijava nije poslana.',
     failBody:
       'Tvoji odgovori su ostali u obrascu, pa možeš pokušati ponovno. Ako i dalje ne ide, piši nam na:',
@@ -385,8 +393,9 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
     honeypotLabel: 'Ostavi ovo polje prazno',
     noscript:
       'Bez JavaScripta ovaj se obrazac ne može poslati, pa ga ovdje i ne prikazujemo. Prijavu nam pošalji e-mailom na:',
-    noscriptAsk:
-      'Napiši ime, razinu ako je već znaš i kad ti otprilike odgovara. Odgovaramo u roku od jednog radnog dana.',
+    // MUSE-80: a second copy of the same promise, here on an email the visitor sends by
+    // hand. The sentence is dropped rather than rewritten; the ask is the content.
+    noscriptAsk: 'Napiši ime, razinu ako je već znaš i kad ti otprilike odgovara.',
   },
   en: {
     formLabel: 'Trial class request',
@@ -424,7 +433,7 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
     tooLong: 'That message is too long — please shorten it.',
     sentTitle: 'Your request is on its way.',
     sentBody:
-      'We reply within one working day with a slot for your trial class. If you do not see our answer, check your spam folder.',
+      'We reply with a slot for your trial class. If you do not see our answer, check your spam folder.',
     failTitle: 'That did not send.',
     failBody:
       'Your answers are still in the form, so you can try again. If it still will not go through, write to us at:',
@@ -437,7 +446,7 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
     noscript:
       'Without JavaScript this form cannot be sent, so we do not show it here. Send your request by email instead, to:',
     noscriptAsk:
-      'Tell us your name, your level if you already know it, and roughly when suits you. We reply within one working day.',
+      'Tell us your name, your level if you already know it, and roughly when suits you.',
   },
 };
 
