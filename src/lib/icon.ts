@@ -122,6 +122,18 @@ export const APPLE_TOUCH_INSET = 0.14;
 /** Where the derived icon files live, relative to the repository root. */
 export const ICON_DIR = 'src/assets/icon';
 
+/**
+ * **The one opaque file, which two registry entries point at.**
+ *
+ * The iOS tile and MUSE-75's scheme-less default are the same artwork for the same
+ * reason — an icon that brings its own ground does not have to ask what it is drawn on —
+ * so they are one file and one decision. Named rather than written twice because it is
+ * also the predicate the pixel assertions in `test/icon.test.ts` need: everything *else*
+ * in `ICONS` is the transparent mark, and the rules about stroke weight, ink colour and a
+ * shared alpha channel are rules about that mark, not about a tile.
+ */
+export const TILE_FILE = 'muse-apple-touch.png';
+
 /** One `<link rel="icon">` or `<link rel="apple-touch-icon">` the layout emits. */
 export interface IconLink {
   rel: 'icon' | 'apple-touch-icon';
@@ -172,6 +184,38 @@ export interface IconLink {
  *     past the floor anything else here is written against, and the failure is a tab with
  *     no visible icon, which is what the whole site had before this ticket.
  *
+ * ## The default branch, and the one case the pair above cannot serve (MUSE-75)
+ *
+ * There is a **second** cost, and it is the sharper one: a user agent that evaluates
+ * `media` but does not implement `prefers-color-scheme` matches **neither** branch. An
+ * unknown media feature is false, not ignored, so such a UA sees two candidates it has
+ * ruled out and no candidate it has not — and gets no icon at all. Every current browser
+ * matches one of the two, so the population is small; the failure, for anyone in it, is
+ * total. MUSE-40's argument that a `public/favicon.ico` cannot cover this still **stands
+ * and is not revisited**: on the Pages sub-path it would publish at
+ * `/MuseByMina/favicon.ico` while the bare probe goes to the *origin* root. This is the
+ * other, cheap half.
+ *
+ * So the registry carries one scheme-less `rel="icon"`, and it is the **opaque tile** —
+ * the same file the iOS entry points at, white mark on §12's plum. That is the whole
+ * argument rather than a convenience: the four icons above need a `media` *because they
+ * are transparent*, so what the tab strip is made of decides whether they are visible. A
+ * tile brings its own ground and is legible on a light strip and a dark one alike, which
+ * is exactly what a default has to be when the UA asking for it is one that cannot tell
+ * us which it has. It is also why the iOS tile is opaque (`APPLE_TOUCH_INSET`), so there
+ * is one decision here and not two.
+ *
+ * **Its size is what keeps the scheme pair deterministic.** The concern above — a tie the
+ * browser breaks however it likes — is real only between candidates of the same declared
+ * size. This one declares 180×180 against the pair's 16 and 32, and a browser picks the
+ * closest declared size to the box it is filling before it considers anything else, so a
+ * 16 or 32 pixel tab never reaches for it. It wins when it is the only candidate left,
+ * which is precisely the case it exists for.
+ *
+ * **MUSE-29 changes this calculus.** On an apex domain a `public/favicon.ico` *would*
+ * answer the origin-root probe, which covers one more class again — a UA that reads no
+ * `<link>` at all. Worth adding with that move; worth nothing before it.
+ *
  * Note that the icon tags are **not** gated on `indexable`: unlike the canonical and the
  * JSON-LD block, an icon is not a claim about a URL, and the error page gets a tab icon
  * for the same reason it gets a theme colour.
@@ -205,7 +249,13 @@ export const ICONS: readonly IconLink[] = [
     sizes: '32x32',
     media: '(prefers-color-scheme: dark)',
   },
-  { rel: 'apple-touch-icon', file: 'muse-apple-touch.png', href: appleTouch, sizes: '180x180' },
+  /**
+   * The default branch (MUSE-75) — no `media`, so a UA that cannot evaluate
+   * `prefers-color-scheme` still has one candidate. See the note above for why it is the
+   * opaque tile and why its size is what keeps the pair above deterministic.
+   */
+  { rel: 'icon', file: TILE_FILE, href: appleTouch, sizes: '180x180' },
+  { rel: 'apple-touch-icon', file: TILE_FILE, href: appleTouch, sizes: '180x180' },
 ];
 
 /** The ink colour each tab icon is drawn in — §12's white mark and its plum derivation. */
