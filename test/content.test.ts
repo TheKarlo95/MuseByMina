@@ -502,10 +502,19 @@ describe('the migration is a committed artefact, not a Studio session', () => {
      * them. The counts are spelled out rather than loosened to "at least", because this
      * is the one assertion that would notice the invented thirteen coming back.
      *
-     * MUSE-59 added the fifth `page` document and the **two** `pricingTier` documents —
-     * two, because the studio confirmed two periods and no others. A third one appearing
-     * here is a price nobody agreed to, which is MUSE-36 on the one field where it is also
-     * a commercial claim; `test/pricing.test.ts` holds the amounts themselves.
+     * MUSE-59 added the fifth `page` document and two `pricingTier` documents. It is
+     * **three** since MUSE-73: the owner gave the complete rate card on 2026-10-09 — a
+     * regular monthly rate, a student monthly rate and a drop-in — and removed the
+     * two-month package the site had been publishing, which appears on neither the card
+     * nor the studio's enrolment form. A fourth one appearing here is a price nobody
+     * agreed to, which is MUSE-36 on the one field where it is also a commercial claim;
+     * `test/pricing.test.ts` holds the amounts, the removal and the provenance.
+     *
+     * Note which direction this count protects, because MUSE-73 is the first finding on
+     * this board that ran the other way: a number pinned here stops a rate *arriving*
+     * unreviewed and does nothing about a rate the studio charges and the site never
+     * published. Only asking the owner closes that, and the receipt in
+     * `test/pricing.test.ts` is where the asking is recorded.
      *
      * MUSE-65 added the seventh `page` document and the **one** `prosePage` document:
      * `/whatisbachata` is the only page whose body is prose from the CMS today, and the
@@ -524,7 +533,7 @@ describe('the migration is a committed artefact, not a Studio session', () => {
       ['class', 4],
       ['instructor', 2],
       ['page', 7],
-      ['pricingTier', 2],
+      ['pricingTier', 3],
       ['prosePage', 1],
       ['scheduleSlot', 4],
       ['siteSettings', 1],

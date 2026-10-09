@@ -671,13 +671,26 @@ async function shotWith(el: Locator, variant: string): Promise<Buffer> {
 }
 
 describe('a price on /pricing is drawn in lining figures (MUSE-59)', () => {
-  it('has prices to measure, carrying the two glyphs the ticket is about', () => {
-    // The positive control: an empty subject satisfies every loop below. `1` and `0` are
-    // the glyphs MUSE-14 was filed for — a text-figure `1` reads as `I` and `0` as `o`.
+  it('has prices to measure, every one of them carrying figures', () => {
+    /**
+     * The positive control: an empty subject satisfies every loop below, and so does a
+     * card whose price somehow rendered without digits.
+     *
+     * **`0` is asserted and `1` is not, which is a change MUSE-73 made rather than a
+     * relaxation.** The two glyphs MUSE-14 was filed for are `1` (a text figure reads as
+     * `I`) and `0` (reads as `o`), and the only seeded price that ever contained a `1`
+     * was the 100 € two-month package — a rate the studio does not offer, which MUSE-73
+     * deleted. Pinning a `1` here would be pinning a price, which is the one thing this
+     * file must not do. The `1` is still measured in this same file and on real pages:
+     * `CONTROL_TEXT` is `19:00 55 €`, so every control on every route is shot with one,
+     * and `/schedule`'s `<time>` elements are `19:30` and `21:00`. What carries the claim
+     * for the three rates is the per-element comparison below — Cormorant's old-style
+     * `5`, `4`, `2` and `0` all differ from their lining forms, so a page drawing text
+     * figures fails on `asRendered.equals(oldstyle)` whichever rate it is.
+     */
     expect(SEEDED_PRICES.hr.length).toBeGreaterThan(0);
-    const digits = SEEDED_PRICES.hr.join('');
-    expect(digits).toMatch(/1/);
-    expect(digits).toMatch(/0/);
+    for (const price of SEEDED_PRICES.hr) expect(price, price).toMatch(/\d/);
+    expect(SEEDED_PRICES.hr.join('')).toMatch(/0/);
   });
 
   for (const { name, route, locale, scheme } of PRICE_CASES) {
