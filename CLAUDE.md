@@ -144,16 +144,45 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   resolves every reference to it in both environments, with no base-path join anywhere.
   `src/styles/fonts.css` uses a relative `url()` into `src/assets/`; `BaseLayout.astro`
   preloads the *same files* via `?url` imports.
-- **A preload must name the same URL as the thing it preloads, and must be a face the
-  page actually needs.** Two different failures, both silent. Point the preload at a
-  second copy of the font and both URLs are 200, both resolve, and the browser downloads
+- **A preload must name the same URL as the thing it preloads, and the preloaded set must
+  be exactly the set the page asks for.** Three failures, all silent. Point the preload at
+  a second copy of the font and both URLs are 200, both resolve, and the browser downloads
   each face twice. Point it at a declared-but-unused subset (`-latin-ext` instead of
   `-latin`) and you pay for bytes the page never paints with and lose the preload on the
-  ones it does. `test/assets.test.ts` catches the first against `dist`;
-  `test/fonts.test.ts` catches the second by loading each page **with the preload tags
-  stripped** and recording what the CSS engine then asks for — the only way to measure
-  it, since a preload is itself a request and so "was it requested" is true by
-  construction.
+  ones it does. **Leave a needed face out and the page paints a word in two typefaces**
+  (MUSE-74): `@font-face` subsets split on `unicode-range`, every Croatian diacritic lives
+  in `latin-ext`, and `font-display: swap` paints the latin half of „Do**đ**i" in Cormorant
+  while the `đ` comes from the system fallback — measured at 221 ms on a throttled cold
+  load, 4 ms once both halves are preloaded together. `test/assets.test.ts` catches the
+  first against `dist`; `test/fonts.test.ts` catches the other two by loading each page
+  **with the preload tags stripped** and recording what the CSS engine then asks for — the
+  only way to measure it, since a preload is itself a request and so "was it requested" is
+  true by construction — and it compares the two sets **both ways**. The one-directional
+  version (`preloaded ⊆ needed`) was green for the life of the project while four of the
+  six faces were preloaded on no page at all.
+
+  **The set is therefore per page, and `src/lib/fonts.ts` is the only place it is
+  decided.** A Croatian page gets all six; an English page gets the three `latin` subsets
+  plus whatever `EN_LATIN_EXT` names. **No list may say a page does *not* need a subset** —
+  that list existed, for Cormorant's `latin-ext` per route, and two content PRs
+  invalidated it on one day (MUSE-71 put a `đ` in `/schedule`'s display heading; MUSE-72
+  put „Ožegovića" into the *English* privacy notice, making `/en/privacy` the first
+  English page to need `inter-latin-ext`). A list that can say "does not need" is wrong in
+  the direction a visitor reads; one that can only add is wrong in the direction the
+  budget counts. The cost is measured and paid: 33.0 KB of Cormorant on the three Croatian
+  pages whose headings are diacritic-free today.
+
+  English is additive-only because the same default there costs 135.9 KB against a 109.8 KB
+  payload, and because **a Croatian proper noun inside an English sentence will keep
+  happening** — a street, an instructor's name, a quoted phrase — and no locale rule
+  predicts it. Two things not to retry, both measured rather than assumed: the rendered
+  text does **not** answer the question, because it is per *face* and `/pricing/` carries
+  „Što je bachata" in `.navList a`, which is Cormorant and `display: none` at the measured
+  width; and `Astro.slots.render()`, which does expose the body before `<head>` is emitted,
+  **silently drops every component's hoisted `<script>`** — eight of fifteen pages lost
+  theirs. Residual risk, stated in the file: `npm test` gates pull requests, the scheduled
+  rebuild does not, so a *Sanity* edit putting a Croatian name into English copy can stale
+  `EN_LATIN_EXT` and deploy.
 - **There is a performance budget, it is `scripts/budget.mjs`, and it is deliberately
   not Lighthouse** (MUSE-63). The original plan listed `lighthouse` among the blocking
   checks; it was never built, and the only size guard was a `du -sm dist` step watching

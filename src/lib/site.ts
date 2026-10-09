@@ -22,7 +22,7 @@
  * An asset belonging to the site's own code — a font, an image, an icon — goes in
  * `src/assets/` and is **imported**, so Vite emits it with a content hash and resolves
  * every reference to it in both environments, with no base-path join at all. See
- * `src/styles/fonts.css` and the `?url` imports in `src/layouts/BaseLayout.astro`.
+ * `src/styles/fonts.css` and the `?url` imports in `src/lib/fonts.ts`.
  *
  * Reach for `rootPath` only when a file genuinely has to live at a fixed, published URL
  * that something outside this codebase asks for by name — `favicon.ico`, `CNAME`,

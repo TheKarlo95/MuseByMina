@@ -24,11 +24,15 @@
    one wrongly — and the emitted filename is content-hashed, so the deploy can
    serve these immutable.
 
-   `src/layouts/BaseLayout.astro` preloads two of them, through a `?url` import
-   of the same file. That is the other half of the rule: the preload and the
-   `src` must be the SAME URL, or the browser fetches each preloaded face twice
-   and the preload matches nothing. `test/assets.test.ts` asserts it against the
-   built output and `test/fonts.test.ts` against the dev server. */
+   `src/lib/fonts.ts` imports every one of these with `?url` and
+   `BaseLayout.astro` preloads **the ones each page paints with** — three on an
+   English page, five or six on a Croatian one, because every Croatian diacritic
+   is in the latin-ext half (MUSE-74). Two halves to the rule. The preload and
+   the `src` must be the SAME URL, or the browser fetches each preloaded face
+   twice and the preload matches nothing; and the preloaded set must be exactly
+   the set the page asks for, or a word paints in two typefaces while it waits.
+   `test/assets.test.ts` asserts the first against the built output,
+   `test/fonts.test.ts` the second in all three environments. */
 
 @font-face {
   font-family: 'Cormorant Garamond';

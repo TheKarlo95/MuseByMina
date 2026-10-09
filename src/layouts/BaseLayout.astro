@@ -39,22 +39,17 @@ import {
 import { getSiteSettings } from '../lib/sanity';
 import { jsonLd, structuredData } from '../lib/structured-data';
 /**
- * The two faces the first paint needs, imported rather than named as a path.
+ * The faces the first paint needs — **this page's, not a fixed pair** (MUSE-74).
  *
- * `?url` hands back whatever URL the build gives the file — base joined, content hash
- * and all — which is the same URL Vite writes into the `@font-face` `src` in
- * `src/styles/fonts.css`, because it is the same file going through the same resolver.
- * That identity is the point (MUSE-35): a preload whose href is not also a `src` is a
- * second download of a face the page was going to fetch anyway, and it looks exactly
- * like a working preload from the outside. `test/assets.test.ts` holds the two
- * together.
- *
- * This is also what replaced `rootPath()` here. `rootPath` joins the deploy base
- * correctly (MUSE-8) but it can only join it to a path someone typed, and the path
- * someone typed is the thing that went stale.
+ * This was two `?url` imports and two hand-written tags below, identical on all fifteen
+ * pages in both locales. Both named faces every page does need, so the guard watching
+ * them was green; four of the six were preloaded nowhere, and every Croatian diacritic
+ * lives in the `latin-ext` half that was never among them. `src/lib/fonts.ts` holds the
+ * whole rule, the files, and why the one content-dependent part of it is written down as
+ * data rather than modelled. It imports no CSS, so its position here cannot move the
+ * built `<head>` (MUSE-43).
  */
-import cormorantLatin from '../assets/fonts/cormorant-garamond-latin.woff2?url';
-import interLatin from '../assets/fonts/inter-400-600-latin.woff2?url';
+import { preloadFaces } from '../lib/fonts';
 /**
  * The tab icons, as a registry rather than five tags written out below (MUSE-40).
  *
@@ -282,23 +277,22 @@ const cardUrl = new URL(card.src, Astro.site).href;
       ))
     }
 
-    {/* Both hrefs come from the `?url` imports above — see the note there. Never spell
-        one of these out: a hand-written path has to join the deploy base (MUSE-8) and
-        then has to keep agreeing with what `fonts.css` asks for (MUSE-35). */}
-    <link
-      rel="preload"
-      href={cormorantLatin}
-      as="font"
-      type="font/woff2"
-      crossorigin="anonymous"
-    />
-    <link
-      rel="preload"
-      href={interLatin}
-      as="font"
-      type="font/woff2"
-      crossorigin="anonymous"
-    />
+    {/* Every href comes from a `?url` import in `src/lib/fonts.ts` — see the note there.
+        Never spell one of these out: a hand-written path has to join the deploy base
+        (MUSE-8) and then has to keep agreeing with what `fonts.css` asks for (MUSE-35).
+        The set is per page and per locale (MUSE-74); `test/fonts.test.ts` measures what
+        each page actually asks the CSS engine for and fails in **both** directions. */}
+    {
+      preloadFaces(route, locale).map((face) => (
+        <link
+          rel="preload"
+          href={face.href}
+          as="font"
+          type="font/woff2"
+          crossorigin="anonymous"
+        />
+      ))
+    }
 
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
