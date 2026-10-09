@@ -1,7 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { recordHeavyOperation } from '../../scripts/heavy-census.mjs';
@@ -35,7 +35,127 @@ const ROOT = fileURLToPath(new URL('../..', import.meta.url));
  * delete the first one's builds mid-flight (MUSE-34). That is the only `rm` in the test
  * tree, and `test/isolation.test.ts` fails if a second one appears.
  */
-export const SCRATCH = join(ROOT, 'node_modules/.muse-test-builds');
+export const SCRATCH = scratchRootIn(ROOT);
+
+/**
+ * Where a given checkout's builds go.
+ *
+ * `SCRATCH` is this one's. The function exists because a developer box runs **one
+ * worktree per ticket** and every one of them has a root of its own (MUSE-79): the
+ * prune has to be able to say where another checkout's builds are without anything
+ * outside this file spelling the path. It is also how `test/isolation.test.ts` builds a
+ * two-worktree tree to prune, since naming the path is an offence everywhere but here.
+ */
+export function scratchRootIn(checkout: string): string {
+  return join(checkout, 'node_modules/.muse-test-builds');
+}
+
+/**
+ * The main checkout `from` belongs to — the directory the worktrees hang off.
+ *
+ * **The scope half of MUSE-79.** The prune is correct and it was reaching one root: the
+ * one in the worktree it ran in. This project's working model is a worktree per ticket,
+ * so a run in `muse-71` never looked at `muse-64`, and a worktree whose pull request
+ * merged is never run in again — its builds live until the disk fills. Measured when the
+ * ticket was filed: 30,061 stale directories across 43 worktrees, **none** younger than
+ * the age the prune already considers prunable, 16 GB of them.
+ *
+ * Read off `.git` rather than asked of `git`, for two reasons. A `globalSetup` may not
+ * start a child process — `test/isolation.test.ts` allows exactly one file to, and that
+ * rule is worth more than the convenience — and a file read cannot fail slowly, which
+ * matters for something that runs before every suite. Git's own on-disk contract is what
+ * is being read, and it is stable: a main checkout has a `.git` **directory**, a linked
+ * worktree has a `.git` **file** holding `gitdir: …/.git/worktrees/<name>`.
+ *
+ * Anything it cannot make sense of returns `from` unchanged, which is exactly the scope
+ * the prune had before this ticket. A tarball with no `.git` at all still prunes its own
+ * builds.
+ */
+export function checkoutRoot(from: string = ROOT): string {
+  let dir = resolve(from);
+  for (;;) {
+    const marker = join(dir, '.git');
+    const kind = kindOfPath(marker);
+    if (kind === 'directory') return dir;
+    if (kind === 'file') {
+      const main = mainCheckoutOf(dir, readFileSync(marker, 'utf8'));
+      if (main !== null) return main;
+    }
+    const up = dirname(dir);
+    if (up === dir) return resolve(from);
+    dir = up;
+  }
+}
+
+/** `gitdir: /path/to/main/.git/worktrees/muse-79` → `/path/to/main`, or `null`. */
+function mainCheckoutOf(worktree: string, dotGit: string): string | null {
+  const gitdir = /^gitdir:\s*(.+?)\s*$/m.exec(dotGit)?.[1];
+  // Relative is legal and `git worktree add` writes it for a worktree inside the repo.
+  if (gitdir === undefined) return null;
+  const admin = /^(.*)[/\\]\.git[/\\]worktrees[/\\][^/\\]+$/.exec(resolve(worktree, gitdir));
+  return admin?.[1] ?? null;
+}
+
+/** `statSync` as a question rather than an exception. */
+function kindOfPath(path: string): 'directory' | 'file' | 'absent' {
+  try {
+    return statSync(path).isDirectory() ? 'directory' : 'file';
+  } catch {
+    return 'absent';
+  }
+}
+
+/**
+ * How deep under the checkout a worktree may be before the walk stops looking.
+ *
+ * Four is what the two conventions in use need — `.worktrees/muse-79/` and
+ * `.claude/worktrees/agent-<id>/`, each with `node_modules` beneath it. Six leaves room
+ * for a nesting nobody has invented yet, and a bound is what keeps this a directory walk
+ * rather than a filesystem crawl: the repository tree is small once `node_modules` is
+ * excluded, and `node_modules` is excluded.
+ */
+const WORKTREE_DEPTH = 6;
+
+/**
+ * Every build scratch root this run may prune: ours, and every one under `repository`.
+ *
+ * The union, not the walk's result, because a worktree is allowed to live outside the
+ * checkout it belongs to — `git worktree add /tmp/x` is legal — and in that layout the
+ * main checkout is not an ancestor of ours. Missing our own root would be a regression
+ * against the behaviour this widens.
+ *
+ * The walk never enters a dependency tree: a `node_modules` is answered by whether it
+ * holds a scratch root and then left alone. That is what stops it descending into the
+ * 30,000 build directories it is looking for, and into the hundred-megabyte package tree
+ * beside them. Symlinks are not followed, because `isDirectory()` on a `Dirent` is false
+ * for one — a symlinked worktree would be walked through its real path or not at all,
+ * and either is safe.
+ */
+export function scratchRoots(repository: string = checkoutRoot()): string[] {
+  const found = new Set<string>([SCRATCH]);
+
+  const descend = (dir: string, depth: number): void => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return; // A directory this user cannot read holds no builds of this run's.
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === '.git') continue;
+      const path = join(dir, entry.name);
+      if (entry.name === 'node_modules') {
+        const root = scratchRootIn(dir);
+        if (existsSync(root)) found.add(root);
+        continue;
+      }
+      if (depth < WORKTREE_DEPTH) descend(path, depth + 1);
+    }
+  };
+  descend(resolve(repository), 1);
+
+  return [...found].sort();
+}
 
 /**
  * Mint a fresh, empty build directory for the caller.

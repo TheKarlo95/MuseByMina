@@ -16,15 +16,20 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { TestCase, TestModule } from 'vitest/node';
 import { describe, expect, it, vi } from 'vitest';
 
-import pruneScratch from './helpers/clean-scratch';
+import { verdict } from '../scripts/sweep-worktrees.mjs';
+
+import pruneScratch, { prune } from './helpers/clean-scratch';
 import HookFailureReporter from './helpers/hook-failure-reporter';
 import {
   astroBuild,
   astroBuildOutside,
   buildErrorHeadline,
   cacheDirFor,
+  checkoutRoot,
   claimOutDir,
   SCRATCH,
+  scratchRootIn,
+  scratchRoots,
 } from './helpers/scratch';
 import ConcurrencyBudgetReporter from './helpers/concurrency-reporter';
 import {
@@ -266,6 +271,244 @@ describe('the one wipe in the tree cannot reach a live build', () => {
     pruneScratch();
 
     expect(existsSync(stale)).toBe(false);
+  });
+});
+
+/**
+ * MUSE-79 — the same rule, over every worktree of the checkout.
+ *
+ * The prune above was right about *what* it may delete and wrong about *where* it looked:
+ * the scratch root of the worktree it ran in. One worktree per ticket means a run in one
+ * never looked at another, and a worktree whose pull request merged is never run in again.
+ * Measured when the ticket was filed: **30,061 stale build directories across 43
+ * worktrees, not one of them younger than the prune's own age**, and a run that died with
+ * `ENOSPC` on a 431 GB disk with 1.2 GB left.
+ *
+ * Both halves are asserted here, and the second is the one MUSE-34 bought with the age
+ * rule: a *fresh* build in another worktree survives. If the wider scope ever needs a
+ * lock or a pid file, that assertion is what will have gone red first.
+ *
+ * The tree is built inside this run's own scratch root, so it is pruned by age like
+ * anything else and nothing has to delete it — `test/isolation.test.ts` may not. The
+ * paths come from `scratchRootIn`, because naming one is an offence in every file but
+ * `test/helpers/scratch.ts` (the rule below).
+ */
+describe('the prune reaches every worktree in the checkout', () => {
+  /** A checkout holding `worktrees`, each with a scratch root of its own. */
+  function checkout(...worktrees: string[]): { root: string; scratch: string[] } {
+    const root = claimOutDir('worktrees');
+    mkdirSync(join(root, '.git'), { recursive: true });
+    const scratch = worktrees.map((name) => {
+      const path = scratchRootIn(join(root, name));
+      mkdirSync(path, { recursive: true });
+      return path;
+    });
+    return { root, scratch };
+  }
+
+  /** A build directory with a file in it, `ageMs` old, inside `scratch`. */
+  function build(scratch: string, ageMs: number): string {
+    const dir = mkdtempSync(join(scratch, 'build-'));
+    writeFileSync(join(dir, 'index.html'), 'output of a build in another worktree');
+    const stamp = new Date(Date.now() - ageMs);
+    utimesSync(dir, stamp, stamp);
+    return dir;
+  }
+
+  const AN_HOUR = 60 * 60 * 1000;
+
+  it('finds the scratch root of a sibling worktree, at either convention', () => {
+    // `.worktrees/muse-79/` and `.claude/worktrees/agent-<id>/` are the two layouts in
+    // use, and the second is a level deeper. The discovery is asserted before anything is
+    // asserted with it: a walk that silently stops matching makes the prune below pass
+    // over nothing.
+    const { root, scratch } = checkout('.worktrees/muse-79', '.claude/worktrees/agent-7');
+
+    expect(scratchRoots(root)).toEqual(expect.arrayContaining(scratch));
+  });
+
+  it('prunes a stale build in a worktree it is not running in', () => {
+    const { root, scratch } = checkout('.worktrees/merged-last-week');
+    const stale = build(scratch[0]!, 48 * AN_HOUR);
+
+    prune(root);
+
+    expect(existsSync(stale), `${stale} survived the prune`).toBe(false);
+  });
+
+  it('leaves a fresh build in that worktree alone, which is why the rule is age', () => {
+    // MUSE-34's property, restated at the new scope. The worktree next door looks exactly
+    // as idle as a merged one between two of its own tool calls, so the only thing that
+    // can tell a live build from a dead one is how old it is.
+    const { root, scratch } = checkout('.worktrees/muse-70');
+    const live = build(scratch[0]!, 0);
+    const stale = build(scratch[0]!, 48 * AN_HOUR);
+
+    prune(root);
+
+    expect(existsSync(live), `${live} was another agent's live build`).toBe(true);
+    expect(readFileSync(join(live, 'index.html'), 'utf8')).toContain('another worktree');
+    expect(existsSync(stale)).toBe(false);
+  });
+
+  it("prunes this run's own root even from a checkout it is not under", () => {
+    // A worktree may legally live outside the checkout it belongs to, in which case the
+    // walk cannot reach ours. Dropping it would be a regression against the behaviour
+    // this widens, so the roots are the union rather than the walk's result.
+    expect(scratchRoots(claimOutDir('elsewhere'))).toContain(SCRATCH);
+  });
+
+  it('never descends into a dependency tree', () => {
+    // What keeps this a directory walk: a `node_modules` is answered by whether it holds
+    // a scratch root, never entered. Entering one would mean walking the 30,000
+    // directories the prune is looking for — and the package tree beside them — on every
+    // run.
+    const { root, scratch } = checkout('.worktrees/nested');
+    const buried = scratchRootIn(join(scratch[0]!, 'build-xyz'));
+    mkdirSync(buried, { recursive: true });
+
+    const found = scratchRoots(root);
+
+    expect(found).toContain(scratch[0]);
+    expect(found).not.toContain(buried);
+  });
+
+  it('resolves the main checkout from inside a linked worktree', () => {
+    // The trap this would otherwise fall into is the one the ticket names: git's own
+    // signals about a worktree are not readable from the commit graph (this repository
+    // squash-merges), and the one that is readable on disk is `.git` itself — a directory
+    // in a main checkout, a file pointing at `…/.git/worktrees/<name>` in a linked one.
+    const main = claimOutDir('linked');
+    mkdirSync(join(main, '.git/worktrees/muse-79'), { recursive: true });
+    const worktree = join(main, '.worktrees/muse-79');
+    mkdirSync(worktree, { recursive: true });
+
+    // Relative is what `git worktree add` writes for a worktree inside the repository;
+    // absolute is what it writes for one outside it. Both resolve to the same checkout.
+    for (const gitdir of ['../../.git/worktrees/muse-79', join(main, '.git/worktrees/muse-79')]) {
+      writeFileSync(join(worktree, '.git'), `gitdir: ${gitdir}\n`);
+      expect(checkoutRoot(worktree), gitdir).toBe(main);
+    }
+  });
+
+  it('prunes from a main checkout, never from a linked worktree', () => {
+    // The claim against the real tree, which is the one no fixture can make: wherever
+    // this suite is run from — `main` in CI, a worktree per ticket here — the directory
+    // the walk starts at is a checkout whose `.git` is a directory. A `.git` *file* would
+    // mean it had stopped at a worktree and the siblings were out of reach again.
+    //
+    // A `.git` it cannot parse does not stop the walk either; it keeps climbing, which is
+    // why the second case lands in the same place as the first.
+    const orphan = claimOutDir('orphan');
+    writeFileSync(join(orphan, '.git'), 'gitdir: something nobody has invented yet\n');
+
+    for (const from of [undefined, orphan]) {
+      const base = checkoutRoot(from);
+      expect(statSync(join(base, '.git')).isDirectory(), base).toBe(true);
+    }
+  });
+});
+
+/**
+ * The other half of MUSE-79, and the half that is deliberately a command.
+ *
+ * 42 of the 52 worktrees present when the ticket was filed belonged to merged pull
+ * requests, each with its own `node_modules`. Nothing removes them, and nothing should
+ * remove them *automatically*: an agent's worktree is indistinguishable from an
+ * abandoned one between two tool calls, so the discriminator cannot be time. It is
+ * evidence — a merged pull request, a clean tree, and a tip commit that exists
+ * somewhere other than this directory.
+ *
+ * `verdict` is pure so that the rules are testable without a repository to delete, and
+ * every case below is one the sweep met on the box the ticket was filed from. The
+ * removal itself is `git worktree remove` **without** `--force`, so git re-checks the
+ * working tree and has the last word.
+ *
+ * Note what is *not* among its inputs: any relationship between the branch and `main`.
+ * This repository squash-merges, so a merged branch is never an ancestor of `main` and
+ * `git merge-base --is-ancestor` reported all 42 merged worktrees as unmerged — the trap
+ * the ticket was explicit about. Every commit below is unrelated to any branch, and the
+ * only one compared is the one the pull request itself recorded.
+ */
+describe('the worktree sweep removes a finished ticket and nothing else', () => {
+  const CLEAN = {
+    path: '/repo/.worktrees/muse-79',
+    branch: 'feature/muse-79',
+    head: 'a'.repeat(40),
+    locked: false,
+    dirty: false,
+    pushed: false,
+    main: false,
+  };
+  const MERGED = {
+    number: 70,
+    state: 'MERGED',
+    headRefName: 'feature/muse-79',
+    headRefOid: CLEAN.head,
+  };
+
+  it('removes a worktree whose pull request merged at this very commit', () => {
+    expect(verdict(CLEAN, [MERGED])).toMatchObject({ action: 'remove' });
+  });
+
+  it('keeps one with uncommitted or untracked work, whatever its pull request says', () => {
+    expect(verdict({ ...CLEAN, dirty: true }, [MERGED])).toMatchObject({ action: 'keep' });
+  });
+
+  it('keeps one whose pull request is still open', () => {
+    const open = { ...MERGED, number: 71, state: 'OPEN' };
+    expect(verdict(CLEAN, [open])).toMatchObject({ action: 'keep' });
+    // And an open one outranks a merged one on the same branch: a reopened ticket.
+    expect(verdict(CLEAN, [MERGED, open])).toMatchObject({ action: 'keep' });
+  });
+
+  it('keeps one with no pull request at all, which is what an in-progress ticket is', () => {
+    expect(verdict(CLEAN, [])).toMatchObject({ action: 'keep' });
+    expect(verdict(CLEAN, [{ ...MERGED, headRefName: 'feature/muse-80' }])).toMatchObject({
+      action: 'keep',
+    });
+  });
+
+  it('sends a merged worktree holding commits nothing else has to review, not removal', () => {
+    // Three of the five merged worktrees on the box this was written on: the branch was
+    // rebased before it merged, so the tip is in no pull request and on no remote. The
+    // content is almost certainly in `main` and nothing here can prove it, so the sweep
+    // says so instead of guessing — and `--remove` passes it over.
+    const rebased = { ...MERGED, headRefOid: 'b'.repeat(40) };
+    expect(verdict(CLEAN, [rebased])).toMatchObject({ action: 'review' });
+
+    // Unless the commits are on a remote, in which case deleting the directory loses
+    // nothing that can only be found in it.
+    expect(verdict({ ...CLEAN, pushed: true }, [rebased])).toMatchObject({ action: 'remove' });
+  });
+
+  it('keeps a detached HEAD and a locked worktree', () => {
+    expect(verdict({ ...CLEAN, branch: null }, [MERGED])).toMatchObject({ action: 'keep' });
+    expect(verdict({ ...CLEAN, locked: true }, [MERGED])).toMatchObject({ action: 'keep' });
+  });
+
+  it('keeps the checkout itself', () => {
+    expect(verdict({ ...CLEAN, main: true, branch: 'main' }, [MERGED])).toMatchObject({
+      action: 'keep',
+    });
+  });
+
+  it('is a command and is wired to nothing that runs on its own', () => {
+    // The acceptance criterion that is about *absence*: no schedule, no hook, no
+    // `globalSetup`. A sweep that ran by itself would eventually delete a worktree an
+    // agent was thinking in, and that is worse than the disk filling up.
+    const script = 'scripts/sweep-worktrees.mjs';
+    const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+    expect(manifest.scripts['worktrees:sweep']).toBe(`node ${script}`);
+
+    for (const file of ['test/helpers/clean-scratch.ts', 'vitest.config.ts']) {
+      expect(readFileSync(join(ROOT, file), 'utf8')).not.toContain('sweep-worktrees');
+    }
+    for (const workflow of readdirSync(join(ROOT, '.github/workflows'))) {
+      const yaml = readFileSync(join(ROOT, '.github/workflows', workflow), 'utf8');
+      expect(yaml, workflow).not.toContain('worktrees:sweep');
+      expect(yaml, workflow).not.toContain('sweep-worktrees');
+    }
   });
 });
 
