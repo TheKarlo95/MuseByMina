@@ -130,6 +130,9 @@ const VITEST_LEAKS = [
  * marker is the whole of the rule below: a scan for the *words* in a build log is what
  * `test/helpers/source-guard.ts` exists to argue against, and three shapes were measured
  * before this was written (see `buildErrorHeadline`).
+ *
+ * Anchored at the start of the line, which is only true of a line with its colour taken
+ * off — see the note on `FORCE_COLOR` in `buildErrorHeadline`.
  */
 const ASTRO_ERROR_LINE = /^(?:\d{2}:\d{2}:\d{2}\s+)?\[ERROR\]\s*(.*)$/;
 
@@ -168,9 +171,23 @@ const ASTRO_ERROR_CONTEXT = /^\s*(?:at\s|[╭╰│├┬─└┌]|Hint:|Locati
  * So: the marker line, plus the line after it when that line says something new. Nothing
  * is ever dropped — the full log still follows on the error — and when no `[ERROR]` line
  * is found this answers `''` and the headline stays exactly as it was.
+ *
+ * **Every line is stripped of colour first, and that is MUSE-47's lesson rather than a
+ * tidy-up.** Astro 7 switches to JSON log lines when it detects an agentic environment and
+ * writes the human banner otherwise, so the same failure arrives in two formats —
+ * deterministically, by where it ran. The first draft of this matched `[ERROR]` at the
+ * start of a line, passed every local run, and answered `''` on a CI runner, where the
+ * line really reads:
+ *
+ *     \x1b[31m\x1b[1m10:03:30\x1b[22m [ERROR] [muse-staging-guard]\x1b[39m An unhandled…
+ *
+ * Reproduce that locally by unsetting `CLAUDECODE`, `AI_AGENT` and `CLAUDE_CODE_*` **and**
+ * setting `FORCE_COLOR=1`: `kleur` turns colour off when stdout is not a TTY, which it
+ * never is under a test runner, so unsetting the markers alone gives a plain banner and
+ * reads as a clean reproduction.
  */
 export function buildErrorHeadline(output: string): string {
-  const lines = output.split('\n');
+  const lines = output.split('\n').map((line) => line.replace(ANSI, ''));
   const marker = lines.findIndex((line) => ASTRO_ERROR_LINE.test(line));
   if (marker === -1) return '';
 
