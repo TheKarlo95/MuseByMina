@@ -1,0 +1,26 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Blog from '../components/Blog.astro';
+import { BLOG_ROUTE } from '../lib/blog';
+import { getPage, getPosts } from '../lib/sanity';
+
+/**
+ * `minimum: 0` is the whole reason this page could be built now (MUSE-26): „nothing has
+ * been written" is a real state of this studio, and `Blog.astro` says so in words rather
+ * than rendering an empty list. The strict default would make an ordinary Tuesday a failed
+ * build.
+ *
+ * `now` is read once and handed to the reader rather than defaulted inside it, so this page
+ * and the detail pages are one answer to „which posts are published" — see
+ * `src/lib/sanity/queries.ts` on why there is only one query over `post`.
+ */
+const now = new Date();
+const [meta, posts] = await Promise.all([
+  getPage(BLOG_ROUTE),
+  getPosts({ minimum: 0, now }),
+]);
+---
+
+<BaseLayout locale="hr" title={meta.title.hr} description={meta.description.hr}>
+  <Blog locale="hr" posts={posts} />
+</BaseLayout>

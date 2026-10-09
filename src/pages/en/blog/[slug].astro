@@ -1,0 +1,60 @@
+---
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import PostPage from '../../../components/PostPage.astro';
+import {
+  assertPostSlugs,
+  postCoverUrl,
+  postMetaDescription,
+  postMetaTitle,
+  publishedIn,
+  publishedLocales,
+} from '../../../lib/blog';
+import { getPosts, getSiteSettings, readStaticPaths, type Post } from '../../../lib/sanity';
+
+/**
+ * **The English twin, and it deliberately does *not* generate the same slug set.**
+ *
+ * `/events/<slug>/`'s two templates assert that they build the same URLs, because HR and
+ * EN share slugs and both locales of an event always exist. A post is the one content type
+ * where that is false by design (MUSE-26): this generates a path only for a post
+ * `publishedIn('en')`, so a Croatian-only post has no page here and `/en/blog/<slug>/` is
+ * an ordinary 404 — reachable by nobody, because the index that would have linked it does
+ * not list it either. `src/lib/blog.ts` is the argument.
+ *
+ * Everything else is the Croatian template's, for its reasons.
+ */
+export async function getStaticPaths() {
+  // `readStaticPaths` for the Croatian template's reason — see the note on it in
+  // `src/lib/sanity/index.ts`.
+  return readStaticPaths(async () => {
+    const posts = await getPosts({ minimum: 0 });
+    assertPostSlugs(posts);
+    return posts
+      .filter((post) => publishedIn(post, 'en'))
+      .map((post) => ({ params: { slug: post.slug }, props: { post } }));
+  });
+}
+
+const { post } = Astro.props as { post: Post };
+
+/** The studio's name, from the same `siteSettings` the footer and the JSON-LD render. */
+const settings = await getSiteSettings();
+const text = post.text.en!;
+const description = postMetaDescription(text.excerpt);
+---
+
+<BaseLayout
+  locale="en"
+  title={postMetaTitle(text.title, settings.studioName)}
+  description={description}
+  localeTwins={publishedLocales(post)}
+  article={{
+    headline: text.title,
+    description,
+    datePublished: post.publishedAt,
+    authorName: post.author,
+    image: postCoverUrl(post),
+  }}
+>
+  <PostPage locale="en" post={post} studioName={settings.studioName} />
+</BaseLayout>

@@ -70,6 +70,12 @@ const FORMATTERS: Record<Locale, Intl.DateTimeFormat> = {
  * criterion would fail for a reason nobody would look for. So the zone is named here, once,
  * and it is the studio's.
  *
+ * `post.publishedAt` is the second one (MUSE-26), and it is the same rule arriving at a
+ * *date* rather than a time: a post published at half past midnight on the 14th in Ilica
+ * is `22:30Z` on the **13th**, so formatting it in UTC prints the wrong day — and slicing
+ * the first ten characters off the string, which is the tempting shortcut, is the same bug
+ * spelled shorter.
+ *
  * `Europe/Zagreb` rather than a fixed offset, because Croatia observes daylight saving and
  * a fixed `+02:00` would be an hour wrong for half the year — the same class of mistake
  * `src/lib/rebuild.ts` refuses to make when it promises Mina a duration instead of a clock

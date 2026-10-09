@@ -1,0 +1,277 @@
+---
+import { BLOG_COPY, postUrl, postsIn } from '../lib/blog';
+import { formatInstantDate } from '../lib/dates';
+import { localeUrl, type Locale } from '../lib/i18n';
+import type { Post } from '../lib/sanity';
+
+/**
+ * `/blog` — what has been written, or a page that says plainly that nothing has (MUSE-26).
+ *
+ * ---------------------------------------------------------------------------------
+ * **The empty state is the state this page ships in, so it was designed first.**
+ *
+ * There are no `post` documents in the dataset and nobody has written any. That is the
+ * whole reason this ticket was unblocked: `getPosts` supports `minimum: 0`, so a blog with
+ * nothing on it is a legitimate page rather than a broken one — *provided* it is honest
+ * about being empty. `src/lib/blog.ts` holds the copy and the four rules it is written
+ * against; the short version is that it says there is nothing, renders no list at all,
+ * offers the schedule and the contact page instead, and promises nothing about posts
+ * nobody has written.
+ *
+ * **No invented posts, anywhere**: not in `content/seed.ndjson`, not as an example, not „to
+ * show the layout". MUSE-36 published thirteen invented classes naming two instructors who
+ * do not work at the studio and it was live for the life of the project.
+ *
+ * ## The list is this locale's, and that is the whole of MUSE-26's hardest question
+ *
+ * `postsIn` is the one place „which posts does this index show" is decided, and it reads
+ * the same fact the URL, the `hreflang` cluster and the switcher read: a post is published
+ * in the locales its text exists in. So a Croatian-only post is simply **not here** on
+ * `/en/blog/` — not listed, not marked, not linked. `src/lib/blog.ts` argues why hiding
+ * rather than marking, and what marking would have cost.
+ *
+ * It is done here rather than in the page wrapper on purpose: both wrappers are thin and
+ * the rule has one home, so the Croatian and English indexes cannot come to disagree about
+ * what „published" means.
+ *
+ * ## The card
+ *
+ * **The title is the link, and the card is not.** A whole-card anchor would give the link
+ * an accessible name made of the title, the date and the summary — a sentence a screen
+ * reader reads out before the reader can decide whether to follow it — and it would nest
+ * the heading inside interactive content. The cost is that the cover image is not
+ * clickable, which is the smaller loss.
+ *
+ * **The date is a `<time datetime>` beside the one a human reads**, formatted in the
+ * studio's zone (§10, and the note on `STUDIO_TIME_ZONE`). A post published just after
+ * midnight in Ilica is the previous day in UTC, so the machine-readable instant and the
+ * printed date are deliberately two renderings of one value rather than two values.
+ * ---------------------------------------------------------------------------------
+ */
+interface Props {
+  locale: Locale;
+  /**
+   * Every published post, from `getPosts({ minimum: 0, now })`. No default.
+   *
+   * A prop with no default for `Schedule.astro`'s reason (MUSE-36): a default is what makes
+   * it possible to render a page before anyone has asked the studio what is on it. It is
+   * the *unfiltered* list — `postsIn` below is what makes it this locale's.
+   */
+  posts: Post[];
+}
+
+const { locale, posts } = Astro.props;
+const t = BLOG_COPY[locale];
+const listed = postsIn(posts, locale);
+---
+
+<section class="hero">
+  <p class="eyebrow">{t.eyebrow}</p>
+  <h1 class="display">{t.heading}</h1>
+  <p class="lede">{t.lede}</p>
+</section>
+
+{
+  listed.length > 0 ? (
+    <section class="band">
+      <div class="wrap">
+        <h2 class="sectionH">{t.latest}</h2>
+        <ul class="list">
+          {listed.map((post) => (
+            <li class="item">
+              <article class="card">
+                <p class="when">
+                  <time datetime={post.publishedAt}>
+                    {formatInstantDate(post.publishedAt, locale)}
+                  </time>
+                </p>
+                <h3 class="name">
+                  <a class="nameLink" href={postUrl(post.slug, locale)}>
+                    {post.text[locale]!.title}
+                  </a>
+                </h3>
+                <p class="sum">{post.text[locale]!.excerpt}</p>
+              </article>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  ) : (
+    <section class="band">
+      <div class="wrap">
+        <h2 class="emptyH">{t.emptyHeading}</h2>
+        <p class="emptyP">{t.emptyBody}</p>
+        <p class="exits">
+          <a class="exit" href={localeUrl('/schedule', locale)}>{t.toSchedule}</a>
+          <a class="exit" href={localeUrl('/contact', locale)}>{t.toContact}</a>
+        </p>
+      </div>
+    </section>
+  )
+}
+
+<style>
+  /* §3 section rhythm: canvas, then one contrasting surface. Not alternating. */
+  .hero {
+    max-width: 1280px;
+    margin-inline: auto;
+    padding: var(--space-8) var(--space-5) var(--space-6);
+  }
+  .band {
+    padding: var(--space-7) var(--space-5) var(--space-8);
+    background: var(--surface-sunken);
+  }
+  @media (min-width: 768px) {
+    .hero {
+      padding: var(--space-10) var(--space-7) var(--space-7);
+    }
+    .band {
+      padding: var(--space-8) var(--space-7) var(--space-10);
+    }
+  }
+  .wrap {
+    max-width: 1280px;
+    margin-inline: auto;
+  }
+
+  .eyebrow {
+    font-family: var(--font-label);
+    font-weight: 300;
+    font-size: 0.75rem;
+    letter-spacing: 0.32em;
+    /* Č Ć Ž Š carry marks above the cap line — 1.4 is the floor in Croatian (§4.6). */
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  /* Cormorant, so never below 26px — `clamp()`'s first value is the floor (§4). */
+  .display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.75rem, 8vw, 5.5rem);
+    line-height: 0.96;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin-block-start: var(--space-4);
+  }
+
+  .lede {
+    margin-block-start: var(--space-5);
+    font-size: 1.125rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+    /* §5: a measure rather than a width, so Croatian — 20–25% longer than English —
+       reflows instead of being clipped (§10). */
+    max-width: 62ch;
+  }
+
+  .sectionH {
+    font-family: var(--font-label);
+    font-weight: 400;
+    font-size: 0.75rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  /*
+    One column, always. Unlike `/events`, which goes to three: a post is a title and two
+    sentences of prose, and prose read in a 3-up grid is three narrow measures beside each
+    other. Capped at the §5 prose measure for the same reason the article itself is.
+  */
+  .list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-6);
+    margin-block-start: var(--space-6);
+    list-style: none;
+  }
+  .item {
+    min-width: 0;
+  }
+  .card {
+    /* No pixel floor: a long Croatian title has to wrap rather than widen the page. */
+    min-width: 0;
+    padding-block-start: var(--space-5);
+    border-block-start: 1px solid var(--line);
+  }
+
+  .when {
+    font-family: var(--font-label);
+    font-weight: 400;
+    font-size: 0.75rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  /*
+    display-s, clamped at Cormorant's 26px floor — the smallest display size there is (§4).
+    `text-wrap: balance` rather than `pretty`, because a two-line title reads better evened
+    out than with a short last line.
+  */
+  .name {
+    margin-block-start: var(--space-3);
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(1.625rem, 3vw, 2.125rem);
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    /* A title can be one long unbroken word in Croatian; it wraps rather than overflows. */
+    overflow-wrap: anywhere;
+  }
+  .nameLink {
+    color: inherit;
+    text-underline-offset: 4px;
+    text-decoration-thickness: 1px;
+  }
+
+  .sum {
+    margin-block-start: var(--space-4);
+    font-size: 1.0625rem;
+    line-height: 1.7;
+    color: var(--text-muted);
+    /* §5: prose measures around 68ch. */
+    max-width: 68ch;
+  }
+
+  /* --- the empty state --- */
+  .emptyH {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(1.625rem, 3vw, 2.125rem);
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .emptyP {
+    margin-block-start: var(--space-4);
+    font-size: 1.0625rem;
+    line-height: 1.7;
+    color: var(--text-muted);
+  }
+  .exits {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-5);
+    margin-block-start: var(--space-6);
+  }
+  .exit {
+    display: inline-flex;
+    align-items: center;
+    /* 44px is the §11 touch target. */
+    min-height: 44px;
+    font-family: var(--font-label);
+    font-size: 0.8125rem;
+    letter-spacing: 0.2em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+    text-underline-offset: 4px;
+  }
+</style>
