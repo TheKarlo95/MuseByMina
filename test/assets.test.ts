@@ -42,8 +42,19 @@ import {
 /** How many faces `src/styles/fonts.css` declares: three families, latin and latin-ext. */
 const FACE_COUNT = 6;
 
-/** How many of them the layout preloads: the display and body subsets used above the fold. */
-const PRELOAD_COUNT = 2;
+/**
+ * How many of them a page may preload.
+ *
+ * A range rather than a count, because **the set is per page and per locale** (MUSE-74):
+ * an English page paints in plain ASCII and needs the three `latin` subsets, a Croatian
+ * one needs five or six because every Croatian diacritic lives in `latin-ext`. Which
+ * faces each page asks for is not a question this file can answer — it reads `dist` — so
+ * `test/fonts.test.ts` owns the equality, in a browser, with the preload tags stripped
+ * out of the document first. What is checked here is what MUSE-8 is about and what only a
+ * static read of the output can see: every href a page does emit is base-joined and names
+ * a file that exists.
+ */
+const PRELOAD_RANGE = { min: 3, max: FACE_COUNT };
 
 let pages: Build;
 let apex: Build;
@@ -95,8 +106,13 @@ function fontPreloads(build: Build, page: string): string[] {
  *     fails this on the sub-path target and fails the file check on the apex one.
  *   - it resolves to a file that exists, the way the host resolves it.
  *
- * Plus: every page agrees. A layout that emitted the right href on one route and a
- * stale one on another would otherwise pass on the strength of the first page read.
+ * Plus: **every page**, each on its own hrefs. This used to read the first page's list
+ * and assert the other fourteen matched it, which was the right shape while the list was
+ * a fixed pair and is the wrong one now that it is derived per page and per locale
+ * (MUSE-74) — it would have demanded the bug back. Every page is still read, because a
+ * layout that emitted a correct href on one route and a stale one on another must not
+ * pass on the strength of the first page: the properties below are just asserted of each
+ * page's own set rather than of one shared list.
  */
 function expectFontPreloads(build: Build): void {
   const prefix = basePrefix(build);
@@ -104,21 +120,27 @@ function expectFontPreloads(build: Build): void {
   const htmlFiles = build.htmlFiles();
   expect(htmlFiles.length, 'the build produced no HTML').toBeGreaterThan(0);
 
-  const expected = fontPreloads(build, htmlFiles[0]!);
-  expect(expected, `font preloads in ${htmlFiles[0]}`).toHaveLength(PRELOAD_COUNT);
-
   for (const page of htmlFiles) {
-    expect(fontPreloads(build, page), `font preloads in ${page}`).toEqual(expected);
-  }
+    const hrefs = fontPreloads(build, page);
+    const where = `font preloads in ${page}`;
 
-  for (const href of expected) {
-    expect(href.startsWith(`${prefix}/`), `${href} is not under ${prefix}/`).toBe(true);
+    // Both ends, so "found no bad hrefs" cannot quietly mean "found no hrefs". The floor
+    // is the three `latin` subsets every page of this site paints its shell with; the
+    // ceiling is the number of faces `fonts.css` declares, above which a page is either
+    // preloading a face twice or preloading a file that is not one of ours.
+    expect(hrefs.length, where).toBeGreaterThanOrEqual(PRELOAD_RANGE.min);
+    expect(hrefs.length, where).toBeLessThanOrEqual(PRELOAD_RANGE.max);
+    expect(new Set(hrefs).size, `${where} repeats an href`).toBe(hrefs.length);
 
-    const file = assetFile(build, href);
-    expect(
-      file !== undefined && build.isFile(file),
-      `${href} does not resolve to a file in the build output`,
-    ).toBe(true);
+    for (const href of hrefs) {
+      expect(href.startsWith(`${prefix}/`), `${href} is not under ${prefix}/`).toBe(true);
+
+      const file = assetFile(build, href);
+      expect(
+        file !== undefined && build.isFile(file),
+        `${href} does not resolve to a file in the build output`,
+      ).toBe(true);
+    }
   }
 }
 
@@ -166,9 +188,7 @@ describe('MUSE-8 AC3: every referenced asset exists in the build output', () => 
 
   for (const [name, build] of TARGETS) {
     it(`resolves every rel="preload" href to a real file (${name})`, () => {
-      expect(unresolved(build(), (ref) => ref.source.includes('rel="preload"'))).toEqual(
-        [],
-      );
+      expect(unresolved(build(), (ref) => ref.source.includes('rel="preload"'))).toEqual([]);
     });
 
     /**
@@ -179,19 +199,26 @@ describe('MUSE-8 AC3: every referenced asset exists in the build output', () => 
      * embedded map.
      */
     it(`resolves every other referenced subresource to a real file (${name})`, () => {
-      expect(unresolved(build(), (ref) => !ref.source.includes('rel="preload"'))).toEqual(
-        [],
-      );
+      expect(unresolved(build(), (ref) => !ref.source.includes('rel="preload"'))).toEqual([]);
     });
   }
 
   it('finds preloads to check, so the checks above cannot pass vacuously', () => {
-    // Deleting the tags would satisfy "every preload resolves" trivially. Two per page.
-    const preloads = pages
+    // Deleting the tags would satisfy "every preload resolves" trivially. At least the
+    // three `latin` subsets on every page — the count itself is per page now (MUSE-74),
+    // so the floor is stated per page rather than multiplied by a fixed pair.
+    const perPage = pages
       .htmlFiles()
-      .flatMap((page) => assetRefs(pages.read(page)))
-      .filter((ref) => ref.source.includes('rel="preload"'));
-    expect(preloads).toHaveLength(PRELOAD_COUNT * pages.htmlFiles().length);
+      .map(
+        (page) =>
+          assetRefs(pages.read(page)).filter((ref) => ref.source.includes('rel="preload"'))
+            .length,
+      );
+    expect(perPage.length, 'the build produced no HTML').toBeGreaterThan(0);
+    expect(
+      Math.min(...perPage),
+      'a page preloads fewer faces than the shell paints with',
+    ).toBeGreaterThanOrEqual(PRELOAD_RANGE.min);
   });
 });
 

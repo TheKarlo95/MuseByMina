@@ -54,8 +54,8 @@ import { servePages, type Host } from './helpers/serve';
  * character class excluded whitespace, quotes and backslashes but not `ESC`, and Astro's
  * human-readable banner is colour-coded — so the base came out `/MuseByMina/%1B[31m/`,
  * `astro dev` answered every page with the error page, and **no assertion below could
- * tell**: the error page loads the same stylesheet, declares the same six faces and
- * carries the same two preloads. "Which faces did the CSS engine ask for" gave the right
+ * tell**: the error page loads the same stylesheet, declares the same six faces and, at
+ * the time, carried the same two preloads. "Which faces did the CSS engine ask for" gave the right
  * answer about the wrong document, in the one suite whose whole reason to exist is seeing
  * what `dist` cannot.
  *
@@ -82,9 +82,6 @@ import { servePages, type Host } from './helpers/serve';
 
 /** Every face `src/styles/fonts.css` declares: three families, latin and latin-ext. */
 const FACE_COUNT = 6;
-
-/** How many the layout preloads — the subsets first paint needs. */
-const PRELOAD_COUNT = 2;
 
 /** A page with body text, display headings and the numerals MUSE-14 is about. */
 const CONTENT_ROUTE = 'schedule/';
@@ -199,7 +196,22 @@ async function preloadedFaces(env: Environment, route: string): Promise<string[]
   const { html } = await fetchMeasuredPage(pageUrl, env.name);
   return linkHrefs(html, 'preload')
     .filter((href) => href.endsWith('.woff2'))
-    .map((href) => new URL(href, pageUrl).href);
+    .map((href) => new URL(href, pageUrl).href)
+    .sort();
+}
+
+/**
+ * A face URL as a person reads it: `cormorant-garamond-latin-ext`.
+ *
+ * The emitted filename carries a content hash, and a failure that printed it would be
+ * naming something nobody can look up — the point of a message here is that a reader can
+ * go straight to the `@font-face` block and the subset's `unicode-range`. The hash is
+ * stripped rather than the stem matched against a list, so a seventh subset arriving
+ * tomorrow is named correctly without this function being told about it.
+ */
+function faceName(url: string): string {
+  const file = new URL(url).pathname.split('/').pop() ?? url;
+  return file.replace(/(\.[A-Za-z0-9_-]+)?\.woff2$/, '');
 }
 
 /**
@@ -219,10 +231,7 @@ async function preloadedFaces(env: Environment, route: string): Promise<string[]
  * same reason `test/numerals.test.ts` screenshots glyphs instead of reading
  * `getComputedStyle`: a model of the engine passes whenever the model is wrong.
  */
-async function facesNeededWithoutPreloads(
-  env: Environment,
-  route: string,
-): Promise<string[]> {
+async function facesNeededWithoutPreloads(env: Environment, route: string): Promise<string[]> {
   const requested = new Set<string>();
 
   // Opened through `scripts/browser-checks.mjs` (MUSE-48), and this is the suite the
@@ -318,7 +327,7 @@ describe.each(ENVIRONMENTS.map((name, index) => ({ name, index })))(
     });
 
     /**
-     * AC2 — a preloaded face must be one the page would have fetched anyway.
+     * AC2 — **the faces a page preloads are exactly the faces it asks for.**
      *
      * Stated behaviourally rather than as "the preload href equals some `@font-face`
      * src", because that weaker form is a subset test against all six declared faces,
@@ -329,36 +338,59 @@ describe.each(ENVIRONMENTS.map((name, index) => ({ name, index })))(
      * every URL still resolving and every file still present. That mutation was run
      * against the subset version of this test and the whole suite stayed green.
      *
-     * Pinning the two filenames would also catch it, and is what this replaced: the
-     * hashed names are unpredictable from outside the build, so a literal list is a
+     * Pinning the filenames would also catch it, and is what that replaced: the hashed
+     * names are unpredictable from outside the build, so a literal list is a
      * transcription of the output rather than a statement about it.
+     *
+     * ## Both directions, which is MUSE-74
+     *
+     * This asserted `preloaded ⊆ needed` and nothing else for its whole life, and said
+     * so in its own name: *"preloads only faces each page actually needs"*. The two
+     * preloads that existed were both faces every page needs, so it was green — while
+     * four of the six faces were preloaded on no page at all, and **every Croatian
+     * diacritic lives in one of them**. `font-display: swap` then paints the latin half
+     * of a word in Cormorant and the `đ` from the system fallback until the ext subset
+     * arrives: a different typeface mid-word, at 96px, in „Dođi na probni sat".
+     *
+     * Incompleteness was the direction the matching rule could not reach — this board's
+     * most repeated defect, and MUSE-62 fixed the other half of *this file* a day
+     * earlier. So the comparison is an equality now, and the failure names the page and
+     * the face in whichever direction it goes:
+     *
+     *   - a face the page requests and does not preload — the ticket's defect;
+     *   - a face it preloads and does not request — MUSE-8's and MUSE-35's waste, bytes
+     *     paid for and never painted with, and a preload that outbids something the page
+     *     does need.
      *
      * ## Every route, not a chosen one
      *
-     * The preloads live in `BaseLayout`, so they are on every page, and the invariant
-     * is therefore about every page. Picking one route would also mean picking
-     * correctly, which is harder than it looks and silently decides how much this test
-     * is worth: on `/schedule/` the Croatian class titles pull *both* halves of Inter
-     * and Jost in, so the needed set is wide enough to contain the wrong subset and the
-     * mutation above survives. The Croatian homepage is no better — its body copy has
-     * enough diacritics to need `inter-400-600-latin-ext` too. It is `/en/`, whose copy
-     * is plain ASCII, that pins Inter down to its latin subset.
+     * The set is per page now (`src/lib/fonts.ts`), so "every page" is no longer just
+     * thoroughness — a single route could not see the rule at all. It mattered before
+     * this too, and in a way worth keeping on the record: picking one route means picking
+     * correctly, and on `/schedule/` the Croatian copy pulls *both* halves of Inter and
+     * Jost in, so the needed set is wide enough to contain the wrong subset and the
+     * mutation above survives. It is `/en/`, whose copy is plain ASCII, that pins Inter
+     * down to its latin subset.
      *
-     * Rather than encode that reasoning in a constant that the next content change can
-     * quietly invalidate, every route is checked. The narrowest page is then always in
-     * the set, whichever page that happens to be this month.
+     * `404.html` is not in `routes` — the host serves it in place of an unknown path
+     * rather than at a URL of its own, so there is nothing to ask for. It is the one page
+     * whose set is not measured here, and `src/lib/fonts.ts` is arranged so that it needs
+     * no entry: an unlisted route gets the latin-ext preloads, which is the right answer
+     * for a page that renders both languages at once.
      */
-    it('preloads only faces each page actually needs', async () => {
+    it('preloads exactly the faces each page asks for, and no others', async () => {
       expect(routes.length, 'no routes to check').toBeGreaterThan(4);
 
       const problems: string[] = [];
+      const sets = new Set<string>();
 
       for (const route of routes) {
         const preloaded = await preloadedFaces(env(), route);
-        if (preloaded.length !== PRELOAD_COUNT) {
-          problems.push(`${route}: ${preloaded.length} preloads, expected ${PRELOAD_COUNT}`);
+        if (preloaded.length === 0) {
+          problems.push(`${route}: preloads no fonts at all`);
           continue;
         }
+        sets.add(preloaded.map(faceName).join(' '));
 
         const needed = await facesNeededWithoutPreloads(env(), route);
         if (needed.length === 0) {
@@ -366,15 +398,33 @@ describe.each(ENVIRONMENTS.map((name, index) => ({ name, index })))(
           continue;
         }
 
+        const asks = `it asks for ${needed.map(faceName).sort().join(', ')}`;
+        const sends = `it preloads ${preloaded.map(faceName).join(', ')}`;
+
         for (const url of preloaded.filter((u) => !needed.includes(u))) {
           problems.push(
-            `${route}: preloads ${url}, which it never requests ` +
-              `(it asks for ${needed.join(', ')})`,
+            `${route}: preloads ${faceName(url)}, which it never requests (${asks})`,
+          );
+        }
+        for (const url of needed.filter((u) => !preloaded.includes(u))) {
+          problems.push(
+            `${route}: asks for ${faceName(url)} and does not preload it (${sends})`,
           );
         }
       }
 
       expect(problems, env().name).toEqual([]);
+
+      // The list is per page, and this is the cheapest statement of that (MUSE-74). The
+      // equality above already refuses any one fixed list — three faces fails on the
+      // Croatian pages, six fails on the English ones — so this cannot fail on its own
+      // today. It is here to say out loud what shape the answer has, so that a future
+      // change to `preloadFaces` that happens to be uniform is read as the regression it
+      // would be rather than as a simplification.
+      expect(
+        [...sets].length,
+        `${env().name}: every page preloads the same faces`,
+      ).toBeGreaterThan(1);
     });
   },
 );
@@ -418,9 +468,7 @@ describe('MUSE-35 AC2: no stylesheet hard-codes a deploy-root asset path', () =>
   }
 
   it('scans a source tree that is actually there', () => {
-    expect(sourceFiles().length, 'no stylesheets or components scanned').toBeGreaterThan(
-      15,
-    );
+    expect(sourceFiles().length, 'no stylesheets or components scanned').toBeGreaterThan(15);
     expect(sourceUrls().length, 'no url() seen anywhere under src/').toBeGreaterThan(0);
   });
 
