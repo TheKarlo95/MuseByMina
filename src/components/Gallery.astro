@@ -1,0 +1,769 @@
+---
+import {
+  EAGER_TILES,
+  FULL_SIZES,
+  FULL_WIDTHS,
+  GALLERY_COPY,
+  GRID_SIZES,
+  GRID_WIDTHS,
+  galleryPosition,
+} from '../lib/gallery';
+import { localeUrl, type Locale } from '../lib/i18n';
+import {
+  imageFocus,
+  imageSize,
+  imageSrc,
+  imageSrcSet,
+  type GalleryImage,
+} from '../lib/sanity';
+
+/**
+ * `/gallery` — the photographs, a lightbox, and a page that says plainly there are none
+ * (MUSE-25).
+ *
+ * =================================================================================
+ * ## 1. The empty state is the shipped state, and this page is the honest hard case
+ *
+ * No photography of this studio exists. `src/lib/gallery.ts` carries the full argument;
+ * the part that is this file's is what the markup does about it:
+ *
+ *   - **no grid, no section heading and no lede** when `photographs` is empty. The lede is
+ *     the one thing this page withholds that `/events` does not, and the reason is the
+ *     ticket's own: an events page with no events still has a subject, a gallery with no
+ *     photographs does not, so a lede here would be a sentence describing pictures that do
+ *     not exist;
+ *   - **no filler.** No placeholder tiles, no decorative frames, no stock imagery. A grid
+ *     of grey squares is MUSE-36's invented schedule with the words taken out;
+ *   - **somewhere else to go** — the timetable, which is what the studio actually runs, and
+ *     the contact page.
+ *
+ * ## 2. The lightbox: a native `<dialog>`, opened by an inline script
+ *
+ * The ticket's criteria are arrow keys, Escape, **focus trapped inside and returned to the
+ * thumbnail it opened from**, over a plum-ink 96% backdrop in both themes — and the built
+ * output contains zero `.js` files (`test/nojs.test.ts`), so whatever mechanism this is has
+ * to be CSS, or markup, or an inline `<script>`. Three were available. The choice is
+ * `showModal()` and the reason is one word: **inertness.**
+ *
+ *   - **`:target`** is the pure-CSS construction and it fails the criteria rather than
+ *     approximating them. It cannot trap focus at all — every link, every nav item and
+ *     every other tile behind the overlay stays in the tab order and in the accessibility
+ *     tree — it cannot bind an arrow key, and it writes to session history: browsing twelve
+ *     photographs leaves twelve entries, so Back stops meaning „the page I came from" on
+ *     the one page a visitor is most likely to arrive at from a search result. A gallery
+ *     whose Back button is spent is worse than one with no enlargement.
+ *   - **`popover`** is tempting because `popovertarget` needs no script at all: it opens,
+ *     Escape light-dismisses, and focus returns to the invoker, all from the platform. But
+ *     `popover="auto"` **does not make the rest of the document inert** — it is explicitly
+ *     specified not to — so Tab walks straight out of the „modal" into the page behind it.
+ *     That is the one criterion this ticket singles out as the thing modals get wrong, and
+ *     it would be wrong in the quietest possible way: looks modal, reads modal, is not.
+ *   - **`<dialog>` + `showModal()`** makes every other element in the document inert by
+ *     specification. Tab cycles inside the dialog because there is nowhere else to go, not
+ *     because a keydown handler counted the focusables and wrapped the index — and a
+ *     hand-rolled trap is a loop that is wrong the day somebody adds a control, or the day
+ *     a browser changes what is focusable. Escape fires `cancel` and closes. Closing
+ *     **returns focus to the element that was focused when `showModal()` was called**,
+ *     which is the thumbnail, from the platform. Four of the ticket's criteria, none of
+ *     them our arithmetic.
+ *
+ * The script adds exactly what the platform does not have an opinion about: which
+ * photograph is showing, the arrow keys, the counter, and click-to-dismiss.
+ *
+ * ### What happens with JavaScript off
+ *
+ * **The grid is the gallery, and the tile is a link to the photograph.** Every picture is
+ * on the page, at the size the grid paints it, with its alt text, with no mechanism
+ * involved. Each tile is an `<a href>` pointing at that photograph's own 1200w URL on
+ * Sanity's CDN, so activating it opens the picture in the browser's own image view — which
+ * pans, zooms, is keyboard-operable and has a working Back button. The script
+ * `preventDefault`s a plain left-click or Enter and opens the dialog instead; a
+ * middle-click or ⌘/Ctrl-click is deliberately left alone, so „open the photograph in a new
+ * tab" keeps working (MUSE-33's case).
+ *
+ * That is a single mechanism of ours with the platform underneath it, which is the
+ * property being bought. The rejected alternative was a `:target` panel *beneath* the
+ * dialog so that a no-script visitor got a lightbox too — and it is rejected for MUSE-38's
+ * reason: two individually-correct mechanisms answering one question between them is how
+ * that defect happened, `npm run a11y` runs with scripting on so only one of the two would
+ * ever be audited, and the unaudited one would be the one that cannot trap focus. Offering
+ * a no-script visitor a half-modal is offering them this ticket's own failure mode.
+ *
+ * The cost, stated: a no-script visitor gets no counter, no arrow navigation and no
+ * in-page enlargement, and the `<dialog>`'s markup — ~6 KB of `srcset` on a twelve-picture
+ * page — is weight they never use. A static site cannot render that conditionally.
+ *
+ * ### Why the frames are all here, and all `hidden`
+ *
+ * One dialog holding one `<figure>` per photograph, rather than one dialog whose `src` the
+ * script rewrites. Rewriting means the responsive URL ladder exists twice — once in
+ * `imageSrcSet` and once in JavaScript — and the copy in JavaScript is the one no test can
+ * see. Holding them all means the index is a `hidden` toggle and the URLs stay in the read
+ * path where `test/projections.test.ts` already runs them.
+ *
+ * `hidden` is load-bearing beyond display: a `loading="lazy"` image inside a
+ * `display: none` subtree has no box, so it never intersects the viewport and is **never
+ * fetched**. A closed dialog therefore costs zero bytes, and only the photograph being
+ * looked at is downloaded. The script primes the two neighbours on each move — it clears
+ * `loading="lazy"` rather than showing them — so an arrow press paints from cache instead
+ * of starting a request.
+ *
+ * ## 3. The ratio is CSS's and the width is the CDN's (§9 rule 2)
+ *
+ * `src/lib/sanity/images.ts` has the long argument. Here it means the tile is a square
+ * frame with `aspect-ratio: 1` in the stylesheet — which is render-blocking, so the box is
+ * reserved before a single photograph arrives and the grid cannot reflow as they load —
+ * with `object-fit: cover` and `object-position` on the hotspot. The lightbox frame is the
+ * opposite: the photograph's own ratio, so its `width`/`height` attributes come from
+ * `imageSize` and the box is reserved from the file's real dimensions.
+ *
+ * **The design system's two sections disagree about the grid and §9 wins.** §7.4 says
+ * „mixed aspect ratios"; §9 rule 4 lists `1:1` as the gallery ratio, the Studio's own field
+ * description promises Mina her upload is cropped to 1:1, and the ticket says „images are
+ * 1:1 in the grid; the lightbox shows the original ratio". Three to one, and the one is the
+ * only place in either document where a masonry layout is implied — with no column
+ * algorithm, no gutter behaviour and no ordering rule to go with it. Noted rather than
+ * silently resolved: if mixed ratios are wanted, that is a design decision with a layout
+ * attached and it needs the hotspot story re-thought, because a hotspot is what makes one
+ * upload survive four crops.
+ * =================================================================================
+ */
+interface Props {
+  locale: Locale;
+  /**
+   * The photographs, from `getGallery({ minimum: 0 })`. **No default.**
+   *
+   * `Schedule.astro`'s rule (MUSE-36): a default is what makes it possible to render a page
+   * before anybody has asked the studio what is on it. An empty array is a legitimate value
+   * and is the value this page ships with; what is not legitimate is this component having
+   * an opinion about what the dataset contains.
+   */
+  photographs: GalleryImage[];
+}
+
+const { locale, photographs } = Astro.props;
+const t = GALLERY_COPY[locale];
+
+/**
+ * Every URL and every box, resolved once per photograph.
+ *
+ * In the frontmatter rather than inline in the markup so that the grid tile and the
+ * lightbox frame for one photograph are visibly two renderings of one `ImageRef` — and so
+ * that `alt` is read from the dataset exactly once per surface. An `alt` resolved twice is
+ * an `alt` that can be resolved differently.
+ */
+const tiles = photographs.map((photograph, index) => {
+  const ref = photograph.image;
+  return {
+    index,
+    alt: ref.alt[locale],
+    caption: photograph.caption?.[locale],
+    focus: imageFocus(ref),
+    // The middle rung is the `src`: the fallback for a browser that ignores `srcset`, and
+    // never the largest file in the set.
+    thumb: imageSrc(ref, { width: GRID_WIDTHS[1]! }),
+    thumbSet: imageSrcSet(ref, GRID_WIDTHS),
+    full: imageSrc(ref, { width: FULL_WIDTHS[1]! }),
+    fullSet: imageSrcSet(ref, FULL_WIDTHS),
+    // From the widest rung, so the declared box is the one the largest file really has —
+    // `imageSize` clamps to the asset, so it cannot promise pixels the upload lacks.
+    box: imageSize(ref, { width: FULL_WIDTHS[FULL_WIDTHS.length - 1]! }),
+  };
+});
+---
+
+<section class="hero">
+  <p class="eyebrow">{t.eyebrow}</p>
+  <h1 class="display">{t.heading}</h1>
+  {/* Only beside a populated grid — see the note at the top of this file. */}
+  {tiles.length > 0 && <p class="lede">{t.lede}</p>}
+</section>
+
+{
+  tiles.length > 0 ? (
+    <section class="band">
+      <div class="wrap">
+        <h2 class="sectionH">{t.photographs}</h2>
+        <ul class="grid">
+          {tiles.map((tile) => (
+            <li class="cell">
+              {/*
+                A link, not a button, and the href is the photograph. That is what makes the
+                no-script state a working gallery rather than a dead affordance — see „What
+                happens with JavaScript off" above. The accessible name is the `alt`, so
+                there is deliberately no `aria-label` here: one would override it and
+                announce „Enlarge" twelve times in place of twelve descriptions.
+              */}
+              <a class="tile" href={tile.full} data-tile={tile.index}>
+                <img
+                  src={tile.thumb}
+                  srcset={tile.thumbSet}
+                  sizes={GRID_SIZES}
+                  alt={tile.alt}
+                  loading={tile.index < EAGER_TILES ? 'eager' : 'lazy'}
+                  decoding="async"
+                  style={`object-position: ${tile.focus.x}% ${tile.focus.y}%`}
+                />
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  ) : (
+    <section class="band">
+      <div class="wrap">
+        <h2 class="emptyH">{t.emptyHeading}</h2>
+        <p class="emptyP">{t.emptyBody}</p>
+        <p class="exits">
+          <a class="exit" href={localeUrl('/schedule', locale)}>
+            {t.toSchedule}
+          </a>
+          <a class="exit" href={localeUrl('/contact', locale)}>
+            {t.toContact}
+          </a>
+        </p>
+      </div>
+    </section>
+  )
+}
+
+{
+  /*
+    The lightbox. Rendered only when there is something to enlarge: an empty `<dialog>`
+    is markup nothing can open, and `data-lightbox` is what the script looks for, so an
+    empty gallery runs none of the behaviour below.
+
+    Control order is DOM order and DOM order is focus order. `showModal()` focuses the
+    first tabbable child, so Close is first: it is the one control whose effect a visitor
+    who pressed Enter by reflex already wanted, and it is where every other modal on the
+    web puts initial focus.
+  */
+  tiles.length > 0 && (
+    <dialog class="lightbox" data-lightbox aria-label={t.lightbox}>
+      <button class="close" type="button" data-close aria-label={t.close}>
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
+      </button>
+
+      <div class="stage">
+        {tiles.map((tile) => (
+          <figure class="frame" data-frame={tile.index} hidden>
+            <img
+              src={tile.full}
+              srcset={tile.fullSet}
+              sizes={FULL_SIZES}
+              alt={tile.alt}
+              width={tile.box.width}
+              height={tile.box.height}
+              loading="lazy"
+              decoding="async"
+            />
+            {tile.caption !== undefined && <figcaption class="caption">{tile.caption}</figcaption>}
+          </figure>
+        ))}
+      </div>
+
+      <div class="controls">
+        <button class="step" type="button" data-prev aria-label={t.previous}>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M14 5l-7 7 7 7" />
+          </svg>
+        </button>
+        {/*
+          `role="status"` so a move is announced. The visible half is the counter §7.4 asks
+          for; the hidden half is the new photograph's own description, because a reader
+          who hears „3 / 12" and nothing else has been told their position and not what
+          they are looking at. Both are set by the script, and the figures are lining and
+          tabular from the document — this component must not redeclare
+          `font-variant-numeric` to get them (MUSE-14).
+        */}
+        <p class="counter" role="status">
+          <span data-count>{galleryPosition(0, tiles.length)}</span>
+          <span class="srOnly" data-described></span>
+        </p>
+        <button class="step" type="button" data-next aria-label={t.next}>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M10 5l7 7-7 7" />
+          </svg>
+        </button>
+      </div>
+    </dialog>
+  )
+}
+
+<style>
+  /* §3 section rhythm: canvas, then one contrasting surface. Not alternating. */
+  .hero {
+    max-width: 1280px;
+    margin-inline: auto;
+    padding: var(--space-8) var(--space-5) var(--space-6);
+  }
+  .band {
+    padding: var(--space-7) var(--space-5) var(--space-8);
+    background: var(--surface-sunken);
+  }
+  @media (min-width: 768px) {
+    .hero {
+      padding: var(--space-10) var(--space-7) var(--space-7);
+    }
+    .band {
+      padding: var(--space-8) var(--space-7) var(--space-10);
+    }
+  }
+  .wrap {
+    max-width: 1280px;
+    margin-inline: auto;
+  }
+
+  .eyebrow {
+    font-family: var(--font-label);
+    font-weight: 300;
+    font-size: 0.75rem;
+    letter-spacing: 0.32em;
+    /* Č Ć Ž Š carry marks above the cap line — 1.4 is the floor in Croatian (§4.6). */
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  /* Cormorant, so never below 26px — `clamp()`'s first value is the floor (§4). */
+  .display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.75rem, 8vw, 5.5rem);
+    line-height: 0.96;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin-block-start: var(--space-4);
+  }
+
+  .lede {
+    margin-block-start: var(--space-5);
+    font-size: 1.125rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+    /* §5: a measure rather than a width, so Croatian — 20–25% longer than English —
+       reflows instead of being clipped (§10). */
+    max-width: 62ch;
+  }
+
+  .sectionH {
+    font-family: var(--font-label);
+    font-weight: 400;
+    font-size: 0.75rem;
+    letter-spacing: 0.28em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  /* --- the grid: 2 / 3 / 4 columns, 8px gutters (§7.4) --- */
+  /*
+    `repeat(N, 1fr)` and never `auto-fit`. With three photographs in a four-column grid,
+    `1fr` tracks keep each tile one quarter wide and leave the fourth column empty, which
+    is the ticket's „fewer than a full row does not stretch them to fill"; `auto-fit` with
+    `minmax()` would spread three photographs across the full width and silently change
+    their crop. The gutter is `--space-2`, which is §5's 8px.
+  */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-2);
+    margin-block-start: var(--space-6);
+    list-style: none;
+  }
+  @media (min-width: 768px) {
+    .grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+  @media (min-width: 1024px) {
+    .grid {
+      grid-template-columns: repeat(4, 1fr);
+    }
+  }
+  /* No min-width anywhere in the grid: a pixel floor on a track is what overflows 390px. */
+  .cell {
+    min-width: 0;
+  }
+
+  /*
+    The tile. §7.4: „hover raises to full opacity from 88%" — so the resting state is 0.88
+    and the raise is on hover *and* focus-visible, because a keyboard visitor moving along
+    the grid is doing the same thing a pointer is. No scale and no shadow: §5 depth is
+    surface value plus a hairline, in both themes.
+  */
+  .tile {
+    display: block;
+    /* The box, reserved by the stylesheet rather than by the file (§9 rule 2). */
+    aspect-ratio: 1;
+    overflow: hidden;
+    border-radius: var(--radius-sm);
+    /* Plum in both themes: this is the ground a photograph loads onto, and a cream frame
+       would fight the picture (§9). `--band-surface` is the role set for a surface that
+       does not follow the page theme. */
+    background: var(--band-surface);
+    opacity: 0.88;
+    transition: opacity var(--dur-fast) var(--ease);
+  }
+  .tile:hover,
+  .tile:focus-visible {
+    opacity: 1;
+  }
+  .tile img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  /* --- the empty state --- */
+  /*
+    display-s, clamped at Cormorant's 26px floor — the smallest display size there is (§4).
+    A sentence rather than a label: this is the page's answer to the question the visitor
+    arrived with, so it is set at the size an answer is set at.
+  */
+  .emptyH {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(1.625rem, 3vw, 2.125rem);
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .emptyP {
+    margin-block-start: var(--space-4);
+    font-size: 1.0625rem;
+    line-height: 1.7;
+    color: var(--text-muted);
+    max-width: 62ch;
+  }
+  .exits {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-5);
+    margin-block-start: var(--space-6);
+  }
+  .exit {
+    display: inline-flex;
+    align-items: center;
+    /* 44px is the §8 touch target. */
+    min-height: 44px;
+    font-family: var(--font-label);
+    font-size: 0.8125rem;
+    letter-spacing: 0.2em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    color: var(--accent);
+    text-underline-offset: 4px;
+  }
+
+  /* --- the lightbox (§7.4) --- */
+  /*
+    The scrim is the dialog's own background and `::backdrop` is cleared, which is the one
+    place this file departs from the obvious reading of §7.4 („a plum-ink 96% backdrop").
+    Two reasons, and they are mechanical rather than aesthetic:
+
+      1. **Custom properties do not reliably reach `::backdrop`.** Inheriting from the
+         originating element is a recent change to the spec and a recent change in
+         implementations, so `background: color-mix(…, var(--band-surface) …)` there
+         resolves to nothing on a browser a year old — a fully transparent overlay, with
+         the page legible underneath and nothing failing. The alternative is a literal
+         plum-ink, which `npm run ds` refuses for the reason that rule exists.
+      2. **A click has to be able to dismiss.** `::backdrop` is not an event target. With
+         the dialog itself filling the viewport, a click outside the photograph lands on
+         the dialog element and the script can read it.
+
+    `::backdrop` is set transparent rather than left alone because the UA default for a
+    modal dialog is a translucent black, which would sit under this and darken the brand
+    colour by an amount nobody chose.
+  */
+  .lightbox {
+    /* Set under `[open]` only: `display` here would override the UA rule that keeps a
+       closed dialog — and all of its photographs — out of the layout entirely. */
+    inline-size: 100vw;
+    max-inline-size: 100vw;
+    block-size: 100dvh;
+    max-block-size: 100dvh;
+    margin: 0;
+    /* 12px, not 24: §7.4 gives the photograph 90vw, and 24 either side leaves only 342 of
+       a 390px phone for an image entitled to 351. The scrim is the dialog's own
+       background, so the padding is breathing room rather than structure. */
+    padding: var(--space-3);
+    border: 0;
+    background: color-mix(in srgb, var(--band-surface) 96%, transparent);
+    color: var(--band-text);
+  }
+  .lightbox::backdrop {
+    background: transparent;
+  }
+  /*
+    Two rows: the photograph, then the controls. `minmax(0, 1fr)` rather than `1fr`,
+    because a `1fr` track has an automatic **minimum** of its content — so a tall
+    photograph makes the row taller than the viewport instead of being asked to shrink,
+    and the overflow is then centred, which puts the top of the picture off the top of the
+    screen. That is the whole of this block: every box between the dialog and the `<img>`
+    carries `min-block-size: 0`, so „the image fits in what is left" is a chain with no
+    break in it. Measured at 390 × 844 and 1280 × 900, both themes.
+  */
+  .lightbox[open] {
+    display: grid;
+    /* One bounded column: an `auto` column is sized by its contents, so the stage could
+       make it wider than the viewport and then centre the overflow — which is a
+       photograph half off the right edge of a phone, with the document's own scroll width
+       unchanged because a modal dialog lives in the top layer. */
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    justify-items: center;
+    align-items: center;
+    gap: var(--space-4);
+    animation: lightboxIn var(--dur-base) var(--ease);
+  }
+  @keyframes lightboxIn {
+    from {
+      opacity: 0;
+    }
+  }
+  /*
+    §8: under `prefers-reduced-motion: reduce` the fade is gone, not shortened. The global
+    rule in `src/styles/base.css` collapses every duration to 0.01ms, which is already
+    enough — this is here because an overlay appearing is the one transition on this page a
+    motion-sensitive visitor meets, and „it is handled somewhere else" is how a rule like
+    that stops being true.
+  */
+  @media (prefers-reduced-motion: reduce) {
+    .lightbox[open] {
+      animation: none;
+    }
+  }
+
+  /*
+    **The sizing chain, which is the only fiddly thing in this file — and it is arithmetic
+    rather than percentages, deliberately.**
+
+    The obvious construction is a `minmax(0, 1fr)` row with `max-block-size: 100%` on the
+    image, so the picture fits „whatever is left" with no number in it. It does not work
+    here and the reason is worth writing down: the image's *width* is `auto`, so the row's
+    height depends on the image, and the image's height then depends on the row — a cyclic
+    percentage, which Chromium resolves by treating the percentage as indefinite and
+    leaving the picture at a hundred-odd pixels. Measured, three ways round, at both
+    viewports.
+
+    So the ceiling is viewport arithmetic. `85vh` is §7.4's own number; `100dvh - 12rem`
+    is what is left after the chrome beneath the photograph, and 12rem = 192px is the sum
+    of the parts rather than a guess: the controls row is 44, the caption up to two lines
+    is 46, the two gaps are 12 and 16, and the dialog's padding is 24 top and bottom. That
+    is 166, and the 26 left over is the third caption line a long Croatian sentence can
+    take. `dvh` and not `vh` because a phone's toolbar moves the viewport and `vh` does
+    not notice.
+  */
+  .stage {
+    display: grid;
+    /* Bounded here too, and for the same reason one level up: an `auto` column takes the
+       photograph's max-content width, so the frame was centred inside a column wider than
+       the phone and the picture sat 13px off the right edge. */
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    align-content: center;
+    inline-size: 100%;
+    min-block-size: 0;
+  }
+  .frame {
+    display: grid;
+    justify-items: center;
+    gap: var(--space-3);
+    min-block-size: 0;
+  }
+  /*
+    **This line is load-bearing and its absence is silent.** `[hidden] { display: none }`
+    is a *user-agent* rule, and any author `display` beats the user-agent stylesheet
+    whatever the specificity — so the rule above quietly put all seven photographs in the
+    layout at once, each one a full-size image the browser then fetched the moment the
+    lightbox opened. Measured before this line: a stage 5,002px tall inside a 900px
+    viewport, with the photograph that was asked for 636px above the top of the screen.
+    Nothing about the markup was wrong; `hidden` was simply not doing anything.
+    `test/gallery.test.ts` asserts the layout box count with the lightbox open.
+  */
+  .frame[hidden] {
+    display: none;
+  }
+  /* §7.4: the photograph at up to 90vw by 85vh, at its own ratio. */
+  .frame img {
+    display: block;
+    max-inline-size: 90vw;
+    max-block-size: min(85vh, calc(100dvh - 12rem));
+    inline-size: auto;
+    block-size: auto;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+  }
+  .caption {
+    /* `90vw`, not a bare 62ch measure: 62ch is wider than a 390px phone, and a caption box
+       wider than its frame pushes the photograph off centre rather than wrapping. */
+    max-inline-size: min(62ch, 90vw);
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    text-align: center;
+    color: var(--band-muted);
+  }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: var(--space-5);
+  }
+  /* §7.4: prev / next as accent hairline circles. 44px is the §8 touch target. */
+  .step,
+  .close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    inline-size: 44px;
+    block-size: 44px;
+    padding: 0;
+    background: none;
+    border: 1px solid var(--band-line-accent);
+    border-radius: var(--radius-full);
+    color: var(--band-accent);
+    cursor: pointer;
+    transition:
+      border-color var(--dur-fast) var(--ease),
+      opacity var(--dur-fast) var(--ease);
+  }
+  .step:hover,
+  .close:hover {
+    border-color: var(--band-accent);
+  }
+  .step svg,
+  .close svg {
+    inline-size: 20px;
+    block-size: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+  }
+  /*
+    Top-right, out of the photograph's way. `position: fixed` rather than `absolute`: the
+    dialog is in the top layer and fills the viewport, so the two agree, and `fixed` keeps
+    the button put if the stage ever scrolls.
+  */
+  .close {
+    position: fixed;
+    inset-block-start: var(--space-4);
+    inset-inline-end: var(--space-4);
+  }
+
+  /* §7.4: the counter in `caption`. */
+  .counter {
+    min-inline-size: 5ch;
+    font-family: var(--font-label);
+    font-size: 0.8125rem;
+    letter-spacing: 0.2em;
+    line-height: 1.4;
+    text-align: center;
+    color: var(--band-muted);
+  }
+
+  .srOnly {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+</style>
+
+<script>
+  /**
+   * The lightbox, and nothing the platform already does.
+   *
+   * Locale-agnostic on purpose, `TrialForm.astro`'s rule: every string this needs is
+   * already in the markup, so the script reads the DOM instead of being handed copy. That
+   * is what keeps it one bundled script for both locales rather than two.
+   *
+   * What is deliberately absent: a focus trap, an Escape handler, and a focus-return. All
+   * three are `showModal()`'s, by specification — see the long note in the frontmatter.
+   * Writing them here would be writing a second, worse answer beside a working one.
+   */
+  const dialog = document.querySelector<HTMLDialogElement>('dialog[data-lightbox]');
+
+  // `showModal` is the whole mechanism, so a browser without it gets the no-script page:
+  // the tiles stay plain links to the photographs. Feature-detected rather than assumed,
+  // because the alternative is a tile whose click is cancelled and replaced by nothing.
+  if (dialog && typeof dialog.showModal === 'function') {
+    const frames = [...dialog.querySelectorAll<HTMLElement>('[data-frame]')];
+    const tiles = [...document.querySelectorAll<HTMLAnchorElement>('[data-tile]')];
+    const count = dialog.querySelector<HTMLElement>('[data-count]');
+    const described = dialog.querySelector<HTMLElement>('[data-described]');
+    const total = frames.length;
+    let at = 0;
+
+    /**
+     * Let a neighbour start loading without showing it.
+     *
+     * A `loading="lazy"` image in a `hidden` subtree has no box, never intersects the
+     * viewport and is never fetched — which is what makes a closed dialog cost nothing.
+     * Clearing the attribute turns that into an ordinary eager load, so the next arrow
+     * press paints from cache. Showing them instead would fetch all twelve on open.
+     */
+    const prime = (index: number) => {
+      const image = frames[index]?.querySelector('img');
+      if (image) image.loading = 'eager';
+    };
+
+    const show = (index: number) => {
+      at = (index + total) % total;
+      frames.forEach((frame, position) => {
+        frame.hidden = position !== at;
+      });
+      if (count) count.textContent = `${at + 1} / ${total}`;
+      // The description, for the `role="status"` region: position alone says where you are
+      // and not what you are looking at.
+      const image = frames[at]?.querySelector('img');
+      if (described && image) described.textContent = image.alt;
+      prime(at);
+      prime((at + 1) % total);
+      prime((at - 1 + total) % total);
+    };
+
+    tiles.forEach((tile, index) => {
+      tile.addEventListener('click', (event) => {
+        // A modified click is the visitor asking for a new tab or a download, and the href
+        // is the photograph, so the honest thing is to let the browser have it (MUSE-33).
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        if (event.button !== 0) return;
+        event.preventDefault();
+        show(index);
+        dialog.showModal();
+      });
+    });
+
+    dialog.addEventListener('keydown', (event) => {
+      // Escape is the platform's, and `cancel` fires before this would see it.
+      const steps: Record<string, number | undefined> = {
+        ArrowRight: at + 1,
+        ArrowLeft: at - 1,
+        Home: 0,
+        End: total - 1,
+      };
+      const next = steps[event.key];
+      if (next === undefined) return;
+      event.preventDefault();
+      show(next);
+    });
+
+    dialog.querySelector('[data-prev]')?.addEventListener('click', () => show(at - 1));
+    dialog.querySelector('[data-next]')?.addEventListener('click', () => show(at + 1));
+    dialog.querySelector('[data-close]')?.addEventListener('click', () => dialog.close());
+
+    // A click on the scrim. The dialog fills the viewport, so anything that is not the
+    // photograph, the caption or a control lands on the dialog element itself.
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+  }
+</script>

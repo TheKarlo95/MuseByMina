@@ -220,13 +220,26 @@ describe('MUSE-63: every page of both deploy targets is within budget', () => {
  * version that stays.
  */
 describe('MUSE-63: a page over budget names itself', () => {
-  /** A page comfortably inside every budget, to mutate one field of at a time. */
+  /**
+   * A page comfortably inside every budget, to mutate one field of at a time.
+   *
+   * Two images, which is every page of this site: the footer lockup and the masthead mark.
+   * They are here because `html`, `total` and `requests` carry a per-`<img>` allowance
+   * (MUSE-25), so a fixture with no images would be judged against a different number than
+   * any real page is — and the allowance is small enough at two that the overruns below
+   * still read as the numbers in `BUDGET`.
+   */
   const lean = () => ({
     route: '/schedule/',
     measured: { url: 'http://127.0.0.1/MuseByMina/schedule/', locale: 'hr', lang: 'hr-HR' },
-    bytes: { html: 22_000, css: 25_000, font: 215_000 },
-    total: 262_000,
+    bytes: { html: 22_000, css: 25_000, font: 215_000, image: 12_956 },
+    total: 274_956,
     requests: 8,
+    images: 2,
+    imageResponses: [
+      { url: 'http://h/_astro/muse-lockup-white.abc.webp', bytes: 11_356 },
+      { url: 'http://h/_astro/muse-mark-white.def.webp', bytes: 1_600 },
+    ],
     renderBlocking: 2,
     blocking: ['stylesheet a.css', 'stylesheet b.css'],
     missing: [],
@@ -249,10 +262,11 @@ describe('MUSE-63: a page over budget names itself', () => {
     budget: string;
     actual: string;
   }[] = [
-    { kind: 'html', bytes: { html: 60 * 1024 }, budget: '48.0 KB', actual: '60.0 KB' },
+    // `html` is the one line with a per-`<img>` allowance here, so the budget it names is
+    // 48 KB plus 1,280 bytes for each of the fixture's two images (MUSE-25).
+    { kind: 'html', bytes: { html: 60 * 1024 }, budget: '50.5 KB', actual: '60.0 KB' },
     { kind: 'css', bytes: { css: 90 * 1024 }, budget: '40.0 KB', actual: '90.0 KB' },
     { kind: 'font', bytes: { font: 400 * 1024 }, budget: '288.0 KB', actual: '400.0 KB' },
-    { kind: 'image', bytes: { image: 820_000 }, budget: '16.0 KB', actual: '800.8 KB' },
   ];
 
   it.each(overruns)(
@@ -276,16 +290,95 @@ describe('MUSE-63: a page over budget names itself', () => {
     const [problem, ...rest] = checkBudget({
       ...page,
       bytes: { html: 44 * 1024, css: 36 * 1024, font: 280 * 1024 },
-      total: 360 * 1024 + 1,
+      imageResponses: [],
+      total: 360 * 1024 + 2 * 1280 + 1,
     });
 
     expect(rest).toEqual([]);
     expect(problem).toContain('total');
-    expect(problem).toContain('budget 360.0 KB');
+    // 360 KB plus the two images' allowance, which is what the gate compared against.
+    expect(problem).toContain('budget 362.5 KB');
+  });
+
+  /**
+   * **MUSE-25: photography is out of the total, and each image is budgeted on its own.**
+   *
+   * The two halves of the same decision, and each needs its own proof because they fail in
+   * opposite directions. A gallery's *sum* is a statement about how many photographs Mina
+   * published — editorial, unbounded, and not something a byte ceiling can hold — so it is
+   * excluded. What replaces it is a ceiling on one response, which is a statement about
+   * something a developer can fix and which fires on every page rather than only on the one
+   * with a grid.
+   */
+  it('does not count photography towards the total', () => {
+    // 600 KB of correctly-sized photographs: a thirty-picture gallery. Nothing is over.
+    const page = lean();
+    const images = Array.from({ length: 30 }, (_, index) => ({
+      url: `http://h/photo-${index}.webp`,
+      bytes: 20_000,
+    }));
+    expect(
+      checkBudget({
+        ...page,
+        bytes: { ...page.bytes, image: 600_000 },
+        imageResponses: images,
+        images: 60,
+        requests: 38,
+        total: 274_956 - 12_956 + 600_000,
+      }),
+    ).toEqual([]);
+  });
+
+  it('fails one image that is bigger than its box, naming the file', () => {
+    const page = lean();
+    const [problem, ...rest] = checkBudget({
+      ...page,
+      bytes: { ...page.bytes, image: 12_956 + 297_000 },
+      total: page.total + 297_000,
+      imageResponses: [...page.imageResponses, { url: 'http://h/huge.webp', bytes: 297_000 }],
+      images: 3,
+    });
+
+    expect(rest).toEqual([]);
+    expect(problem).toContain('/schedule/');
+    expect(problem).toContain('image response');
+    expect(problem).toContain('budget 32.0 KB');
+    expect(problem).toContain('actual 290.0 KB');
+    // The file, because „this page carries 300 KB of photography" does not say which one.
+    expect(problem).toContain('huge.webp');
+    // And where the widths are decided, because that is the fix.
+    expect(problem).toContain('src/lib/gallery.ts');
+  });
+
+  it('allows html, total and requests to grow with the images in the document', () => {
+    // A twelve-photograph gallery: 26 `<img>`, so 26 × 1,280 bytes of `srcset` allowance on
+    // html and on total, and 26 more requests. Measured 42.0 KB of html and 23 requests.
+    const page = lean();
+    expect(
+      checkBudget({
+        ...page,
+        bytes: { html: 43_008, css: 23_000, font: 248_000, image: 151_000 },
+        total: 43_008 + 23_000 + 248_000 + 151_000,
+        images: 26,
+        requests: 23,
+        imageResponses: Array.from({ length: 14 }, (_, index) => ({
+          url: `http://h/tile-${index}.webp`,
+          bytes: 11_500,
+        })),
+      }),
+    ).toEqual([]);
+
+    // And the allowance is per image, not a blanket raise: a gallery's html on a page with
+    // two images is over, because two images buy 2.5 KB and not 32 KB.
+    const [problem] = checkBudget({ ...page, bytes: { ...page.bytes, html: 64_600 } });
+    expect(problem).toContain('html');
+    expect(problem).toContain('budget 50.5 KB');
+    expect(problem).toContain('actual 63.1 KB');
   });
 
   it.each([
-    { what: 'requests', page: { requests: 15 }, says: 'requests  budget 14  actual 15' },
+    // 14 plus the fixture's two images (MUSE-25), so the first count that is over is 17.
+    { what: 'requests', page: { requests: 17 }, says: 'requests  budget 16  actual 17' },
     {
       what: 'render-blocking requests',
       page: { renderBlocking: 5 },
@@ -337,6 +430,12 @@ describe('MUSE-63: a page over budget names itself', () => {
    */
   it('refuses a resource kind that has no budget at all', () => {
     expect(BUDGET.bytes).not.toHaveProperty('js');
+    // `image` is also not in `BUDGET.bytes` — it is budgeted per response (MUSE-25) — and
+    // it must **not** be reported as unbudgeted, which would be a true sentence about a
+    // kind that now has a stricter budget than it used to.
+    expect(BUDGET.bytes).not.toHaveProperty('image');
+    expect(BUDGET.imageResponse).toBeGreaterThan(0);
+    expect(checkBudget(lean()).join(' ')).not.toContain('no budget exists for image');
 
     const page = lean();
     const [problem, ...rest] = checkBudget({
@@ -421,9 +520,11 @@ describe('MUSE-63: what the measurement calls things', () => {
       {
         route: '/schedule/',
         measured: { url: 'http://h/', locale: 'hr', lang: 'hr-HR' },
-        bytes: { html: 22_000, css: 25_000, font: 215_000 },
-        total: 262_000,
+        bytes: { html: 22_000, css: 25_000, font: 215_000, image: 11_356 },
+        total: 273_356,
         requests: 8,
+        images: 2,
+        imageResponses: [{ url: 'http://h/lockup.webp', bytes: 11_356 }],
         renderBlocking: 2,
         blocking: [],
         missing: [],
@@ -434,6 +535,21 @@ describe('MUSE-63: what the measurement calls things', () => {
 
     expect(lines.join('\n')).toContain('headroom');
     expect(lines.join('\n')).toContain('advisory');
+    /**
+     * **The headroom shown is the headroom the gate uses** (MUSE-25).
+     *
+     * `html`, `total` and `requests` carry a per-`<img>` allowance and `image` is budgeted
+     * per response, so printing `BUDGET.bytes.html` on its own would show a room the gate
+     * does not give — which is the single thing this table must never do, since MUSE-63's
+     * second criterion is that the next ticket reads its room off here instead of
+     * discovering it by going red.
+     */
+    const budgetRow = lines.find((line) => line.startsWith('budget'))!;
+    // 48 KB + two images' allowance, and the per-response image ceiling said as such.
+    expect(budgetRow).toContain('50.5 KB');
+    expect(budgetRow).toContain('32.0 KB ea');
+    // And the footnote that says why those two cells are not simple sums.
+    expect(lines.join('\n')).toContain('editorial decision');
   });
 });
 
@@ -588,8 +704,12 @@ describe('MUSE-63: the budget is accounted for, number by number', () => {
       'bytes.css',
       'bytes.font',
       'bytes.html',
-      'bytes.image',
       'fonts',
+      // MUSE-25. `bytes.image` was here and is gone: photography is budgeted per response
+      // rather than summed per page, and the per-`<img>` allowances are what keep the three
+      // content-sensitive lines from being traps that fire on an editor's upload.
+      'imageResponse',
+      'perImage',
       'renderBlocking',
       'requests',
       'total',

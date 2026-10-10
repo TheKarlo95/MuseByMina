@@ -439,6 +439,7 @@ describe('nothing can open a browser context of its own', () => {
       'test/budget.test.ts',
       'test/contact.test.ts',
       'test/fonts.test.ts',
+      'test/gallery.test.ts',
       'test/lang.test.ts',
       'test/localeswitch.test.ts',
       'test/numerals.test.ts',

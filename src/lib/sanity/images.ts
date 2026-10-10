@@ -28,16 +28,28 @@ import { SanityContentError, type ImageRef } from './decode';
  * separately checkable: `rect` is pixel arithmetic on the source dimensions, and
  * `object-position` is a percentage.
  *
- * What is deliberately **not** here, and should be its own ticket once photographs exist:
+ * **`srcset` arrived with `/gallery` and is {@link imageSrcSet}** (MUSE-25). It was listed
+ * here as deliberately absent until a page existed whose whole subject is photographs: one
+ * width is defensible for a 160px logo and indefensible for a picture a visitor opens full
+ * screen, and the ticket's own requirement is that a phone must not be sent a
+ * full-resolution original. What that note asked for — *"measuring the real breakpoints
+ * against real files"* — is what `src/lib/gallery.ts` records: the candidate widths and the
+ * `sizes` expression live beside the grid they describe, and `test/gallery.test.ts`
+ * measures the browser's selection against the painted box rather than modelling it.
  *
- *   - `srcset`/`sizes`. One width is served. A portrait is at most ~420px wide in this
- *     layout, so `w=600` covers 1x comfortably and under-serves a 2x screen; fixing that
- *     properly means measuring the real breakpoints against real files.
+ * `imageSrc` stays, and callers with one box keep using it: the lockup, an event card and
+ * an instructor portrait are each painted at one size, and a `srcset` there would mean the
+ * performance budget measures a file almost nobody fetches (MUSE-64's argument, unchanged).
+ *
+ * What is still deliberately **not** here:
+ *
  *   - A `<picture>` with an explicit `.webp`/`.jpg` pair. `auto=format` is the CDN
  *     negotiating the same thing from one URL (§9 rule 5), which is strictly less markup
  *     and no less correct.
  *   - LQIP / blur-up placeholders. `aspect-ratio` already reserves the box, so there is
  *     nothing to stop reflowing.
+ *   - Density descriptors (`2x`). They answer the device and not the layout, so a tile that
+ *     is 171px on a phone and 300px on a desktop cannot be described by them at all.
  * ---------------------------------------------------------------------------------
  */
 
@@ -145,6 +157,48 @@ export function imageSrc(ref: ImageRef, { width }: ImageSrcOptions): string {
   params.push(`q=${QUALITY}`);
 
   return `${IMAGE_CDN}${path}?${params.join('&')}`;
+}
+
+/**
+ * **The `srcset` for one photograph: the same URL at several widths** (MUSE-25).
+ *
+ * Width descriptors, not density descriptors, and paired with a `sizes` expression by the
+ * caller. The browser then knows both how wide the box will be and which files exist, and
+ * picks one — which is the only arrangement that can be right for a tile that is 171 CSS px
+ * on a phone and 300 on a desktop.
+ *
+ * Three things this does and one it refuses:
+ *
+ *   - **Every candidate goes through `imageSrc`**, so the `rect` arithmetic, `auto=format`
+ *     and the quality setting are decided in exactly one place. A second URL builder here
+ *     is how a manual crop ends up applied at one width and not another.
+ *   - **Widths wider than the asset are dropped, and the asset's own width is offered in
+ *     their place.** The CDN will not invent detail, so a 1200px upload asked for `2000w`
+ *     answers at 1200 — and a `2000w` descriptor on a 1200px file is a lie the browser
+ *     believes: it will pick that candidate on a wide screen and get a smaller image than
+ *     the one it rejected. {@link imageSize} already clamps, and this is the same clamp
+ *     made visible in the descriptor.
+ *   - **Duplicates collapse.** Two requested widths above a small asset both clamp to its
+ *     width; emitting the same descriptor twice is invalid.
+ *   - It refuses an **empty** width list rather than returning an empty attribute, because
+ *     `srcset=""` is a `src` with no fallback behaviour anybody has reasoned about.
+ */
+export function imageSrcSet(ref: ImageRef, widths: readonly number[]): string {
+  if (widths.length === 0) {
+    throw new SanityContentError(
+      'imageSrcSet was given no widths. A `srcset` with no candidates is not a narrower ' +
+        'set of choices, it is an attribute the browser ignores — pass the widths the ' +
+        'surface can paint (see GRID_WIDTHS / FULL_WIDTHS in src/lib/gallery.ts).',
+    );
+  }
+
+  const available = croppedPixels(assetOf(ref), ref.crop).width;
+  const offered = [...new Set(widths.map((width) => Math.min(Math.round(width), available)))];
+
+  return offered
+    .sort((a, b) => a - b)
+    .map((width) => `${imageSrc(ref, { width })} ${width}w`)
+    .join(', ');
 }
 
 /**

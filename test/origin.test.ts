@@ -227,11 +227,11 @@ describe('an explicit ORIGIN is checked against the local build', () => {
       index,
       readFileSync(index, 'utf8').replace('</body>', '<p>another branch</p></body>'),
     );
-    // And a route this build does not have at all: `/gallery/`, which is 404 here and
+    // And a route this build does not have at all: `/etiquette/`, which is 404 here and
     // would have been 200 on the daemon that answered. It was `/aboutus/` until MUSE-60
     // routed that page — this has to be a path the build genuinely lacks, or the copy
     // below overwrites a real page and the assertion inverts.
-    cpSync(join(foreign, 'en'), join(foreign, 'gallery'), { recursive: true });
+    cpSync(join(foreign, 'en'), join(foreign, 'etiquette'), { recursive: true });
   }, 240_000);
 
   afterAll(async () => {
@@ -306,13 +306,13 @@ describe('an explicit ORIGIN is checked against the local build', () => {
       origin: server.origin,
       base: `${PREVIEW_BASE}/`,
       outDir: ours,
-      routes: ['/gallery'],
+      routes: ['/etiquette'],
     }).then(
       () => null,
       (e: unknown) => e as Error,
     );
     expect(error).toBeTruthy();
-    expect(error!.message).toContain('/gallery/');
+    expect(error!.message).toContain('/etiquette/');
     // The local build has no such page, and saying so is the whole difference between
     // this and the status check that is already there.
     expect(error!.message).toMatch(/not in the build|404/);

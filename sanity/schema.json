@@ -449,6 +449,10 @@
             },
             {
               "type": "string",
+              "value": "/gallery"
+            },
+            {
+              "type": "string",
               "value": "/pricing"
             },
             {
@@ -608,6 +612,10 @@
             {
               "type": "string",
               "value": "/events/archive"
+            },
+            {
+              "type": "string",
+              "value": "/gallery"
             },
             {
               "type": "string",

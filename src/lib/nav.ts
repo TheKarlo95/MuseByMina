@@ -106,6 +106,29 @@ export const MORE_NAV: NavItem[] = [
    */
   { route: '/events', label: { hr: 'Događaji', en: 'Events' } },
   /**
+   * **`/gallery` is here, and for this page the disclosure is the point rather than the
+   * compromise** (MUSE-25).
+   *
+   * The bar's four-link budget is the same constraint `/events` met, and the same note
+   * above applies. But there is a second reason this one belongs behind the disclosure and
+   * it is the ticket's own: **no photography of this studio exists yet, so the page ships
+   * visibly thin, and the ticket says in as many words that it should not be linked
+   * prominently until it has real content.** A „Galerija" entry in the masthead of every
+   * page, promising pictures, leading to a page that says there are none, is a worse
+   * answer than a 404 — it is an invitation the site cannot honour, repeated fourteen
+   * times.
+   *
+   * It is a complete entry in the mobile panel and in the footer's quick list either way,
+   * which is what `MORE_NAV.slice(0, 4)` in `Footer.astro` is for — and it needs to be in
+   * *some* list, because a page nothing links to in its own locale fails
+   * `test/nav.test.ts`'s orphan rule (MUSE-37).
+   *
+   * **Promoting it to `PRIMARY_NAV` is the shoot's ticket, not this one.** That is a
+   * judgement about content rather than about navigation, and the entry moving is how
+   * „the photographs landed" shows up in a diff.
+   */
+  { route: '/gallery', label: { hr: 'Galerija', en: 'Gallery' } },
+  /**
    * **`/blog` is the third, and the same budget argument applies** (MUSE-26). The bar is
    * still four links plus this disclosure; a blog is also not where a returning visitor
    * is going, and its traffic arrives from a search engine rather than from the masthead

@@ -1,0 +1,23 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Gallery from '../components/Gallery.astro';
+import { GALLERY_ROUTE } from '../lib/gallery';
+import { getGallery, getPage } from '../lib/sanity';
+
+/**
+ * `minimum: 0` is what lets this page exist at all (MUSE-25).
+ *
+ * „No photography of this studio has been taken" is the studio's real state, and
+ * `Gallery.astro` says so in words rather than rendering an empty grid. The strict default
+ * would make every build fail until a shoot happens — and the ticket's whole premise is
+ * that a real page which fills itself beats a 404 in the navigation.
+ */
+const [meta, photographs] = await Promise.all([
+  getPage(GALLERY_ROUTE),
+  getGallery({ minimum: 0 }),
+]);
+---
+
+<BaseLayout locale="hr" title={meta.title.hr} description={meta.description.hr}>
+  <Gallery locale="hr" photographs={photographs} />
+</BaseLayout>
