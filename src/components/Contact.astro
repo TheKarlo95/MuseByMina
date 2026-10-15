@@ -24,6 +24,10 @@
 // only thing watching that, and it is still only a comment.
 import { getSiteSettings, socialUrl } from '../lib/sanity';
 import TrialForm from './TrialForm.astro';
+// Below the `TrialForm` import deliberately, and safe for the reason the table above
+// gives: `../lib/forms` is already in this page's import graph (`TrialForm` imports it),
+// so it adds no stylesheet and moves nothing. A *new* module here would.
+import { FORM_HAS_PROCESSOR } from '../lib/forms';
 import { localeUrl, type Locale } from '../lib/i18n';
 import { STUDIO } from '../lib/nav';
 
@@ -46,14 +50,40 @@ const { locale } = Astro.props;
  */
 const settings = await getSiteSettings();
 
+/**
+ * **The hero's instruction is chosen by the form's own configuration** (MUSE-84).
+ *
+ * The lede told the visitor to fill the form in — on a deploy where
+ * `PUBLIC_FORM_ENDPOINT` is unset, so `TrialForm.astro` throws before any `fetch` and
+ * every submission ends by offering the studio inbox instead (MUSE-12 records that the
+ * form has never delivered a message). The instruction was false at the moment it was
+ * followed, and `/privacy` — corrected in MUSE-72, gated on this same constant — said the
+ * opposite about the same form on the same deploy.
+ *
+ * So there is no third state and no new fact: `FORM_HAS_PROCESSOR` is the expression the
+ * form's script tests before it will send, and the hero reads it. With an endpoint the
+ * instruction is true and is restored; without one the honest instruction is the inbox,
+ * which is what the form itself falls back to. The sentence ends in a colon and the
+ * address follows it as a link — `FormCopy['noscript']`'s convention, for the same reason:
+ * telling somebody to write to us without the address in front of them is half a fix.
+ *
+ * **„bez obveze" / "no commitment" is gone and nothing replaced it** (MUSE-84's „also in
+ * scope"). „Bez partnera, bez iskustva" are facts about how a class runs and the site
+ * says them everywhere, `siteSettings.tagline` included. „Bez obveze" is a *term of an
+ * offer* — nobody has said what attending a first class commits you to, `/pricing`
+ * publishes three rates and no trial rate, and `test/pricing.test.ts` already refuses
+ * "no commitment" as a payment-terms claim one layer down. Retiring an unsupported
+ * commercial term needs no decision from the studio; adding one does (MUSE-71).
+ */
 const t = {
   hr: {
     // MUSE-71: the eyebrow used to price the first class at nothing. It names the
     // subject of the hero instead, which is what every other eyebrow on the site does.
     eyebrow: 'Prvi sat',
     h1: 'Dođi na probni sat',
-    lede:
-      'Bez partnera, bez iskustva, bez obveze. Ispuni obrazac i javljamo se s terminom koji ti odgovara.',
+    lede: FORM_HAS_PROCESSOR
+      ? 'Bez partnera, bez iskustva. Ispuni obrazac i javljamo se s terminom koji ti odgovara.'
+      : 'Bez partnera, bez iskustva. Obrazac trenutačno ne možemo primiti, pa nam prijavu pošalji e-mailom na:',
     formHeading: 'Prijavi se',
     elseHeading: 'Ili nam se javi direktno',
     elseLede: 'Ako ti je obrazac prekomplicirano, piši nam ili nas pronađi na društvenim mrežama.',
@@ -64,8 +94,9 @@ const t = {
   en: {
     eyebrow: 'First class',
     h1: 'Come to a trial class',
-    lede:
-      'No partner, no experience, no commitment. Fill in the form and we will come back with a time that suits you.',
+    lede: FORM_HAS_PROCESSOR
+      ? 'No partner, no experience. Fill in the form and we will come back with a time that suits you.'
+      : 'No partner, no experience. We cannot receive the form at the moment, so send your request by email to:',
     formHeading: 'Sign up',
     elseHeading: 'Or reach us directly',
     elseLede: 'If a form is one step too many, write to us or find us on social media.',
@@ -79,7 +110,18 @@ const t = {
 <section class="hero">
   <p class="eyebrow">{t.eyebrow}</p>
   <h1 class="display">{t.h1}</h1>
-  <p class="lede">{t.lede}</p>
+  {/*
+    With no endpoint the lede ends in a colon and the address is the next thing read, so
+    the visitor can act on the honest instruction without scrolling for it (MUSE-84). The
+    same inbox the form's own failure block and `/privacy` offer, read from the same CMS
+    field — one address, three surfaces, no literal.
+  */}
+  <p class="lede">
+    {t.lede}
+    {!FORM_HAS_PROCESSOR && (
+      <a class="mail" href={`mailto:${settings.email}`}>{settings.email}</a>
+    )}
+  </p>
 </section>
 
 <section class="section sunken">
@@ -178,6 +220,16 @@ const t = {
     line-height: 1.6;
     color: var(--text-muted);
     margin-top: var(--space-5);
+  }
+
+  /* Inline in the lede, so it takes the paragraph's own size and leading — the `.link`
+     rule below is a 44px row in a list and would break the sentence it sits in. §11.3's
+     44px is about tap targets and names the chrome controls; a link inside a sentence is
+     what WCAG 2.5.8's inline exception covers, and `npm run a11y` runs every rule axe
+     enables by default, so a disagreement is reported rather than argued here. */
+  .mail {
+    color: var(--accent);
+    text-underline-offset: 4px;
   }
 
   .links {

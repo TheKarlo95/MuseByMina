@@ -1528,6 +1528,31 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   twice about the rebuild cadence, which is why a reply verb is required beside it.
   `INNOCENT` spans `src/` **and** `sanity/` for that reason — MUSE-71 read only `src/` and
   the nearest miss lives in `sanity/badges.ts`.
+- **`/contact` tells the visitor to do what this build can actually do** (MUSE-84). The
+  hero said „Ispuni obrazac i javljamo se s terminom…" / "Fill in the form and we will
+  come back with a time…" while `PUBLIC_FORM_ENDPOINT` is unset, so the instruction was
+  false at the moment it was followed and `/privacy` — corrected in MUSE-72 — said the
+  opposite about the same form on the same deploy. `Contact.astro`'s lede reads
+  `FORM_HAS_PROCESSOR` now, the same expression the notice and the form's own script
+  read: with an endpoint the instruction is restored, without one it names the inbox and
+  the address follows it as a link, which is `FormCopy['noscript']`'s convention. **No
+  third state and no response time** (MUSE-80).
+
+  **The `page` description is the half that cannot be gated, and that is the general
+  lesson.** `page-contact.description` is a `page` document — Sanity owns a page's words
+  — so it has no branch to sit in and no configuration to read, and a CMS string beside a
+  conditional mechanism has exactly one honest shape: **true in both states**, which here
+  means naming no mechanism at all. It is „Javi nam se i dogovaramo termin…" / "Get in
+  touch and we will find a time…", and the guard runs the same claim against *both*
+  builds rather than two opposite ones. Gating it would mean a second description source
+  in code, which is what `getPage(route)` exists to prevent. `test/trialform.test.ts`
+  carries all of it — the same two builds MUSE-72 added, so the heavyweight count did not
+  move — and `llms.txt` is asserted there too, because it publishes the same strings.
+
+  „bez obveze" / "no commitment" went with the sentence and nothing replaced it: it is a
+  *term of an offer* nobody has specified, where „bez partnera, bez iskustva" are facts
+  about how a class runs. `test/pricing.test.ts` already refuses "no commitment" in the
+  period names, which is the same claim one layer down.
 - **„Dvoja vrata, ne šest." is `Home.astro`'s own line, not the design brief's** (MUSE-80).
   Four comments — two in `src/components/Home.astro`, two in `test/home.test.ts` — cited
   the brief for it. The brief contains no „vrata", no "door" and no "not six"; its only

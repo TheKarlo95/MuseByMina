@@ -794,3 +794,187 @@ describe('MUSE-72: the privacy notice describes the form that was actually built
     });
   }
 });
+
+/**
+ * **MUSE-84 — `/contact` instructs the visitor to use the path this build actually has.**
+ *
+ * The defect: the hero told the visitor to submit the form — „Ispuni obrazac i javljamo se
+ * s terminom koji ti odgovara." / "Fill in the form and we will come back with a time that
+ * suits you." — on a deploy where `PUBLIC_FORM_ENDPOINT` is unset, so `TrialForm.astro`
+ * throws before any `fetch` and every submission ends in „Prijava nije poslana." with the
+ * inbox offered instead. The instruction was false at the moment it was followed, and it
+ * was repeated in `page-contact.description`, so in both `<meta name="description">` tags
+ * and two `llms.txt` lines.
+ *
+ * It is MUSE-72's defect one surface over: a present-tense description of a mechanism that
+ * is absent, with the claim in prose and the fact in configuration and nothing comparing
+ * them. MUSE-72 fixed the notice and stopped at the page it was filed against; the privacy
+ * notice has said „Zato ti obrazac, kad ga pokušaš poslati, umjesto potvrde ponudi našu
+ * e-mail adresu." since, so `/privacy` and `/contact` contradicted each other about the
+ * same form on the same deploy.
+ *
+ * So the hero reads `FORM_HAS_PROCESSOR`, exactly as the notice does, and this is the
+ * comparison — in the same file and against the same two builds, which is why it costs no
+ * build against `test/helpers/concurrency.ts`'s zero headroom.
+ *
+ * **The `page` description is the half that cannot be gated, and that is the one worth
+ * reading.** It is a `page` document: Sanity owns a page's words (MUSE-20), so there is no
+ * branch to put it in and no configuration it can read. A CMS string beside a conditional
+ * mechanism therefore has exactly one honest shape — **it must be true in both states** —
+ * which means it may not name the form at all. The assertion below is run against both
+ * builds for that reason: the same claim twice is not a weaker test here, it is the whole
+ * statement. Gating it would mean a second description source in code, which is the one
+ * thing `getPage(route)` exists to prevent.
+ */
+describe('MUSE-84: the contact copy describes the form that was actually built', () => {
+  /**
+   * Which of the two heroes was rendered.
+   *
+   * Short phrases on purpose, as MUSE-72's `RECIPIENT` is: the assertion is about which
+   * branch the build took, not about the wording, which belongs to whoever reviews the
+   * page. The negative direction needs the *imperative* rather than the word „obrazac" —
+   * the honest branch names the form too, in order to say it cannot be received.
+   */
+  const HERO = {
+    hr: { form: 'Ispuni obrazac', inbox: 'Obrazac trenutačno ne možemo primiti' },
+    en: { form: 'Fill in the form', inbox: 'We cannot receive the form at the moment' },
+  } as const;
+
+  /**
+   * The `page` description, which is one string for both states.
+   *
+   * `never` is the form instruction, which no build may publish from a CMS field. `reach`
+   * is asserted *present* for `RECIPIENT`'s reason: a description with the instruction
+   * simply deleted would pass the negative half and leave the `<meta name="description">`
+   * Google shows saying nothing about how to reach the studio.
+   */
+  const DESCRIPTION = {
+    hr: { never: 'Ispuni obrazac', reach: 'Javi nam se' },
+    en: { never: 'Fill in the form', reach: 'Get in touch' },
+  } as const;
+
+  const CONTACT = [
+    { locale: 'hr', route: '/contact' },
+    { locale: 'en', route: '/en/contact' },
+  ] as const;
+
+  const BUILDS = [
+    { label: 'an endpoint configured', processor: true, preview: () => configured },
+    { label: 'no endpoint configured', processor: false, preview: () => unconfigured },
+  ] as const;
+
+  /** Markup stripped, entities decoded, so a phrase split by a tag still reads. */
+  function flat(html: string): string {
+    return html
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)))
+      .replace(/&amp;/g, '&')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  async function markup(preview: Preview, route: string): Promise<string> {
+    const response = await fetch(preview.url(route));
+    expect(response.status, `${route} did not build`).toBe(200);
+    return await response.text();
+  }
+
+  /** The hero section's own text — not the whole page, which offers the inbox anyway. */
+  function hero(html: string): string {
+    const section = /<section[^>]*class="hero[^"]*"[^>]*>([\s\S]*?)<\/section>/.exec(html)?.[1];
+    expect(section, 'no hero section').toBeDefined();
+    return flat(section!);
+  }
+
+  function description(html: string): string {
+    const head = /<head\b[^>]*>([\s\S]*?)<\/head>/.exec(html)?.[1] ?? html;
+    const tag = /<meta[^>]*\bname="description"[^>]*>/.exec(head)?.[0];
+    expect(tag, 'no <meta name="description">').toBeDefined();
+    const content = /\bcontent="([^"]*)"/.exec(tag!)?.[1];
+    expect(content, 'the description tag carries no content').toBeDefined();
+    return flat(content!);
+  }
+
+  /** The address the page itself offers — read off the page, never written out here. */
+  function inbox(html: string): string {
+    const address = /mailto:([^"'?]+)/.exec(html)?.[1];
+    expect(address, 'the page offers no mailto: anywhere').toBeDefined();
+    return address!;
+  }
+
+  for (const build of BUILDS) {
+    for (const { locale, route } of CONTACT) {
+      it(`${locale}, ${build.label}: the hero offers the path that works`, async () => {
+        const html = await markup(build.preview(), route);
+        const lede = hero(html);
+        const expected = HERO[locale];
+
+        if (build.processor) {
+          expect(
+            lede,
+            'an endpoint is configured, so a submission does reach somebody and the ' +
+              'instruction is true again',
+          ).toContain(expected.form);
+          expect(
+            lede,
+            'the hero still says the form cannot be received while an endpoint is configured',
+          ).not.toContain(expected.inbox);
+          expect(
+            lede,
+            'the hero offers the inbox as the way in while the form can actually send',
+          ).not.toContain(inbox(html));
+        } else {
+          // The shipping state, and the one the defect was live in.
+          expect(
+            lede,
+            'no endpoint is configured, so the form cannot send and the hero must not ' +
+              'tell the visitor to submit it — the MUSE-84 defect, exactly',
+          ).not.toContain(expected.form);
+          expect(lede, 'the hero says nothing about the form it cannot send').toContain(
+            expected.inbox,
+          );
+          expect(
+            lede,
+            'the hero says what does not work without offering what does: the inbox, ' +
+              'which is what the form itself falls back to',
+          ).toContain(inbox(html));
+        }
+      });
+
+      it(`${locale}, ${build.label}: the page description names no form to fill in`, async () => {
+        const html = await markup(build.preview(), route);
+        const meta = description(html);
+        const expected = DESCRIPTION[locale];
+
+        expect(
+          meta,
+          'the `<meta name="description">` Google shows instructs a form submission. It ' +
+            'is a `page` document, so it cannot be gated on the endpoint and has to be ' +
+            'true in both states',
+        ).not.toContain(expected.never);
+        expect(meta, 'the description offers no way to reach the studio at all').toContain(
+          expected.reach,
+        );
+      });
+    }
+
+    it(`${build.label}: llms.txt says what the pages say`, async () => {
+      const response = await fetch(`${build.preview().origin}/llms.txt`);
+      expect(response.status, 'llms.txt did not build').toBe(200);
+      const published = await response.text();
+
+      for (const { locale } of CONTACT) {
+        const expected = DESCRIPTION[locale];
+        expect(
+          published,
+          `llms.txt instructs a form submission in ${locale} — it publishes the same ` +
+            'strings as the `<meta name="description">` tags, so it is the same claim ' +
+            'again in the file written for machines',
+        ).not.toContain(expected.never);
+        expect(published, `llms.txt dropped the ${locale} contact description`).toContain(
+          expected.reach,
+        );
+      }
+    });
+  }
+});

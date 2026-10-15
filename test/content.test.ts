@@ -201,9 +201,9 @@ const SUPERSEDED: { route: string; field: CopyField; ticket: string; because: st
   {
     route: '/contact',
     field: 'description',
-    ticket: 'MUSE-71, MUSE-80',
+    ticket: 'MUSE-71, MUSE-80, MUSE-84',
     because:
-      'Two unsupported claims in one sentence, retired by two tickets. MUSE-71 took ' +
+      'Three unsupported claims in one sentence, retired by three tickets. MUSE-71 took ' +
       '„besplatni probni sat" / "a free bachata trial class" out of the ' +
       '`<meta name="description">` of `/contact` and its two `llms.txt` lines — one word ' +
       'from each locale. MUSE-80 then took the clause that followed it: „javljamo se u ' +
@@ -211,7 +211,13 @@ const SUPERSEDED: { route: string; field: CopyField; ticket: string; because: st
       'nobody at the studio has set, promised beside a form that has never delivered a ' +
       'message (`PUBLIC_FORM_ENDPOINT` is unset, MUSE-12). Both trace to agent-written ' +
       'foundation copy; neither is in a ticket or in the brief. Nothing replaced the ' +
-      'clause with a different number, and what is left says only what the page does.',
+      'clause with a different number, and what is left says only what the page does. ' +
+      'MUSE-84 then took „Ispuni obrazac" / "Fill in the form" out of it, for the same ' +
+      'reason one ticket later: it instructed a submission the deploy cannot transmit at ' +
+      'all. The hero is gated on `FORM_HAS_PROCESSOR` and this string cannot be — a ' +
+      '`page` document has no branch and reads no configuration — so it has to be true ' +
+      'in both states, and it now names no mechanism. `test/trialform.test.ts` holds it ' +
+      'against both builds.',
   },
 ];
 
