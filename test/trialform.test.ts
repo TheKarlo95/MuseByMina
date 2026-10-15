@@ -841,16 +841,163 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
   } as const;
 
   /**
+   * **The other half, and the half MUSE-72 would be missing without it.**
+   *
+   * `HERO` above is `RECIPIENT`'s shape: *which branch rendered*, in short phrases, both
+   * directions. That is necessary and it is not sufficient, because every needle in it is
+   * **the sentence this ticket happened to delete**. A guard built only out of those
+   * phrases says "the old wording is gone and the new wording is here", so the defect
+   * comes back the moment somebody says the same thing differently — reviewed and
+   * measured on this branch: a description reading „… pošalji obrazac na ovoj stranici." /
+   * "… submit the form on this page." left 207 tests green and published into both
+   * `<meta name="description">` tags and both `llms.txt` lines, and a gated second
+   * sentence beside the honest one („Prijavu možeš poslati i kroz obrazac ispod.") left
+   * 202 green while the hero contradicted itself on the page.
+   *
+   * `NEVER` is MUSE-72's answer to that, and it is why that guard would catch a notice
+   * naming a *different* non-existent processor: a **class** of claim, asserted
+   * independently of which branch rendered. This is that class — "the copy tells the
+   * visitor to submit the form" — as a verb-and-object adjacency rather than a phrase, so
+   * the wording is free to change and the claim is not.
+   *
+   * **It cannot live in `test/helpers/offer-claims.ts`**, which is where MUSE-71's and
+   * MUSE-80's class needles are, for two reasons that are about this claim rather than
+   * about that file. It is **conditional**: with an endpoint configured the instruction is
+   * legitimate and *must* be present, and `RETIRED_CLAIMS` is a list of things that may
+   * never appear anywhere. And the honest branch itself names the form in order to say it
+   * cannot be received, as does `/privacy`'s „Zato ti obrazac, kad ga pokušaš poslati,
+   * umjesto potvrde ponudi našu e-mail adresu." — so the needles have a boundary to
+   * respect, and `INNOCENT_FORM_PROSE` tests it from both sides the way `INNOCENT` does.
+   *
+   * Two directions per locale, because Croatian puts the object first as readily as the
+   * verb („Obrazac ispuni i javljamo se."). The object-first window is **tighter** — two
+   * words — and the gap is bounded in both: „obrazac, kad ga pokušaš poslati" puts a
+   * listed verb three words out and is pinned below.
+   *
+   * **Negation is the boundary, and it is a distinction rather than an exemption.** An
+   * instruction and a statement that the thing cannot be done are the same verb and the
+   * same object with „ne" between them: „Bez JavaScripta ovaj se obrazac **ne može**
+   * poslati" (`FormCopy['noscript']`) is true in every state and is the opposite of a
+   * claim. So a negation may be neither the word in the gap nor the word in front of the
+   * verb, which is what the lookaheads and the lookbehind are for. Without that, the
+   * needle read the `<noscript>` line as an instruction — measured, which is why it is
+   * written this way and why that sentence is in `INNOCENT_FORM_PROSE`.
+   */
+  const NEGATION_HR = String.raw`ne|ni|nije|nemoj|nemojte|nećemo`;
+  const NEGATION_EN = String.raw`not|cannot|never|without`;
+  /** One word of slack that is not a negation. */
+  const step = (negations: string) =>
+    String.raw`(?:[^\p{L}\d]+(?!(?:${negations})(?![\p{L}\d]))[\p{L}\d’']+)`;
+  const VERB_HR = String.raw`(?<!(?:${NEGATION_HR})[\s-])(?:ispun|popun|pošalj|poslat|predaj|predat|prijav)[\p{L}]*`;
+  const VERB_EN = String.raw`(?<!(?:${NEGATION_EN})[\s-])\b(?:fill|send|submit|complete|use|return|post)\b`;
+  const HR_STEP = step(NEGATION_HR);
+  const EN_STEP = step(NEGATION_EN);
+
+  const SUBMIT = {
+    hr: {
+      verbFirst: new RegExp(
+        String.raw`${VERB_HR}${HR_STEP}{0,4}?[^\p{L}\d]+obraz[\p{L}]*`,
+        'iu',
+      ),
+      objectFirst: new RegExp(
+        String.raw`obraz[\p{L}]*${HR_STEP}{0,2}?[^\p{L}\d]+${VERB_HR}`,
+        'iu',
+      ),
+    },
+    en: {
+      verbFirst: new RegExp(String.raw`${VERB_EN}${EN_STEP}{0,4}?[^\p{L}\d]+\bforms?\b`, 'iu'),
+      objectFirst: new RegExp(
+        String.raw`\bforms?\b${EN_STEP}{0,2}?[^\p{L}\d]+${VERB_EN}`,
+        'iu',
+      ),
+    },
+  } as const;
+
+  /** Every needle that fires on `text`, named, so a failure says which shape it was. */
+  function instructsSubmission(text: string, locale: 'hr' | 'en'): string[] {
+    return Object.entries(SUBMIT[locale])
+      .filter(([, pattern]) => pattern.test(text))
+      .map(([shape, pattern]) => `${shape}: ${JSON.stringify(pattern.exec(text)?.[0])}`);
+  }
+
+  /**
+   * **What the needles have to catch.** The first of each pair is what the site published;
+   * the rest are the rewordings a phrase-level guard let through — the two that were
+   * measured green on this branch, plus the inverted word order Croatian makes free.
+   *
+   * This is the teeth. Without it the needles are a regex nobody has run against the
+   * sentence they are for, which is the shape of defence this repository keeps re-filing.
+   */
+  const INSTRUCTIONS = {
+    hr: [
+      'Ispuni obrazac i javljamo se s terminom koji ti odgovara.',
+      'Prijavi se na probni sat bachate u Zagrebu. Javi nam se i dogovaramo termin — pošalji obrazac na ovoj stranici.',
+      'Prijavu možeš poslati i kroz obrazac ispod.',
+      'Obrazac ispuni i javljamo se s terminom.',
+      'Popunite obrazac i čekajte poziv.',
+      'Prijavi se kroz obrazac.',
+    ],
+    en: [
+      'Fill in the form and we will come back with a time that suits you.',
+      'Sign up for a bachata trial class in Zagreb. Get in touch and we will find a time — submit the form on this page.',
+      'You can also send your request through the form below.',
+      'The form? Fill it in below and we will be in touch.',
+      'Complete the form and we will come back with a time.',
+      'Use the form below.',
+    ],
+  } as const;
+
+  /**
+   * **Prose that legitimately names the form, and must not match.** Each is asserted
+   * *live* as well as non-matching, `INNOCENT`'s pattern: a boundary tested only against
+   * strings written in a test file drifts away from the page it is protecting.
+   *
+   * The first two are the honest hero this ticket shipped — in scope, and it names the
+   * form. Then `FormCopy['noscript']`, which is the sentence that *measured* the need for
+   * the negation rule, read off the copy table rather than quoted. Then `/privacy`'s, which
+   * MUSE-72 wrote and which says the same true thing one page over. Then
+   * `page-privacy.description`, which is in `llms.txt` beside `/contact`'s and so inside
+   * the scan.
+   */
+  const INNOCENT_FORM_PROSE = [
+    { locale: 'hr', route: '/contact', text: 'Obrazac trenutačno ne možemo primiti' },
+    { locale: 'en', route: '/en/contact', text: 'We cannot receive the form at the moment' },
+    { locale: 'hr', route: '/contact', text: FORM_COPY.hr.noscript },
+    { locale: 'en', route: '/en/contact', text: FORM_COPY.en.noscript },
+    {
+      locale: 'hr',
+      route: '/privacy',
+      text: 'Zato ti obrazac, kad ga pokušaš poslati, umjesto potvrde ponudi našu e-mail adresu',
+    },
+    {
+      locale: 'en',
+      route: '/en/privacy',
+      text: 'That is why the form, when you try to send it, offers you our email address',
+    },
+    {
+      locale: 'hr',
+      route: '/privacy',
+      text: 'Što obrazac za probni sat prikuplja, zašto, kome se prenosi',
+    },
+    {
+      locale: 'en',
+      route: '/en/privacy',
+      text: 'What the trial-class form collects, why, who it is passed to',
+    },
+  ] as const;
+
+  /**
    * The `page` description, which is one string for both states.
    *
-   * `never` is the form instruction, which no build may publish from a CMS field. `reach`
-   * is asserted *present* for `RECIPIENT`'s reason: a description with the instruction
-   * simply deleted would pass the negative half and leave the `<meta name="description">`
-   * Google shows saying nothing about how to reach the studio.
+   * Only the positive half is a phrase, and it is here for `RECIPIENT`'s reason: a
+   * description with the instruction simply deleted would pass every needle above and
+   * leave the `<meta name="description">` Google shows saying nothing about how to reach
+   * the studio at all. The negative half is `SUBMIT`, so there is one answer to "does this
+   * instruct a submission" rather than a phrase and a class disagreeing.
    */
   const DESCRIPTION = {
-    hr: { never: 'Ispuni obrazac', reach: 'Javi nam se' },
-    en: { never: 'Fill in the form', reach: 'Get in touch' },
+    hr: { reach: 'Javi nam se' },
+    en: { reach: 'Get in touch' },
   } as const;
 
   const CONTACT = [
@@ -941,19 +1088,38 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
         }
       });
 
-      it(`${locale}, ${build.label}: the page description names no form to fill in`, async () => {
-        const html = await markup(build.preview(), route);
-        const meta = description(html);
-        const expected = DESCRIPTION[locale];
+      /**
+       * The class needle on the hero, in the state where the instruction cannot be true.
+       *
+       * Separate from the branch-identity test above and *not* folded into it, because
+       * this one is the half that survives a rewording: the assertion is "nothing in this
+       * hero tells the visitor to submit the form", whichever words are used and however
+       * many sentences the branch grew.
+       */
+      if (!build.processor) {
+        it(`${locale}: nothing in the hero instructs a submission this build cannot make`, async () => {
+          const lede = hero(await markup(build.preview(), route));
+          expect(
+            instructsSubmission(lede, locale),
+            'the hero tells the visitor to submit a form that cannot send. With no ' +
+              'endpoint the only honest instruction is the inbox (MUSE-84); an ' +
+              'instruction added beside the honest sentence is the same defect, and a ' +
+              'reworded one is the same defect again',
+          ).toEqual([]);
+        });
+      }
+
+      it(`${locale}, ${build.label}: the page description instructs no submission`, async () => {
+        const meta = description(await markup(build.preview(), route));
 
         expect(
-          meta,
+          instructsSubmission(meta, locale),
           'the `<meta name="description">` Google shows instructs a form submission. It ' +
             'is a `page` document, so it cannot be gated on the endpoint and has to be ' +
-            'true in both states',
-        ).not.toContain(expected.never);
+            'true in both states — which means naming no mechanism at all',
+        ).toEqual([]);
         expect(meta, 'the description offers no way to reach the studio at all').toContain(
-          expected.reach,
+          DESCRIPTION[locale].reach,
         );
       });
     }
@@ -964,17 +1130,56 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
       const published = await response.text();
 
       for (const { locale } of CONTACT) {
-        const expected = DESCRIPTION[locale];
         expect(
-          published,
+          instructsSubmission(published, locale),
           `llms.txt instructs a form submission in ${locale} — it publishes the same ` +
             'strings as the `<meta name="description">` tags, so it is the same claim ' +
             'again in the file written for machines',
-        ).not.toContain(expected.never);
+        ).toEqual([]);
         expect(published, `llms.txt dropped the ${locale} contact description`).toContain(
-          expected.reach,
+          DESCRIPTION[locale].reach,
         );
       }
     });
   }
+
+  /**
+   * **The needles have teeth** — every way of saying it that has been seen or measured,
+   * including the two rewordings that passed the phrase-level guard.
+   */
+  for (const locale of ['hr', 'en'] as const) {
+    it(`${locale}: every known phrasing of the instruction is caught`, () => {
+      for (const sentence of INSTRUCTIONS[locale]) {
+        expect(
+          instructsSubmission(sentence, locale),
+          `no needle catches ${JSON.stringify(sentence)}, which instructs a submission`,
+        ).not.toEqual([]);
+      }
+    });
+
+    it(`${locale}: prose that legitimately names the form is not caught`, () => {
+      for (const innocent of INNOCENT_FORM_PROSE.filter((entry) => entry.locale === locale)) {
+        expect(
+          instructsSubmission(innocent.text, locale),
+          `a needle reads ${JSON.stringify(innocent.text)} as an instruction. It is ` +
+            'true in every state and has to stay on the page — widen the gap or the verb ' +
+            'list rather than exempting it',
+        ).toEqual([]);
+      }
+    });
+  }
+
+  /**
+   * And the innocent prose is still *live*, which is what keeps the boundary above a
+   * statement about this site rather than about six strings in a test file (`INNOCENT`'s
+   * reason, in `test/helpers/offer-claims.ts`).
+   */
+  it('the prose the boundary is drawn around is still published', async () => {
+    for (const { route, text } of INNOCENT_FORM_PROSE) {
+      // The raw document rather than its text: two of these are a `<meta>` content
+      // attribute, which stripping tags would throw away.
+      const page = await markup(unconfigured, route);
+      expect(page, `${route} no longer says ${JSON.stringify(text)}`).toContain(text);
+    }
+  });
 });

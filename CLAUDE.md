@@ -1549,6 +1549,37 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   carries all of it — the same two builds MUSE-72 added, so the heavyweight count did not
   move — and `llms.txt` is asserted there too, because it publishes the same strings.
 
+  **MUSE-72 is two halves and the first draft of this copied only one.** `RECIPIENT` is
+  *branch identity* — short phrases, both directions, both locales, asserting which
+  paragraph rendered — and `NEVER` is a **class** of forbidden claim, asserted against
+  both states whatever branch ran, which is why that guard would catch a notice naming a
+  *different* processor that does not exist. The first version of this ticket's guard was
+  `RECIPIENT` twice: every needle was the sentence being deleted, so it asserted „the old
+  words are gone and the new words are here" and nothing about the claim. Measured on the
+  branch: a description reading „…pošalji obrazac na ovoj stranici." left 207 tests green
+  and published into both `<meta name="description">` tags and both `llms.txt` lines, and
+  a second sentence beside the honest hero („Prijavu možeš poslati i kroz obrazac
+  ispod.") left 202 green with the page contradicting itself. That is the third ticket in
+  a row — MUSE-71, MUSE-80, this — to conclude that **a retired claim needs a needle for
+  the class and not for the sentence.**
+
+  So `SUBMIT` is a verb-and-object adjacency („ispuni/pošalji/predaj … obrazac",
+  "fill/send/submit … the form") in **both word orders**, because Croatian fronts the
+  object as readily as the verb and a verb-first needle misses „Obrazac ispuni i javljamo
+  se." It is **not** in `test/helpers/offer-claims.ts` and cannot be: the claim is
+  *conditional* — with an endpoint the instruction is legitimate and must be present —
+  and `RETIRED_CLAIMS` is a list of things that may appear nowhere, ever.
+
+  **Negation is the boundary, and it is a distinction rather than an exemption.** An
+  instruction and a statement that the thing cannot be done are the same verb and the
+  same object with „ne" between them: „Bez JavaScripta ovaj se obrazac **ne može** poslati"
+  (`FormCopy['noscript']`) is true in every state, and the honest hero and `/privacy` both
+  name the form in order to say it cannot be received. So a negation may be neither the
+  word in the gap nor the word before the verb. The needle read that `<noscript>` line as
+  an instruction until it was — measured, not imagined, which is why `INNOCENT_FORM_PROSE`
+  pins six real strings, asserts each one *still published*, and tests the boundary from
+  both sides the way `INNOCENT` does.
+
   „bez obveze" / "no commitment" went with the sentence and nothing replaced it: it is a
   *term of an offer* nobody has specified, where „bez partnera, bez iskustva" are facts
   about how a class runs. `test/pricing.test.ts` already refuses "no commitment" in the
