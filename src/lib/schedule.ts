@@ -128,15 +128,46 @@ export const LEVEL_NAME: Record<Locale, Record<Level, string>> = {
  *
  * ---
  *
- * **`improver` is the one line here nobody has confirmed (MUSE-36).**
+ * **Nobody has confirmed any of these four, and the record is
+ * `LEVEL_PREREQUISITE_CONFIRMATION` below rather than this paragraph (MUSE-85).**
  *
- * The other three were written with Mina. „Improver" is a word of the scene, and the
- * honest answer to *who is an Improver?* is "somebody who has finished a beginner course
- * and is a few months in" — which is what the wording says, measured in months because
- * the rule above allows nothing else. It deliberately claims no more than that: no
- * course-completion requirement, no figure vocabulary, no number of terms. Flagged for
- * Karlo to confirm with Mina; if she words it differently, this is a one-line edit and
- * both pages move with it.
+ * This comment used to quarantine `improver` as the single unconfirmed line and state that
+ * the other three had been agreed with the studio. That second claim was untrue, and it is
+ * named rather than quoted here for MUSE-42's reason — a sentence kept as an example is a
+ * sentence the next scan still finds. Traced string by string with `git log -S`, which is
+ * the only evidence there is:
+ *
+ * | string | first appears in |
+ * |---|---|
+ * | beginner, HR and EN | `c303292` — MUSE-6, the foundation commit |
+ * | advanced, HR and EN | `c303292` — MUSE-6 |
+ * | intermediate, HR and EN | `c45d750`, as homepage door copy beside an invented day and time; restated here by `c303292` |
+ * | improver, HR and EN | `4be63d3` — MUSE-36 |
+ * | the sentence licensing the other three | `4be63d3` — MUSE-36 |
+ *
+ * So the sentence licensing three of them arrived in **the same commit that authored the
+ * fourth**, two days after the other three, and it could not have been about `c303292`'s
+ * work in any case: MUSE-6 specified three levels („Početni / Srednji / Napredni") and
+ * used „oko godinu dana" as an *example of the required format*, not as a threshold
+ * anybody had agreed. MUSE-36's comments flag `improver` for confirmation and record no
+ * conversation about the rest. `c303292` is also the commit that produced MUSE-36's
+ * thirteen invented classes and the commercial promise MUSE-71 retired, both
+ * fabrications — the claim itself is not restated here, for the reason `RETIRED_CLAIMS`
+ * in `test/helpers/offer-claims.ts` has no exemption list.
+ *
+ * **All four are therefore unconfirmed, and all four are still published** — the owner's
+ * decision, taken in MUSE-85 over removing the two that carry a number. They are honest
+ * about what they claim (time danced, no course numbering, no figure vocabulary) and they
+ * are the most useful thing a visitor choosing a class is given; what was wrong was the
+ * file saying three of them had been settled. Do not soften one into „a while" to dodge
+ * the question — that is the same claim with less information in it.
+ *
+ * **What is still owed, and it is a conversation rather than a commit:** Mina has not been
+ * asked whether a year and two years are the thresholds she teaches to. MUSE-85's second
+ * acceptance criterion — every published threshold confirmed-with-a-record or removed — is
+ * open until she answers, and the answer goes in the map below, which cannot record it
+ * without naming her and dating it. MUSE-73's rate card is the worked example of what that
+ * looks like once it happens.
  */
 export const LEVEL_PREREQUISITE: Record<Locale, Record<Level, string>> = {
   hr: {
@@ -151,6 +182,49 @@ export const LEVEL_PREREQUISITE: Record<Locale, Record<Level, string>> = {
     intermediate: 'About a year of dancing.',
     advanced: 'Two or more years of dancing.',
   },
+};
+
+/**
+ * Whether the studio has confirmed one prerequisite, and if so who said so and when.
+ *
+ * A **type** rather than a sentence, because MUSE-85 is a sentence that was believed: the
+ * authors who came after it read that three of these had been agreed with the studio and
+ * left those three alone — precisely what a comment is bad at and what a compiler is good
+ * at. The confirmed branch cannot be written without a person and a date, so a
+ * confirmation can no longer be asserted the way that one was: as a claim with no source
+ * attached to it.
+ *
+ * `by` is **the person who said it**, not a ticket and not an agent. „MUSE-36" is not an
+ * answer to who confirmed a threshold; neither is „the brief" (MUSE-80).
+ */
+export type PrerequisiteConfirmation =
+  | { readonly confirmed: false }
+  | {
+      readonly confirmed: true;
+      /** Who confirmed the wording. A person. */
+      readonly by: string;
+      /** The day they confirmed it, `YYYY-MM-DD`. */
+      readonly on: string;
+    };
+
+/**
+ * **Nobody, for any of the four (MUSE-85).** See the note above `LEVEL_PREREQUISITE`.
+ *
+ * Keyed by level so that confirming one is confirming one: that is the whole defect this
+ * replaces, which was a single sentence standing in for three separate conversations none
+ * of which happened. `test/schedule.test.ts` pins the record as empty, so filling an entry
+ * in is a red test asking for the frozen list of published strings to move with it — the
+ * `REBUILT_FROM_PARTS` mechanic (MUSE-67), where fixing the thing turns the guard red
+ * rather than leaving a stale exemption behind.
+ *
+ * This is not a second copy of the wording and must not become one: `LEVEL_PREREQUISITE`
+ * stays the only place the strings live (`test/home.test.ts`'s single-source guard).
+ */
+export const LEVEL_PREREQUISITE_CONFIRMATION: Record<Level, PrerequisiteConfirmation> = {
+  beginner: { confirmed: false },
+  improver: { confirmed: false },
+  intermediate: { confirmed: false },
+  advanced: { confirmed: false },
 };
 
 /**

@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
@@ -8,7 +12,14 @@ import {
   type Build,
 } from './helpers/build';
 import { seededSchedule, seedDocsOfType, type SeedRow } from './helpers/seed';
-import { classCount } from '../src/lib/schedule';
+import {
+  classCount,
+  LEVEL_PREREQUISITE_CONFIRMATION,
+  type PrerequisiteConfirmation,
+} from '../src/lib/schedule';
+
+/** The repository root, for the one assertion below that reads a source file. */
+const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 /**
  * **The timetable Mina supplied, as a photograph of a sheet of paper (MUSE-36).**
@@ -912,5 +923,217 @@ describe('design-system rules the component could break silently', () => {
     const css = pageCss('hr');
     expect(css).not.toMatch(/box-shadow\s*:\s*(?!none)/);
     expect(css).not.toMatch(/filter\s*:\s*[^;}]*drop-shadow/);
+  });
+});
+
+/**
+ * **MUSE-85 — the four entry thresholds, frozen, and the confirmation record, which is
+ * empty.**
+ *
+ * `/schedule`, `/en/schedule` and both homepages publish an entry threshold for a real
+ * class, and the last two of the four tell a visitor whether they may join: „Plešeš oko
+ * godinu dana." and „Plešeš dvije ili više godina.". Until MUSE-85 the file they live in
+ * stated that three of the four had been agreed with the studio, licensing them as
+ * confirmed. Nothing records such a conversation. (The sentence is named and not quoted,
+ * here and in `src/lib/schedule.ts`, for MUSE-42's reason.) Verified commit by commit,
+ * with `git log -S` on each string:
+ *
+ * | string | first appears in |
+ * |---|---|
+ * | beginner, HR and EN | `c303292` — MUSE-6, the foundation commit |
+ * | advanced, HR and EN | `c303292` — MUSE-6 |
+ * | intermediate, HR and EN | `c45d750`, as invented homepage door copy; restated into `LEVEL_PREREQUISITE` by `c303292` |
+ * | improver, HR and EN | `4be63d3` — MUSE-36 |
+ * | the sentence licensing the other three | `4be63d3` — MUSE-36 |
+ *
+ * ## What this suite can assert, and why it is a frozen list rather than two builds
+ *
+ * The honest requirement is *the rendered pages do not move*. Two builds of two revisions
+ * would say it directly and cannot be had: the heavyweight budget's headroom is zero
+ * (`test/helpers/concurrency.ts`), and a test that compared this branch to its own merge
+ * base would stop meaning anything the moment it merged. So this is
+ * `PUBLISHED_BEFORE_THE_MIGRATION`'s shape — the strings as `main` published them, written
+ * out here, checked against a real build. It costs no operation, it keeps working after
+ * the branch lands, and it is the same assertion for every future reader.
+ *
+ * **It is a second copy of the content, deliberately, and that is what gives it teeth.**
+ * The existing AC3 block above reads these lines through regexes — `/oko godinu dana/i`,
+ * `/godin/i` — which is right for *its* criterion (is the prerequisite measured in time
+ * danced?) and cannot see a reword. „Plešeš nekoliko godina." passes it. So softening a
+ * number into vagueness, which is the one thing MUSE-85 says not to do, was reachable with
+ * the suite green.
+ *
+ * When the studio legitimately rewords one, edit the entry here **and** its confirmation
+ * record below, in the same commit, with a sentence saying who decided it — the rule
+ * `PUBLISHED_BEFORE_THE_MIGRATION` and `CONFIRMED_TIERS` are both kept by. Do not quietly
+ * make it match.
+ */
+const PUBLISHED_THRESHOLDS = {
+  hr: {
+    beginner: 'Bez iskustva — nikad nisi plesao ni plesala.',
+    improver: 'Plešeš nekoliko mjeseci.',
+    intermediate: 'Plešeš oko godinu dana.',
+    advanced: 'Plešeš dvije ili više godina.',
+  },
+  en: {
+    beginner: 'No experience — you have never danced.',
+    improver: 'A few months of dancing.',
+    intermediate: 'About a year of dancing.',
+    advanced: 'Two or more years of dancing.',
+  },
+} as const;
+
+/**
+ * Where each locale's homepage is published, and which thresholds it carries.
+ *
+ * A homepage carries two of the four, not all of them: `Home.astro`'s `DOOR_LEVELS` is a
+ * hand-picked pair — the person who has never danced and the person a year in — so the
+ * improver and advanced thresholds appear on `/schedule` alone. That is pinned in both
+ * directions below, because „the four pages agree" (MUSE-85's AC4) is a claim about one
+ * source rendering in four places, not about four pages saying the same four things.
+ */
+const HOME_FILE: Record<Locale, string> = { hr: 'index.html', en: 'en/index.html' };
+const HOME_LEVELS = ['beginner', 'intermediate'] as const satisfies readonly LevelKey[];
+
+describe('MUSE-85: the published entry thresholds, and what the file claims about them', () => {
+  for (const locale of LOCALES) {
+    it(`publishes each threshold verbatim on /schedule (${locale})`, () => {
+      const content = text(main(page[locale]));
+      for (const level of LEVEL_KEYS) {
+        expect(content, `${level} threshold on the ${locale} schedule`).toContain(
+          PUBLISHED_THRESHOLDS[locale][level],
+        );
+      }
+    });
+
+    it(`publishes the two door thresholds verbatim on the homepage (${locale})`, () => {
+      const content = text(main(build.read(HOME_FILE[locale])));
+      for (const level of HOME_LEVELS) {
+        expect(content, `${level} threshold on the ${locale} homepage`).toContain(
+          PUBLISHED_THRESHOLDS[locale][level],
+        );
+      }
+    });
+
+    it(`keeps the other two thresholds off the homepage (${locale})`, () => {
+      // The other direction of AC4. Without it, „both homepages carry their doors'
+      // thresholds" is satisfied by a homepage that carries all four — which would be a
+      // door onto a level this page deliberately does not open (`DOOR_LEVELS`).
+      const content = text(main(build.read(HOME_FILE[locale])));
+      const offstage = LEVEL_KEYS.filter(
+        (level) => !(HOME_LEVELS as readonly string[]).includes(level),
+      );
+      expect(offstage, 'every level has a door — DOOR_LEVELS has changed').not.toEqual([]);
+      for (const level of offstage) {
+        expect(content, `${level} threshold reached the ${locale} homepage`).not.toContain(
+          PUBLISHED_THRESHOLDS[locale][level],
+        );
+      }
+    });
+  }
+
+  it('renders one source in four places: the shared thresholds are byte-identical', () => {
+    // AC4 as stated. Four pages, one constant: a per-page copy would satisfy every
+    // assertion above and disagree the first time one of them was edited — which is
+    // MUSE-18, verbatim, on these exact strings.
+    for (const level of HOME_LEVELS) {
+      for (const locale of LOCALES) {
+        const onSchedule = text(main(page[locale]));
+        const onHome = text(main(build.read(HOME_FILE[locale])));
+        const expected = PUBLISHED_THRESHOLDS[locale][level];
+        expect([onSchedule.includes(expected), onHome.includes(expected)]).toEqual([
+          true,
+          true,
+        ]);
+      }
+    }
+  });
+});
+
+/**
+ * **The confirmation record, and the one way a future reader can tell (MUSE-85).**
+ *
+ * AC1 and AC3 are about what the file *says*, and a comment is the weakest instrument
+ * there is for them: the defect this ticket exists for was a comment, written in good
+ * faith, that later authors believed instead of opening the file. Correcting the prose is
+ * necessary and it is not sufficient — the same sentence can be written again tomorrow,
+ * about the same four strings, and nothing would fail.
+ *
+ * So the confirmation lives in a value instead. `LEVEL_PREREQUISITE_CONFIRMATION` is a
+ * discriminated union, which puts the two halves of MUSE-85 in two different places:
+ *
+ *   - **the type** makes „confirmed" unwritable without a person and a date, at compile
+ *     time, so a confirmation cannot be recorded the way this one was — as an assertion
+ *     with no source. `astro check` is inside `npm run build`, and the `@ts-expect-error`
+ *     below is what keeps that claim from being vacuous.
+ *   - **this test** pins the record as *empty*, so the day somebody confirms one with
+ *     Mina the suite goes red naming the level and asking for this list to move with it.
+ *     That is `REBUILT_FROM_PARTS`'s mechanic (MUSE-67): the exemption is asserted still
+ *     live, so fixing the thing turns the guard red rather than leaving it stale.
+ *
+ * **This does not satisfy AC2 and is not pretending to.** AC2 asks that every published
+ * threshold be confirmed-with-a-record or removed; the owner chose to keep all four while
+ * unconfirmed, pending a conversation with Mina. What is below is the slot that
+ * conversation's answer goes into, and the reason the file can no longer claim to have
+ * had it.
+ */
+const CONFIRMED_BY_THE_STUDIO: readonly LevelKey[] = [];
+
+describe('MUSE-85: no threshold claims a confirmation nobody can source', () => {
+  it('has a confirmation record for exactly the levels the site publishes', () => {
+    // A fifth level forces the decision rather than inheriting „unconfirmed" by default.
+    expect(Object.keys(LEVEL_PREREQUISITE_CONFIRMATION).sort()).toEqual(
+      [...LEVEL_KEYS].sort(),
+    );
+  });
+
+  it('records a confirmation for none of the four, which is what MUSE-85 found', () => {
+    const confirmed = LEVEL_KEYS.filter(
+      (level) => LEVEL_PREREQUISITE_CONFIRMATION[level].confirmed,
+    );
+    expect(
+      confirmed,
+      'a threshold is now recorded as confirmed. If the studio confirmed it, say so here ' +
+        'and in PUBLISHED_THRESHOLDS above, in the same commit, naming who and when — ' +
+        'that is MUSE-85 closed rather than reopened.',
+    ).toEqual(CONFIRMED_BY_THE_STUDIO);
+  });
+
+  it('names a person and a date for any confirmation it does record', () => {
+    // Vacuous today by construction, and the directive below is why that is acceptable
+    // rather than decorative: the rule has to exist before the first entry, because the
+    // first entry is the one that will be written in a hurry.
+    for (const level of LEVEL_KEYS) {
+      const record = LEVEL_PREREQUISITE_CONFIRMATION[level];
+      if (!record.confirmed) continue;
+      expect(record.by.trim(), `${level} is confirmed by nobody`).not.toBe('');
+      expect(record.on, `${level}'s confirmation is not dated`).toMatch(
+        /^\d{4}-\d{2}-\d{2}$/,
+      );
+    }
+  });
+
+  it('cannot express a confirmation without a person and a date', () => {
+    // The assertion with teeth, and it is the compiler's rather than vitest's: this line
+    // is an error unless the type refuses it, and an unused directive is an error too.
+    // `tsconfig.json` includes `**/*.ts`, so `npm run typecheck` reads it.
+    // @ts-expect-error a confirmed record needs `by` and `on`
+    const unsourced: PrerequisiteConfirmation = { confirmed: true };
+    expect(unsourced.confirmed).toBe(true);
+  });
+
+  it('no longer claims three of them were written with Mina', () => {
+    // The exact sentence MUSE-85 was filed about, retired. It is deliberately not in
+    // `test/helpers/offer-claims.ts`'s `RETIRED_CLAIMS`: that list is for claims the
+    // *site published* to a visitor, and widening it into „any untrue sentence anywhere"
+    // is how a narrow, checkable guard stops being either. This is a code comment, so it
+    // is asserted beside the code.
+    //
+    // Scoped to the one file on purpose, and the limit is worth stating: the needle below
+    // is itself the sentence, so a repository-wide scan would match this line. `CLAUDE.md`
+    // repeated the claim too and MUSE-85 corrected it there by hand; what a test can hold
+    // is the file the next author will edit.
+    const source = readFileSync(join(SOURCE_ROOT, 'src/lib/schedule.ts'), 'utf8');
+    expect(source).not.toContain('written with Mina');
   });
 });
