@@ -194,8 +194,21 @@ export const LEVEL_PREREQUISITE: Record<Locale, Record<Level, string>> = {
  * confirmation can no longer be asserted the way that one was: as a claim with no source
  * attached to it.
  *
+ * **Both halves are red on every pull request and every deploy, not only under `npm
+ * test`.** `tsconfig.json` includes every `.ts` file in the tree — the suite's files
+ * among them — and `npm run build` runs `astro check` before `astro build`, so a
+ * `confirmed: true` missing `by` or `on` fails the build, and so does the
+ * `@ts-expect-error` in `test/schedule.test.ts` going unused, which is what stops this
+ * type from being quietly widened. `deploy.yml` runs `npm run build` and nothing else, so
+ * the deploy is covered by the same two.
+ *
  * `by` is **the person who said it**, not a ticket and not an agent. „MUSE-36" is not an
- * answer to who confirmed a threshold; neither is „the brief" (MUSE-80).
+ * answer to who confirmed a threshold; neither is „the brief" (MUSE-80). **The type
+ * cannot enforce that** — `by` is a `string`, so `by: 'MUSE-36'` compiles and satisfies
+ * „names a person and a date". What mitigates it is the empty-record pin in
+ * `test/schedule.test.ts`: the first entry written here reddens the suite and so is read
+ * by somebody before it lands. A pattern refusing a ticket identifier was considered and
+ * is not worth it — it would be a list of the shapes a non-answer can take.
  */
 export type PrerequisiteConfirmation =
   | { readonly confirmed: false }

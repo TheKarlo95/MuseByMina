@@ -1032,22 +1032,25 @@ describe('MUSE-85: the published entry thresholds, and what the file claims abou
     });
   }
 
-  it('renders one source in four places: the shared thresholds are byte-identical', () => {
-    // AC4 as stated. Four pages, one constant: a per-page copy would satisfy every
-    // assertion above and disagree the first time one of them was edited — which is
-    // MUSE-18, verbatim, on these exact strings.
-    for (const level of HOME_LEVELS) {
-      for (const locale of LOCALES) {
-        const onSchedule = text(main(page[locale]));
-        const onHome = text(main(build.read(HOME_FILE[locale])));
-        const expected = PUBLISHED_THRESHOLDS[locale][level];
-        expect([onSchedule.includes(expected), onHome.includes(expected)]).toEqual([
-          true,
-          true,
-        ]);
-      }
-    }
-  });
+  /**
+   * **AC4's „one source" half is not asserted here, and the guard that does assert it is
+   * `test/home.test.ts`.**
+   *
+   * There was a fifth test on this block called „renders one source in four places",
+   * comparing the two pages' renderings of each shared threshold. It was **deleted**: a
+   * per-page duplicate carrying identical text satisfies it, so it could only ever fail
+   * in lockstep with the four assertions above, and its comment claimed it would catch
+   * MUSE-18's second copy — which it would not. A redundant assertion is a reader's time;
+   * one whose comment describes a guard it is not is worse than that, and it is this
+   * ticket's own subject arriving in this ticket's own diff.
+   *
+   * What actually holds single-sourceness is `test/home.test.ts`, *AC3: the guard — a
+   * level name may not be hardcoded outside `LEVEL_NAME`*, whose `prerequisite` group
+   * walks the source tree for any copy of a `LEVEL_PREREQUISITE` string outside
+   * `src/lib/schedule.ts`. That is a claim about the source, which is where a second copy
+   * would live; what these four assertions hold is the weaker, complementary claim that
+   * the one constant reaches all four published pages.
+   */
 });
 
 /**
@@ -1064,8 +1067,11 @@ describe('MUSE-85: the published entry thresholds, and what the file claims abou
  *
  *   - **the type** makes „confirmed" unwritable without a person and a date, at compile
  *     time, so a confirmation cannot be recorded the way this one was — as an assertion
- *     with no source. `astro check` is inside `npm run build`, and the `@ts-expect-error`
- *     below is what keeps that claim from being vacuous.
+ *     with no source. **That half does not depend on this suite running at all**:
+ *     `tsconfig.json` includes every `.ts` file in the tree, this one among them, and
+ *     `npm run build` runs `astro check` — so both a `confirmed: true` missing its fields
+ *     *and* the `@ts-expect-error` below going unused are build failures, on every pull
+ *     request and on every deploy, which runs `npm run build` and nothing else.
  *   - **this test** pins the record as *empty*, so the day somebody confirms one with
  *     Mina the suite goes red naming the level and asking for this list to move with it.
  *     That is `REBUILT_FROM_PARTS`'s mechanic (MUSE-67): the exemption is asserted still
@@ -1082,9 +1088,11 @@ const CONFIRMED_BY_THE_STUDIO: readonly LevelKey[] = [];
 describe('MUSE-85: no threshold claims a confirmation nobody can source', () => {
   it('has a confirmation record for exactly the levels the site publishes', () => {
     // A fifth level forces the decision rather than inheriting „unconfirmed" by default.
-    expect(Object.keys(LEVEL_PREREQUISITE_CONFIRMATION).sort()).toEqual(
-      [...LEVEL_KEYS].sort(),
-    );
+    expect(
+      Object.keys(LEVEL_PREREQUISITE_CONFIRMATION).sort(),
+      'LEVEL_PREREQUISITE_CONFIRMATION and LEVELS disagree. A level with no entry has no ' +
+        'confirmation record, so it would publish a threshold nothing here can speak for.',
+    ).toEqual([...LEVEL_KEYS].sort());
   });
 
   it('records a confirmation for none of the four, which is what MUSE-85 found', () => {
@@ -1122,6 +1130,20 @@ describe('MUSE-85: no threshold claims a confirmation nobody can source', () => 
     expect(unsourced.confirmed).toBe(true);
   });
 
+  /**
+   * **This needle holds one phrasing, not the property.** AC3 asks that nothing in the
+   * file read as „three of these are settled" unless three of them are, and *that* is not
+   * a bounded pattern — unlike MUSE-80's reply-verb-plus-period adjacency, which works
+   * because both halves are enumerable. Review demonstrated the gap: the same licensing
+   * claim reworded („agreed with the studio in person and needs no further check")
+   * inserted into this very comment left the file **67/67 green**.
+   *
+   * No guard is built for it, deliberately. What carries the general property is the pair
+   * above — `PrerequisiteConfirmation` refusing a confirmation without a person and a
+   * date, and the empty-record pin, which goes red on the first entry and so puts a human
+   * in front of this file. This assertion is the narrow half: the specific sentence
+   * MUSE-85 was filed about does not come back verbatim.
+   */
   it('no longer claims three of them were written with Mina', () => {
     // The exact sentence MUSE-85 was filed about, retired. It is deliberately not in
     // `test/helpers/offer-claims.ts`'s `RETIRED_CLAIMS`: that list is for claims the
