@@ -625,6 +625,20 @@ describe('a build stages its prerendered output where it writes it', () => {
     expect(fault).toContain(SHARED_STAGING);
     expect(fault).toContain('EXDEV');
     expect(fault).toContain('MUSE-41');
+
+    // **And the rule it states is the rule it enforces** (MUSE-92), which is the ticket's
+    // own subject one case narrower. The sibling allowed above is *not* under the project
+    // root, so a headline reading "outDir must live under the project root" — MUSE-41's
+    // wording, which outlived MUSE-41's predicate — would again promise something a
+    // passing case violates. The headline is the first line because that is what
+    // `buildErrorHeadline` carries into a failed build's report.
+    const headline = fault!.split('\n')[0]!;
+    expect(headline).toContain('start with the project root path');
+    expect(headline).not.toContain('under the project root');
+    // Whose rule it is, and the case it therefore admits — so a reader who believes the
+    // message cannot be surprised by the predicate.
+    expect(fault).toContain('getOutDirWithinCwd');
+    expect(fault).toContain('<root>-other/dist');
   });
 
   it('refuses an outDir above the project root, the one that deletes the project', async () => {
@@ -1207,11 +1221,12 @@ describe('the run reports a dead hook rather than swallowing it', () => {
       const coloured =
         '\u001b[31m\u001b[1m10:03:30\u001b[22m [ERROR] [muse-staging-guard]\u001b[39m ' +
         'An unhandled error occurred while running the "astro:config:setup" hook\n' +
-        'outDir must live under the project root (MUSE-41).';
+        'outDir must start with the project root path, and may not be the root (MUSE-41).';
 
       expect(buildErrorHeadline(coloured)).toBe(
         '[muse-staging-guard] An unhandled error occurred while running the ' +
-          '"astro:config:setup" hook — outDir must live under the project root (MUSE-41).',
+          '"astro:config:setup" hook — outDir must start with the project root path, and ' +
+          'may not be the root (MUSE-41).',
       );
     });
 

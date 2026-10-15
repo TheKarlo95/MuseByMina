@@ -111,10 +111,10 @@ export function prerenderStagingDir(outDir, cwd = process.cwd()) {
 /**
  * Why this `outDir` cannot be built into, or `null` if it can.
  *
- * One question — *is `outDir` inside the project root?* — rather than a list of the ways
- * a build can go wrong. `EXDEV`, the shared directory and the deleted project are three
- * symptoms of the same condition, and a check per symptom is a check that misses the
- * fourth.
+ * One question — *does `outDir`'s path start with the project root's, and is it something
+ * other than the root itself?* — rather than a list of the ways a build can go wrong.
+ * `EXDEV`, the shared directory and the deleted project are three symptoms of the same
+ * condition, and a check per symptom is a check that misses the fourth.
  *
  * **It asks that about `outDir` and not about the staging directory** (MUSE-92). It used
  * to compare the staging directory against `outDir` — *does this build stage inside its
@@ -123,19 +123,24 @@ export function prerenderStagingDir(outDir, cwd = process.cwd()) {
  * is inside it, so the proxy answered "yes, it stages locally" and the build ran. Astro
  * and Vite then emptied the output directory, which contained the project root, and
  * deleted the project — sources, caches and all, with Vite's own generic warning the only
- * thing that objected and only after the fact. The rule the message below has always
- * stated is the right one, so it is now the rule the code states too.
+ * thing that objected and only after the fact. The message said „outDir must live under
+ * the project root" throughout, which is how the defect reads as impossible from the log:
+ * the sentence was right about the ancestor and the predicate was not. Both say the same
+ * thing now, and what they say is the predicate rather than the old sentence — see below.
  *
- * Two boundaries, both deliberate:
+ * Two boundaries, both deliberate, and **both stated in the message** — a guard whose
+ * message is wider than its predicate is the defect this ticket is about, one case
+ * narrower, so „under the project root" is gone from the wording as well as from the code:
  *
  *   - **The prefix is Astro's own raw string test**, the one `prerenderStagingDir` models,
  *     so the sibling whose name extends the root's (`<root>-other/dist`) is still allowed.
  *     It stages inside its own output, so it is safe, and `path.relative` would refuse it
- *     for nothing.
- *   - **The root itself is not *under* the root.** Astro refuses that build on its own —
+ *     for nothing. It is also **not** under the project root, which is why the message may
+ *     not claim that every allowed `outDir` is.
+ *   - **The root itself is refused.** Astro refuses that build on its own —
  *     `validateConfig`, `the outDir cannot be the root folder` — so nothing's outcome
  *     changes, but a guard against deleting the project may not rest on a check inside a
- *     dependency, and the rule would otherwise be one case wider than the sentence.
+ *     dependency, and the prefix alone would admit it.
  *
  * @param {string} outDir Absolute path to the build's output directory.
  * @param {string} [cwd] The working directory the build will run in.
@@ -145,19 +150,28 @@ export function stagingFault(outDir, cwd = process.cwd()) {
   if (outDir.startsWith(cwd) && relative(cwd, outDir) !== '') return null;
 
   return [
-    'outDir must live under the project root (MUSE-41, MUSE-92).',
+    // One line, and the ticket refs stay on it: `buildErrorHeadline` in
+    // test/helpers/scratch.ts reads the `[ERROR]` marker line plus the line after it, so
+    // a headline split in two loses half of what a failed build reports (MUSE-77).
+    'outDir must start with the project root path, and may not be the root (MUSE-41, MUSE-92).',
     '',
     `  outDir   ${outDir}`,
     `  root     ${cwd}`,
     `  staging  ${prerenderStagingDir(outDir, cwd)}`,
     '',
-    'Astro stages prerendered output in <outDir>/.prerender/ only when outDir starts',
-    'with the working directory, and otherwise in <cwd>/.astro/.prerender/ — renaming',
-    'every emitted asset out of it. This outDir is not under the project root, so the',
-    'build would fail with EXDEV across a filesystem boundary, and silently lose assets',
-    'to whichever concurrent build renames them first when it does not. And an outDir at',
-    'or above the project root is emptied before the build writes it, which deletes the',
-    'project. Build into the project root and copy or serve the output from there.',
+    "A string prefix and not a directory tree, because it is Astro's test rather than",
+    'ours: getOutDirWithinCwd stages prerendered output in <outDir>/.prerender/ exactly',
+    "when outDir's path starts with the working directory, and otherwise in",
+    '<cwd>/.astro/.prerender/ — renaming every emitted asset out of it afterwards. So a',
+    "sibling whose name extends the root's (<root>-other/dist) is allowed even though it",
+    'is not under the project root: Astro stages it inside its own output, which is',
+    "per-build and on that output's own filesystem.",
+    '',
+    'An outDir that starts elsewhere stages in the shared directory above instead, which',
+    'fails with EXDEV across a filesystem boundary and silently loses assets to whichever',
+    'concurrent build renames them first when it does not. An outDir at or above the root',
+    'is emptied before the build writes it, which deletes the project. Build into a',
+    'directory inside the project root and copy or serve the output from there.',
   ].join('\n');
 }
 
