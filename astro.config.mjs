@@ -1,5 +1,5 @@
 // @ts-check
-import { isAbsolute, join, relative } from 'node:path';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { defineConfig } from 'astro/config';
@@ -111,32 +111,53 @@ export function prerenderStagingDir(outDir, cwd = process.cwd()) {
 /**
  * Why this `outDir` cannot be built into, or `null` if it can.
  *
- * One question — *does this build stage inside its own output?* — rather than a list of
- * the ways it can go wrong. `EXDEV` and the shared directory are two symptoms of the same
- * fallback, and a check per symptom is a check that misses the third.
+ * One question — *is `outDir` inside the project root?* — rather than a list of the ways
+ * a build can go wrong. `EXDEV`, the shared directory and the deleted project are three
+ * symptoms of the same condition, and a check per symptom is a check that misses the
+ * fourth.
+ *
+ * **It asks that about `outDir` and not about the staging directory** (MUSE-92). It used
+ * to compare the staging directory against `outDir` — *does this build stage inside its
+ * own output?* — which is the same question for a descendant and the **opposite** one for
+ * an ancestor: for an `outDir` above the root, Astro's fallback `<cwd>/.astro/.prerender`
+ * is inside it, so the proxy answered "yes, it stages locally" and the build ran. Astro
+ * and Vite then emptied the output directory, which contained the project root, and
+ * deleted the project — sources, caches and all, with Vite's own generic warning the only
+ * thing that objected and only after the fact. The rule the message below has always
+ * stated is the right one, so it is now the rule the code states too.
+ *
+ * Two boundaries, both deliberate:
+ *
+ *   - **The prefix is Astro's own raw string test**, the one `prerenderStagingDir` models,
+ *     so the sibling whose name extends the root's (`<root>-other/dist`) is still allowed.
+ *     It stages inside its own output, so it is safe, and `path.relative` would refuse it
+ *     for nothing.
+ *   - **The root itself is not *under* the root.** Astro refuses that build on its own —
+ *     `validateConfig`, `the outDir cannot be the root folder` — so nothing's outcome
+ *     changes, but a guard against deleting the project may not rest on a check inside a
+ *     dependency, and the rule would otherwise be one case wider than the sentence.
  *
  * @param {string} outDir Absolute path to the build's output directory.
  * @param {string} [cwd] The working directory the build will run in.
  * @returns {string | null}
  */
 export function stagingFault(outDir, cwd = process.cwd()) {
-  const staging = prerenderStagingDir(outDir, cwd);
-  const step = relative(outDir, staging);
-  if (step !== '' && !step.startsWith('..') && !isAbsolute(step)) return null;
+  if (outDir.startsWith(cwd) && relative(cwd, outDir) !== '') return null;
 
   return [
-    'outDir must live under the project root (MUSE-41).',
+    'outDir must live under the project root (MUSE-41, MUSE-92).',
     '',
     `  outDir   ${outDir}`,
     `  root     ${cwd}`,
-    `  staging  ${staging}`,
+    `  staging  ${prerenderStagingDir(outDir, cwd)}`,
     '',
     'Astro stages prerendered output in <outDir>/.prerender/ only when outDir starts',
-    'with the working directory. This one does not, so the build would stage in the',
-    'directory above and rename every emitted asset out of it — which fails with EXDEV',
-    'across a filesystem boundary, and silently loses assets to whichever concurrent',
-    'build renames them first when it does not. Build into the project root and copy or',
-    'serve the output from there.',
+    'with the working directory, and otherwise in <cwd>/.astro/.prerender/ — renaming',
+    'every emitted asset out of it. This outDir is not under the project root, so the',
+    'build would fail with EXDEV across a filesystem boundary, and silently lose assets',
+    'to whichever concurrent build renames them first when it does not. And an outDir at',
+    'or above the project root is emptied before the build writes it, which deletes the',
+    'project. Build into the project root and copy or serve the output from there.',
   ].join('\n');
 }
 

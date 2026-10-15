@@ -771,6 +771,25 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   **`SCRATCH` being inside the repository is therefore a requirement, not a preference**:
   moving it to `os.tmpdir()` was harmless before MUSE-35 emitted any assets, and now puts
   all ten builds back on one staging path.
+
+  **The rule is a containment test on `outDir`, and asking it about the staging directory
+  instead is what deleted a project** (MUSE-92). `stagingFault` used to ask *"does this
+  build stage inside its own output?"* — the same question as the rule for a descendant
+  and the **opposite** one for an ancestor, because Astro's fallback
+  `<cwd>/.astro/.prerender` *is* inside an `outDir` above the root. So the guard whose
+  message says „outDir must live under the project root" allowed the one shape that does
+  not, and QA's `outDir = <root>/..` was emptied by Astro and Vite with the project root
+  inside it: sources, caches and all gone, Vite's own generic warning the only thing that
+  objected and only after the fact. The predicate is now `outDir` against `cwd`, which is
+  the sentence the message always carried. Two boundaries to leave alone: the test is
+  **Astro's raw string prefix**, the one `prerenderStagingDir` models, so the sibling whose
+  name extends the root's is still allowed (it stages inside its own output, so it is
+  safe, and `path.relative` would refuse it for nothing); and **the root itself is
+  refused**, because the root is not *under* the root — Astro's `validateConfig` refuses
+  that build too, so no outcome changed, but a guard against deleting the project may not
+  rest on a check inside a dependency. The ancestor cases are asserted against
+  `stagingFault` as a function and **never reproduced** — there is nothing to learn from
+  deleting a second project, and the function is what `astro:config:setup` consults.
 - **A browser suite waits for a condition, never for the clock** (MUSE-54), and
   `test/helpers/browser-settle.ts` is the only place it waits. Three suites flaked in one
   afternoon with no code in common and one defect in common: a measurement taken at a

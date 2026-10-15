@@ -609,6 +609,12 @@ describe('a build stages its prerendered output where it writes it', () => {
 
     expect(stagingFault(join(cwd, 'dist'), cwd)).toBeNull();
     expect(stagingFault(claimOutDir('staging'), cwd)).toBeNull();
+    // Astro's raw string prefix again, this time as an *allowance* rather than as a
+    // property of the model: a sibling whose name extends the root's stages inside its
+    // own output, so it is safe and is allowed. Written down here because MUSE-92
+    // replaced the predicate, and a containment test spelled with `path.relative` would
+    // have refused this build for nothing and nothing would have said so.
+    expect(stagingFault(`${cwd}-other/dist`, cwd)).toBeNull();
 
     const fault = stagingFault(join(tmpdir(), 'muse-dist'), cwd);
     expect(fault).not.toBeNull();
@@ -618,6 +624,59 @@ describe('a build stages its prerendered output where it writes it', () => {
     expect(fault).toContain(join(tmpdir(), 'muse-dist'));
     expect(fault).toContain(SHARED_STAGING);
     expect(fault).toContain('EXDEV');
+    expect(fault).toContain('MUSE-41');
+  });
+
+  it('refuses an outDir above the project root, the one that deletes the project', async () => {
+    // MUSE-92, and it is the most expensive defect this project has recorded: QA built a
+    // sandbox at `sandbox/proj` with `outDir = sandbox`, the guard allowed it, and Astro
+    // and Vite emptied the output directory — which contained the project root — and
+    // deleted the whole project, sources and all. The only objection was Vite's own
+    // generic warning, printed after the fact.
+    //
+    // The predicate used to ask *"is the staging directory inside `outDir`?"*, which is
+    // equivalent to the rule for a descendant and **inverts for an ancestor**: Astro
+    // falls back to `<cwd>/.astro/.prerender`, which is inside an ancestor `outDir`, so
+    // the proxy answered yes. The assertion below states both halves — the inversion,
+    // and the refusal — so the next reader can see why the old question looked right.
+    //
+    // Asserted against the function and never against a build: there is nothing to learn
+    // from reproducing the deletion, and the guard runs in `astro:config:setup`, so this
+    // *is* the thing the build consults.
+    const { stagingFault, prerenderStagingDir } = await loadStagingRules();
+    const cwd = process.cwd();
+
+    for (const above of [dirname(cwd), dirname(dirname(cwd)), '/']) {
+      // The inversion itself: staging really does land inside this outDir.
+      expect(prerenderStagingDir(above, cwd), above).toBe(SHARED_STAGING);
+      expect(within(SHARED_STAGING, above), above).toBe(true);
+
+      const fault = stagingFault(above, cwd);
+      expect(fault, `outDir ${above} is above ${cwd} and was allowed`).not.toBeNull();
+      // Named the same way the other refusals are. `/` is a substring of every path, so
+      // the label is part of the needle or the assertion is vacuous for the worst case.
+      expect(fault).toContain(`outDir   ${above}`);
+      expect(fault).toContain(`root     ${cwd}`);
+      expect(fault).toContain(`staging  ${SHARED_STAGING}`);
+      expect(fault).toContain('EXDEV');
+      expect(fault).toContain('MUSE-41');
+    }
+  });
+
+  it('refuses the project root itself, because the root is not under the root', async () => {
+    // The one case MUSE-92 moved from allowed to refused, and it changes no build's
+    // outcome: Astro's own `validateConfig` throws `the outDir cannot be the root folder`
+    // for exactly this, so `astro build --outDir .` failed before and fails now. What
+    // changes is which check says so and when — ours, in `astro:config:setup`, naming the
+    // root and the staging directory — and that the message's rule is now the rule the
+    // code enforces rather than one case wider. A guard against deleting the project that
+    // leans on a check inside a dependency is a guard that can be upgraded away.
+    const { stagingFault } = await loadStagingRules();
+    const cwd = process.cwd();
+
+    const fault = stagingFault(cwd, cwd);
+    expect(fault, `outDir ${cwd} is the project root and was allowed`).not.toBeNull();
+    expect(fault).toContain(`outDir   ${cwd}`);
     expect(fault).toContain('MUSE-41');
   });
 
