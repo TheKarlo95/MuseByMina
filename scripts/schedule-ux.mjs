@@ -1,3 +1,9 @@
+// @ts-nocheck — MUSE-121: 41 errors when `scripts/` was first checked, nearly all missing
+// annotations on `page.$$eval` callbacks (`Element` has no `dataset`/`open`) and on the
+// helpers. Read for a live defect before suppressing: the `.padEnd` errors are `name`
+// destructured from `[string, {width, height}, string][]`, which TypeScript widens to a
+// union; `name` is always a string. Annotate and delete this line when the file is next
+// touched.
 import { describeMeasured, launchChecks, openCheckPage } from './browser-checks.mjs';
 import { openSiteOrExit } from './dist-origin.mjs';
 

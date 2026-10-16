@@ -1,9 +1,22 @@
 {
   "extends": "astro/tsconfigs/strict",
-  "include": [".astro/types.d.ts", "**/*.ts", "**/*.tsx", "**/*.astro", "*.mjs"],
+  // `scripts/` holds four of the project's gates (budget, a11y, ds, format) and the host
+  // model every browser check runs on. It is listed on purpose, and the glob is INERT
+  // without `compilerOptions.checkJs`: allowJs alone puts a file in the program and
+  // reports nothing about it. MUSE-121 found that by adding the glob and getting 0 errors.
+  // Two scripts carry a `// @ts-nocheck — MUSE-121` of their own; delete it as each is touched.
+  "include": [
+    ".astro/types.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.astro",
+    "*.mjs",
+    "scripts/**/*.mjs"
+  ],
   "exclude": ["dist", "node_modules"],
   "compilerOptions": {
     "types": ["node"],
-    "strictNullChecks": true
+    "strictNullChecks": true,
+    "checkJs": true
   }
 }

@@ -92,7 +92,7 @@ console.log(`pages   ${targets.length} from the build, both themes`);
 console.log(`rules   every rule axe-core enables by default — no tag filter (MUSE-75)`);
 
 for (const target of targets) {
-  for (const scheme of ['dark', 'light']) {
+  for (const scheme of /** @type {('dark' | 'light')[]} */ (['dark', 'light'])) {
     /** @type {Awaited<ReturnType<typeof openCheckPage>>} */
     let open;
     try {

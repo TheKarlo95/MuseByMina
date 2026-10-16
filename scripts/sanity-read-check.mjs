@@ -50,7 +50,7 @@ function loadQueries() {
 /** Every parameter any query takes, so one call site can run all of them. */
 const PARAMS = { now: new Date().toISOString() };
 
-function describe(result) {
+function describe(/** @type {any} */ result) {
   if (Array.isArray(result)) {
     return result.length === 0
       ? { verdict: 'EMPTY', detail: 'returned an empty array' }
@@ -86,7 +86,7 @@ for (const { name, query } of queries) {
     response = await fetch(queryUrl(query, PARAMS));
   } catch (cause) {
     broken += 1;
-    console.log(`BROKEN  ${name} — could not reach the API: ${cause.message}`);
+    console.log(`BROKEN  ${name} — could not reach the API: ${cause instanceof Error ? cause.message : String(cause)}`);
     continue;
   }
 

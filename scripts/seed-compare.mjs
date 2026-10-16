@@ -35,7 +35,12 @@ const SEED_FILE = fileURLToPath(new URL(`../${SEED_PATH}`, import.meta.url));
  */
 export const ABSENT = Symbol('absent');
 
-/** Every document in an NDJSON seed, in file order. */
+/**
+ * Every document in an NDJSON seed, in file order.
+ *
+ * @param {string} text
+ * @returns {any[]}
+ */
 export function parseSeed(text) {
   return text
     .split('\n')
@@ -46,7 +51,12 @@ export function parseSeed(text) {
 /** The committed seed, as text, so a caller can compare it with another revision's. */
 export const readSeed = () => readFileSync(SEED_FILE, 'utf8');
 
-/** Drop `_key`, `_type` and friends: they are structure, not content. */
+/**
+ * Drop `_key`, `_type` and friends: they are structure, not content.
+ *
+ * @param {any} value
+ * @returns {any}
+ */
 export function contentOf(value) {
   if (Array.isArray(value)) return value.map(contentOf);
   if (value && typeof value === 'object') {
@@ -59,7 +69,13 @@ export function contentOf(value) {
   return value;
 }
 
-/** Every leaf of `value`, as `path` → scalar, so a difference can be named. */
+/**
+ * Every leaf of `value`, as `path` → scalar, so a difference can be named.
+ *
+ * @param {any} value
+ * @param {string} [path]
+ * @returns {[string, any][]}
+ */
 export function leaves(value, path = '') {
   if (Array.isArray(value)) {
     return value.flatMap((entry, index) => leaves(entry, `${path}[${index}]`));
@@ -77,13 +93,15 @@ export function leaves(value, path = '') {
  * callers look paths up, and the list form made the old comparison quadratic in the leaf
  * count for no reason anybody wanted.
  */
-export const leafMap = (doc) => new Map(leaves(contentOf(doc)));
+export const leafMap = (/** @type {any} */ doc) => new Map(leaves(contentOf(doc)));
 
 /** The leaf at `path`, or `ABSENT`. */
-export const leafAt = (map, path) => (map.has(path) ? map.get(path) : ABSENT);
+export const leafAt = (/** @type {Map<string, any>} */ map, /** @type {string} */ path) =>
+  map.has(path) ? map.get(path) : ABSENT;
 
 /** A leaf as a message can print it. `ABSENT` prints as a word, not as `undefined`. */
-export const showLeaf = (value) => (value === ABSENT ? '(absent)' : JSON.stringify(value));
+export const showLeaf = (/** @type {any} */ value) =>
+  value === ABSENT ? '(absent)' : JSON.stringify(value);
 
 /**
  * The leaves on which a seeded document and the dataset disagree.
@@ -94,7 +112,7 @@ export const showLeaf = (value) => (value === ABSENT ? '(absent)' : JSON.stringi
  * equally load-bearing for the release gate, which would otherwise report every optional
  * field as something to reconcile.
  */
-export function differences(seeded, published) {
+export function differences(/** @type {any} */ seeded, /** @type {any} */ published) {
   const live = leafMap(published);
   return [...leafMap(seeded)]
     .filter(([path, value]) => leafAt(live, path) !== value)
@@ -133,7 +151,7 @@ export const target = () => ({
 export const API_HOST = 'api.sanity.io';
 
 /** A GROQ query and its parameters, as a URL against the uncached host. */
-export function queryUrl(query, params = {}, where = target()) {
+export function queryUrl(/** @type {string} */ query, params = {}, where = target()) {
   const search = new URLSearchParams({ query });
   for (const [key, value] of Object.entries(params)) {
     search.set(`$${key}`, JSON.stringify(value));
@@ -150,7 +168,7 @@ export function queryUrl(query, params = {}, where = target()) {
  * Throws on anything other than a 200. Both callers decide for themselves what an
  * unreachable API means; they do not agree about it, so this must not decide for them.
  */
-export async function fetchLive(ids, where = target()) {
+export async function fetchLive(/** @type {string[]} */ ids, where = target()) {
   const response = await fetch(queryUrl('*[_id in $ids]', { ids }, where));
   if (!response.ok) {
     throw new Error(

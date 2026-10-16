@@ -266,7 +266,7 @@ export async function openCheckPage(browser, site, route, options = {}) {
           }
         }
       },
-      [...Object.entries(storage), [LANG_KEY, locale]],
+      /** @type {[string, string][]} */ ([...Object.entries(storage), [LANG_KEY, locale]]),
     );
 
     const page = await context.newPage();
@@ -371,7 +371,7 @@ export async function openRedirectProbe(
             // As above: a blocked localStorage is not this probe's finding.
           }
         },
-        [LANG_KEY, storedLang],
+        /** @type {[string, string]} */ ([LANG_KEY, storedLang]),
       );
     }
 
