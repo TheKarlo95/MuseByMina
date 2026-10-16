@@ -6,7 +6,7 @@ import type { Browser } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { launchChecks, localeOfRoute, openCheckPage } from '../scripts/browser-checks.mjs';
-import { FACES, preloadFaces } from '../src/lib/fonts';
+import { type Face, FACES, preloadFaces } from '../src/lib/fonts';
 import { routeKey } from '../src/lib/i18n';
 import { ROUTES } from '../src/lib/pages';
 import {
@@ -218,7 +218,125 @@ function faceName(url: string): string {
 }
 
 /**
- * The faces the page fetches **when nothing preloads them for it**.
+ * **The `unicode-range` split, read off the stylesheet that declares it** (MUSE-106).
+ *
+ * The second measurement below asks a character-range question — "does this page hold a
+ * character no `latin` subset can paint" — and the ranges that answer it are in
+ * `src/styles/fonts.css`, beside the `src` of each file. They are read from there rather
+ * than written here because a transcription of them is a second copy that can go stale
+ * silently in the direction that passes: a range typed slightly too wide here reports every
+ * diacritic as covered by `latin` and the guard finds nothing for the rest of its life.
+ *
+ * The *source* rather than the served CSS, because this is the declaration site and it is
+ * one file for every environment; what each environment actually serves is already held to
+ * it by `declaredFaces` above and by `test/assets.test.ts`.
+ */
+const FONTS_CSS = fileURLToPath(new URL('../src/styles/fonts.css', import.meta.url));
+
+/** One declared subset: the stem a reader can look up, and the code points it covers. */
+interface Subset {
+  readonly id: string;
+  readonly subset: Face['subset'];
+  /** Inclusive `[from, to]` pairs, as `unicode-range` writes them. */
+  readonly ranges: readonly (readonly [number, number])[];
+}
+
+/**
+ * One `unicode-range` value, parsed.
+ *
+ * An unrecognised token throws rather than being skipped: the wildcard form (`U+00??`)
+ * and the open-ended form are both legal CSS this project does not use today, and a
+ * parser that quietly dropped one would under-report coverage, which fails in the
+ * direction that passes.
+ */
+function parseRanges(value: string, id: string): (readonly [number, number])[] {
+  return value.split(',').map((token) => {
+    const text = token.trim();
+    const match = /^U\+([0-9A-Fa-f]{1,6})(?:-([0-9A-Fa-f]{1,6}))?$/.exec(text);
+    if (match === null) {
+      throw new Error(
+        `src/styles/fonts.css: the unicode-range token "${text}" on ${id} is not a form ` +
+          `test/fonts.test.ts knows how to read — teach parseRanges about it rather than ` +
+          `letting the character-range measurement under-report coverage`,
+      );
+    }
+    const from = Number.parseInt(match[1]!, 16);
+    return [from, match[2] === undefined ? from : Number.parseInt(match[2], 16)] as const;
+  });
+}
+
+let subsetCache: Subset[] | undefined;
+
+/** Every `@font-face` in `fonts.css`, paired with the face `src/lib/fonts.ts` names. */
+function subsets(): Subset[] {
+  if (subsetCache !== undefined) return subsetCache;
+
+  const css = readFileSync(FONTS_CSS, 'utf8');
+  const found: Subset[] = [];
+
+  for (const [, block] of css.matchAll(/@font-face\s*\{([^}]*)\}/g)) {
+    const src = /url\(\s*['"]?([^'")]+)['"]?\s*\)/.exec(block ?? '')?.[1];
+    const range = /unicode-range:\s*([^;}]+)/.exec(block ?? '')?.[1];
+    if (src === undefined || range === undefined) continue;
+
+    const id = (src.split('/').pop() ?? src).replace(/\.woff2$/, '');
+    const face = FACES.find((entry) => entry.id === id);
+    if (face === undefined) {
+      throw new Error(
+        `src/styles/fonts.css declares ${id}, which is not a face src/lib/fonts.ts knows ` +
+          `about — the stylesheet and the preload list have drifted apart`,
+      );
+    }
+    found.push({ id, subset: face.subset, ranges: parseRanges(range, id) });
+  }
+
+  subsetCache = found;
+  return found;
+}
+
+/** Can a subset of this half of the split paint `cp` at all? */
+function covers(subset: Face['subset'], cp: number): boolean {
+  return subsets().some(
+    (entry) =>
+      entry.subset === subset && entry.ranges.some(([from, to]) => cp >= from && cp <= to),
+  );
+}
+
+/**
+ * The characters in `text` that **no `latin` subset can paint**.
+ *
+ * Deliberately not "which face paints this" — that is the cascade model this project
+ * refuses to build, twice over in `src/lib/fonts.ts`. This is the weaker question that
+ * can be answered without one, and it is the question `unicode-range` itself splits on.
+ */
+function latinExtOnly(text: string): string[] {
+  return [...new Set(text)]
+    .filter((char) => {
+      const cp = char.codePointAt(0);
+      return cp !== undefined && !covers('latin', cp) && covers('latin-ext', cp);
+    })
+    .sort();
+}
+
+/** A string the document holds, and roughly where, for a failure to quote. */
+interface UnpaintedText {
+  readonly text: string;
+  readonly where: string;
+}
+
+/** What one page, in one environment, answers about its own fonts. */
+interface Measurement {
+  /** Every woff2 the page asks the browser to preload. */
+  readonly preloaded: readonly string[];
+  /** Every woff2 the CSS engine asks for once nothing preloads one for it. */
+  readonly requested: readonly string[];
+  /** Text in the document the engine laid out no box for, so it painted nothing. */
+  readonly unpainted: readonly UnpaintedText[];
+}
+
+/**
+ * The faces the page fetches **when nothing preloads them for it**, and the text it
+ * holds that nothing painted.
  *
  * This is the measurement the whole preload claim rests on, and the obvious version of
  * it asserts nothing: a `<link rel="preload">` *is* a request, so "was this face
@@ -233,9 +351,30 @@ function faceName(url: string): string {
  * Measured with a real browser rather than by matching `unicode-range` here, for the
  * same reason `test/numerals.test.ts` screenshots glyphs instead of reading
  * `getComputedStyle`: a model of the engine passes whenever the model is wrong.
+ *
+ * ## The second question, asked of the same page (MUSE-106)
+ *
+ * **What the request measurement cannot see is text the page never paints.** `[hidden]`
+ * is `display: none`, so there is no layout, so the engine asks for no face — and a
+ * `latin-ext` character reachable only after an interaction is therefore reported as a
+ * face the page does not need. `src/lib/fonts.ts` already names that property as an
+ * argument against *deriving* the list from rendered text; it is also a hole in the
+ * measurement, and the section it was added to says so.
+ *
+ * So this visit collects a second thing: every string the document holds that **the
+ * engine laid out no box for**. Which text that is comes from `Range.getClientRects()` —
+ * the engine's own layout answer, asked rather than modelled, for the reason above. The
+ * `<head>` is out of scope because it is never painted with a webfont, and `<script>`,
+ * `<style>` and `<noscript>` because their text is not text.
+ *
+ * Both sets come out of one page load on purpose. The heavyweight census has zero
+ * headroom (`test/helpers/concurrency.ts`), and a second visit per route per environment
+ * would be forty-eight more page loads to ask a question this one is already standing in
+ * front of.
  */
-async function facesNeededWithoutPreloads(env: Environment, route: string): Promise<string[]> {
+async function measurePage(env: Environment, route: string): Promise<Measurement> {
   const requested = new Set<string>();
+  const preloaded = await preloadedFaces(env, route);
 
   // Opened through `scripts/browser-checks.mjs` (MUSE-48), and this is the suite the
   // ticket came out of. A bare Playwright page reports `en-US`, so asking for `''` opened
@@ -269,10 +408,69 @@ async function facesNeededWithoutPreloads(env: Environment, route: string): Prom
     // is the DOM it ended up with, preloads stripped and canonical untouched (MUSE-62).
     assertMeasuredPage(measured.url, await page.content(), env.name);
     await page.evaluate(() => document.fonts.ready);
-    return [...requested].sort();
+
+    const unpainted = await page.evaluate(() => {
+      /** A short, readable path to an element — three generations is enough to find it. */
+      const pathTo = (from: Element): string => {
+        const parts: string[] = [];
+        for (
+          let node: Element | null = from;
+          node !== null && node !== document.body && parts.length < 3;
+          node = node.parentElement
+        ) {
+          let part = node.tagName.toLowerCase();
+          if (node.id !== '') part += `#${node.id}`;
+          else if (node.classList.length > 0) part += `.${node.classList[0]!}`;
+          parts.unshift(part);
+        }
+        return parts.join(' > ');
+      };
+
+      const skip = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT']);
+      const found: { text: string; where: string }[] = [];
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        const text = (node.nodeValue ?? '').trim();
+        const parent = node.parentElement;
+        // A whitespace-only node has no rects even where it is painted, so it would
+        // otherwise be reported as unpainted on every page and say nothing.
+        if (text === '' || parent === null || skip.has(parent.tagName)) continue;
+
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        if (range.getClientRects().length > 0) continue;
+
+        found.push({ text: text.slice(0, 80), where: pathTo(parent) });
+      }
+
+      return found;
+    });
+
+    return { preloaded, requested: [...requested].sort(), unpainted };
   } finally {
     await close();
   }
+}
+
+/**
+ * `measurePage`, once per page per environment.
+ *
+ * Two claims below are made about the same measurement and the measurement costs a page
+ * load, so it is taken once. Keyed on the environment as well as the route because the
+ * three environments serve different documents — different base path, different
+ * filenames — which is the whole reason there are three.
+ */
+const measurements = new Map<string, Promise<Measurement>>();
+
+function measurePageOnce(env: Environment, route: string): Promise<Measurement> {
+  const key = `${env.name}\u0000${route}`;
+  let pending = measurements.get(key);
+  if (pending === undefined) {
+    pending = measurePage(env, route);
+    measurements.set(key, pending);
+  }
+  return pending;
 }
 
 describe.each(ENVIRONMENTS.map((name, index) => ({ name, index })))(
@@ -410,14 +608,13 @@ describe.each(ENVIRONMENTS.map((name, index) => ({ name, index })))(
       const sets = new Set<string>();
 
       for (const route of routes) {
-        const preloaded = await preloadedFaces(env(), route);
+        const { preloaded, requested: needed } = await measurePageOnce(env(), route);
         if (preloaded.length === 0) {
           problems.push(`${route}: preloads no fonts at all`);
           continue;
         }
         sets.add(preloaded.map(faceName).join(' '));
 
-        const needed = await facesNeededWithoutPreloads(env(), route);
         if (needed.length === 0) {
           problems.push(`${route}: requested no fonts at all with preloads stripped`);
           continue;
@@ -462,8 +659,140 @@ describe.each(ENVIRONMENTS.map((name, index) => ({ name, index })))(
         `${env().name}: every page preloads the same faces`,
       ).toBeGreaterThan(1);
     });
+
+    /**
+     * MUSE-106 — **latin-ext text the page can only paint after an interaction.**
+     *
+     * The assertion above is a *request* measurement: load the page with the preload tags
+     * stripped and record what the CSS engine then asks for. It is the right instrument
+     * for the question it answers and it has one blind spot, which is structural rather
+     * than a gap in how carefully it is run: **`[hidden]` is `display: none`, so there is
+     * no layout, so no face is ever requested.** Text behind a disclosure is therefore
+     * measured as text that needs nothing.
+     *
+     * It is reachable from this repository's own code, not only from the CMS. The header's
+     * "More" dropdown renders **every** `MORE_NAV` entry inside `<ul id="more-menu"
+     * hidden>`, while the footer takes only `MORE_NAV.slice(0, 4)` — so a fifth entry
+     * whose *English* label carries a diacritic exists on an English page in exactly one
+     * place, a closed menu. QA planted „Noć bachate" and this whole file stayed green in
+     * all three environments; a visitor who opened the menu read the `ć` from the system
+     * fallback, which is MUSE-74's defect with nothing in front of it.
+     *
+     * ## Why this is a character-range question and not a wider measurement
+     *
+     * Opening the dropdown first is the obvious move and is the wrong rule: it makes the
+     * measurement depend on a list of which interactions exist, which is the list
+     * `src/lib/fonts.ts` exists not to keep. Preloading the three latin-ext subsets on
+     * every English page is the 135.9 KB that file refuses by name.
+     *
+     * So this asks a different question of the same document: **which characters does it
+     * hold that no `latin` subset can paint, in text the engine laid out no box for.**
+     * That needs no cascade model, because it does not ask which *face* paints the
+     * character — nothing can answer that without being the engine, which is the argument
+     * `src/lib/fonts.ts` makes twice. Not being able to attribute it is why the
+     * requirement is **all three** latin-ext subsets: a Croatian page and a content-keyed
+     * page already satisfy it by construction, and a declared English page is where it
+     * bites, which is exactly where `EN_LATIN_EXT` is additive and can be short an entry.
+     *
+     * **This does not replace the measurement above and neither replaces this.** A
+     * preload pointing at a face nothing paints is visible only to the request
+     * measurement; text no interaction in this suite ever triggers is visible only here.
+     *
+     * It also closes half of MUSE-74's remaining hole for free: an English `post` or
+     * `event` whose copy carries a diacritic is covered by this check as well as by
+     * MUSE-88's default — though no build in this suite has such a page to check, because
+     * the seed holds none and must not.
+     */
+    it('preloads latin-ext for text it can only paint after an interaction', async () => {
+      const latinExt = FACES.filter((face) => face.subset === 'latin-ext');
+      const problems: string[] = [];
+      let scanned = 0;
+      let carrying = 0;
+
+      for (const route of routes) {
+        const { preloaded, unpainted } = await measurePageOnce(env(), route);
+        scanned += unpainted.length;
+
+        const names = new Set(preloaded.map(faceName));
+        const absent = latinExt.filter((face) => !names.has(face.id)).map((face) => face.id);
+
+        for (const { text, where } of unpainted) {
+          const chars = latinExtOnly(text);
+          if (chars.length === 0) continue;
+          carrying += 1;
+          if (absent.length === 0) continue;
+
+          problems.push(
+            `${route}: „${text}" in ${where} carries ${chars.join(' ')}, which only a ` +
+              `latin-ext face can paint — and the engine laid out no box for that text, ` +
+              `so the request measurement cannot see which face it needs. The page does ` +
+              `not preload ${absent.join(', ')}. Either preload all three latin-ext ` +
+              `subsets for this route or paint the text (MUSE-106).`,
+          );
+        }
+      }
+
+      expect(problems, env().name).toEqual([]);
+
+      // Neither half of the scan may quietly find nothing. The first number is the
+      // mechanism — a `Range` query that stopped returning empty rect lists, or a walk
+      // that stopped reaching the hidden subtrees, would report zero and pass. The second
+      // is the characters: the header's own „Što je bachata" and „Događaji" sit in the
+      // closed Croatian menu on every page, so a run that sees no latin-ext behind a
+      // disclosure anywhere is measuring something other than this site.
+      expect(scanned, `${env().name}: found no unpainted text anywhere`).toBeGreaterThan(0);
+      expect(
+        carrying,
+        `${env().name}: found no latin-ext character in unpainted text on any page`,
+      ).toBeGreaterThan(0);
+    });
   },
 );
+
+/**
+ * MUSE-106 — the character-range split the check above rests on, parsed and exercised.
+ *
+ * `latinExtOnly` is the whole instrument, and it fails silently in the direction that
+ * passes: a range read slightly too wide reports every diacritic as something `latin`
+ * covers, the per-page check finds nothing on every page forever, and the two
+ * `toBeGreaterThan(0)` guards beside it are the only thing that would notice. These make
+ * the split itself a claim, with no server and no browser.
+ */
+describe('MUSE-106: the latin / latin-ext split, read off fonts.css', () => {
+  it('parses every face the stylesheet declares', () => {
+    const parsed = subsets();
+    expect(parsed.map((entry) => entry.id).sort()).toEqual(
+      FACES.map((face) => face.id).sort(),
+    );
+    expect(parsed.filter((entry) => entry.subset === 'latin-ext')).toHaveLength(3);
+    for (const entry of parsed) {
+      expect(entry.ranges.length, `${entry.id} has no unicode-range`).toBeGreaterThan(0);
+    }
+  });
+
+  it('puts every Croatian diacritic outside latin, and nothing else with them', () => {
+    // The five letters this project has paid for three times (`src/lib/fonts.ts`).
+    // Sorted by code point, which is what `latinExtOnly` does and what a reader of a
+    // failure can look up: U+0106 Ć, U+0107 ć, U+010C Č …
+    expect(latinExtOnly('čćžšđ ČĆŽŠĐ')).toEqual([
+      'Ć',
+      'ć',
+      'Č',
+      'č',
+      'Đ',
+      'đ',
+      'Š',
+      'š',
+      'Ž',
+      'ž',
+    ]);
+
+    // Croatian typographic quotes are `latin`, so quoted ASCII must not read as latin-ext
+    // — otherwise every „…" string on the site would be a finding.
+    expect(latinExtOnly('„Dodi na probni sat.“')).toEqual([]);
+    expect(latinExtOnly('Noc bachate — 20 €')).toEqual([]);
+  });
+});
 
 /**
  * AC2, from the other side: no stylesheet may hand the server a path it typed itself.

@@ -117,7 +117,9 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   be exactly the set the page asks for.** Leave a face out and a word paints in two
   typefaces: every Croatian diacritic lives in `latin-ext`. `src/lib/fonts.ts` is the only
   place the per-page set is decided, and **no list may say a page does *not* need a
-  subset** — English is additive-only. → `design-and-assets.md`
+  subset** — English is additive-only. **What a page paints only after an interaction is
+  measured by character range, not by request** (MUSE-106): `[hidden]` is `display: none`,
+  so the engine asks for no face. Both measurements stay. → `design-and-assets.md`
 - **There is a performance budget, it is `scripts/budget.mjs`, and it is deliberately not
   Lighthouse** (MUSE-63). Bytes per page per resource kind, request count, render-blocking
   count, and how many font faces the host **served**. **No timing and no composite score.**

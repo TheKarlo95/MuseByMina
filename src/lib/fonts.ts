@@ -113,6 +113,48 @@
  * be taken honestly: in a browser, with the preload tags stripped out of the document
  * first, by `test/fonts.test.ts`, per page, per locale, per deploy target.
  *
+ * ## `display: none` is a hole in the *measurement* too, not only in the derivation
+ *
+ * The first rock above uses `display: none` as an argument against deriving the list from
+ * rendered text. **It is also the one thing the measurement cannot see, and it is blind in
+ * the direction a visitor reads** (MUSE-106). `[hidden]` is `display: none`, so the element
+ * gets no layout, so the CSS engine requests no face — and a `latin-ext` character a page
+ * can paint *only after an interaction* is therefore measured as a face the page does not
+ * need. The request measurement is still the right instrument for the question it answers;
+ * this is a property of the instrument, and it belongs beside the argument rather than
+ * under it.
+ *
+ * It is reachable from this repository's own code, not only from the CMS. `Header.astro`
+ * renders **every** `MORE_NAV` entry inside `<ul id="more-menu" hidden>`, in Inter, while
+ * the footer takes only `MORE_NAV.slice(0, 4)` — so a fifth entry whose *English* label
+ * carries a diacritic exists on an English page in exactly one place, a closed menu. QA
+ * planted „Noć bachate" and `test/fonts.test.ts` stayed green in all three environments;
+ * a visitor who opened the menu read the `ć` from the system fallback. That is MUSE-74's
+ * defect with nothing in front of it, and the asymmetry above is why it only bites in
+ * English: a Croatian page has all six by construction whatever is behind a disclosure.
+ *
+ * Two answers were weighed and not taken. **Measuring with the dropdown opened** makes the
+ * measurement depend on a list of which interactions exist, which is the list this file
+ * exists not to keep, and the next hidden thing would not be on it. **Preloading the three
+ * latin-ext subsets on every English page** is the 135.9 KB refused two sections up, and
+ * refused for the reason that still holds: an entry no measurement supports.
+ *
+ * What `test/fonts.test.ts` does instead is ask a **different question of the same
+ * document**: which characters it holds that *no `latin` subset can paint*, in text the
+ * engine laid out no box for. That is a character-range question — the question
+ * `unicode-range` itself splits on — and it needs no cascade model, because it never asks
+ * which *face* paints the character. It cannot, which is precisely why the requirement it
+ * imposes is **all three** latin-ext subsets or a named failure quoting the string and the
+ * page. A Croatian page and a content-keyed route satisfy that by construction; a declared
+ * English page is where it has teeth, which is exactly where `EN_LATIN_EXT` can be short
+ * an entry. `EN_LATIN_EXT` is untouched by it and stays additive-only.
+ *
+ * **The two measurements answer different questions and neither replaces the other.** Only
+ * the request measurement can catch a preload pointing at a face nothing paints — the
+ * waste direction, the one the budget counts in bytes. Only the character-range
+ * measurement can see text no interaction in the suite ever triggers. Both run, per page,
+ * per locale, per deploy target.
+ *
  * ## Content-keyed routes, where the premise of a route table does not hold (MUSE-88)
  *
  * Part 4 rests on something true of every route MUSE-74 knew about: **a human can be
