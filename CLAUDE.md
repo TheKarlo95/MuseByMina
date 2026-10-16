@@ -3,6 +3,21 @@
 Adult bachata studio in Zagreb (Ilica 209). Astro, static, deployed to GitHub Pages.
 Croatian is primary; English follows.
 
+**This file is the rules. `docs/decisions/` is why.** Each rule below is stated in one to
+three lines and names the document that argues it — the measurements, the approaches that
+were tried and failed, and the defect it came from. **Read the document covering what your
+ticket touches before changing anything in that area.** Several of these rules have been
+re-broken by somebody who had the rule and not the argument, which is why the arguments
+were written down rather than summarised.
+
+| document | covers |
+| --- | --- |
+| `docs/decisions/pages.md` | what each page says, and what must never be re-added |
+| `docs/decisions/content-model.md` | Sanity — schema, queries, the seed, the Studio |
+| `docs/decisions/testing.md` | the suite — isolation, concurrency, browsers, dev servers |
+| `docs/decisions/design-and-assets.md` | numerals, fonts, preloads, the budget, the brand marks |
+| `docs/decisions/build-and-deploy.md` | the deploy host, URLs, the cascade, the rebuild loop |
+
 ## Read before touching UI
 
 `../MuseByMina2/docs/design-system/muse-design-system.md` is **authoritative**. Its rules
@@ -12,19 +27,11 @@ are load-bearing, not stylistic. The three that break things silently:
   `npm run ds` enforces this.
 - **Cormorant never below 26px** — its `đ` crossbar vanishes and *Dođi* renders as "Dodi".
 - **No drop shadows, either theme.** Depth is surface value plus hairlines.
-- **Numerals are set in `base.css` and nowhere else — twice, because inheritance only
-  covers half the page.** Cormorant's default figures are old-style, so a number in the
-  display face renders `19:00` as `I9:OO`. `src/styles/base.css` asks `:root` for
-  `lining-nums tabular-nums` and prose inherits it. **Form controls do not inherit it.**
-  The UA stylesheet gives `input`, `select`, `textarea` and `button` their own `font`
-  *shorthand*, which resets the property — so the declaration is not overridden there, it
-  never arrives, and no ordering or `!important` on `:root` can reach it. The same file
-  therefore carries a second rule naming those elements (plus `optgroup`, `option` and
-  `::file-selector-button`); it is part of the fix, not a nicety (MUSE-57). Both rules
-  stay in that one file: `font-variant-numeric` is a single value, so a component that
-  redeclares it *replaces* the rule rather than adding to it — and the bug comes back
-  with the column still neatly aligned. `npm run ds` rejects the property in a component;
-  `test/numerals.test.ts` measures the glyphs, in prose **and** inside a control.
+- **Numerals are `lining-nums tabular-nums`, set in `src/styles/base.css` and nowhere
+  else — in two rules, because form controls do not inherit it.** Never redeclare
+  `font-variant-numeric` in a component: it is a single value, so a component *replaces*
+  the rule and the bug returns with the column still neatly aligned. `npm run ds` rejects
+  the property in a component. → `design-and-assets.md`
 
 Header and footer sit on a band that is plum-ink in *both* themes, so they use the
 `--band-*` roles rather than page-theme roles.
@@ -65,1807 +72,300 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
 - Locale pages are thin wrappers: `src/pages/x.astro` + `src/pages/en/x.astro` both render a
   shared component from `src/components/`.
 - Interactive behaviour goes in a component `<script>`; keep pages static.
-- A page's `<title>` and `description` are a **`page` document in Sanity** (MUSE-20), read
-  through `getPage(route)` in the page's frontmatter. `src/lib/pages.ts` keeps only the half
-  that is structure — `ROUTES`, which routes the site serves — and the Studio builds its
-  route dropdown from it, so Sanity owns a page's words and never its existence. `llms.txt`
-  publishes the same strings as the page's `<meta name="description">`, so a new page needs
-  **both** a route in `ROUTES` and a document in the Studio. **`astro build` will not catch a
-  missing route** — it exits 0 and quietly leaves the page out of the index; `npm test` is
-  that gate, because `test/seo.test.ts` reads the page list off `src/pages/` rather than off
-  the registry. A missing *document* does fail the build, naming the route and where to add
-  it — and so does a second document for a route, because which title the page got would
-  otherwise depend on query order. Both are `pagesByRoute` in `src/lib/sanity/index.ts`,
-  which passes `minimum: 0` to `requireDocuments` deliberately: a count check there reports
-  "the dataset holds 3, this page needs 4 … an empty dataset" and shadows the message that
-  names the route, in the single most likely case.
-
-  **Three lists, four disagreements, and `src/pages/` is the only one that cannot lie**
-  (MUSE-46). `test/routes.test.ts` holds them to each other and every check is anchored on
-  the filesystem. A route in `ROUTES` with **no file** under `src/pages/` used to publish an
-  `llms.txt` link to a 404 — silently, because `test/seo.test.ts` only ever looked each
-  built page *up* in `llms.txt`; it now resolves every URL that file advertises through the
-  model of GitHub Pages and requires a 200, and asserts set equality over page URLs in both
-  directions. The partition between a page link and `robots.txt`/`sitemap-index.xml` is
-  "does the URL end in a slash", which is the site's own URL shape rather than a list of
-  filenames to keep current. A preview route (`MUSE_PREVIEW_ROUTES`) is neither a ghost nor
-  a missing page: its entry point is under `test/` and its URL carries `-preview`, and both
-  halves are asserted.
-
-  **A `page` document for a route the site does not serve is a warning, not a failed
-  build.** Two instruments, neither sufficient alone. The Studio refuses the route —
-  `oneOf(Rule, ROUTE_VALUES)` in `sanity/schemaTypes/enums.ts`, which is `Rule.valid()`
-  past a gap in Sanity's `StringRule` type; `options.list` is the dropdown, not the
-  contract. That reaches Mina while she is typing but cannot cover the other order of
-  events: a developer deletes a route and yesterday's valid document is inert today. That
-  lands in a PR, so the PR's build log gets it. **Do not promote it to a failure** — the
-  document publishes nothing (`getPageMeta` walks `ROUTES`), so a fatal check would let a
-  stale CMS row stop every unrelated PR, every deploy and MUSE-21's scheduled rebuild over
-  a provably inert condition; `test/routes.test.ts` pins that the ghost build is still
-  byte-identical, for exactly that reason. Sanity turns out to *infer* a `valid()` rule
-  from `options.list`, so a pasted route was already refused — under the `required()`
-  rule's message, the one written for an empty field — and nothing in the repo knew either
-  way until the suite started running Sanity's real validator (`@sanity/validation`, a
-  declared devDependency for the same reason `styled-components` is one). `ROUTES[].
-  studioLabel` duplicating each document's `name.hr` was looked at and left: it is a
-  fourth copy of a *label*, not of which pages exist, it has to name a route whose
-  document does not exist yet, and tying them would make Mina rewording a page's short
-  name a red build.
-
-  `Build.log` in `test/helpers/build.ts` is how an acceptance criterion about what the
-  build *says* on success gets read off a real build — the counterpart to `buildFailure`.
-- **The deploy host lives in exactly one file**, `astro.config.mjs`, as the overridable
-  `SITE`/`BASE` default — which is what makes a domain move (MUSE-29) a config change
-  rather than a search-and-replace. `sitemap`, `robots.txt` and `llms.txt` all derive
-  their origin from it.
-
-  **The guarantee is against `dist`, not against a list of directories** (MUSE-42).
-  `test/seo.test.ts` builds under a second `SITE`/`BASE` and asserts the first host — and
-  the first sub-path — appears nowhere in that output, every file of it, fonts included.
-  That is the actual requirement, and it needs no list: it survives a renamed directory, a
-  new top-level folder, a changed `publicDir`, and content arriving from Sanity rather
-  than from a file. It used to be a hardcoded scan of `src/` and `public/` with a
-  file-count floor, which could not tell "`public/` is absent" from "`public/` has four
-  hundred unscanned files" and never read `sanity/` at all — so a host in a seed document
-  rendered into all nine pages with the suite green.
-
-  Alongside it, a **fast source scan** names the offending *file*, which a `dist` failure
-  cannot. It walks the whole repository, taking its exclusions from `.gitignore`, so there
-  is no scan list to keep exhaustive. Three paths may name the host and each is asserted
-  to still need to: `astro.config.mjs`, `.github/workflows/deploy.yml` (where a
-  *different* host is legitimately named — that is how MUSE-29 happens) and `test/`,
-  whose copy is pinned to the config default. **Everything else fails, prose included** —
-  a host in `logo/README.md` reaches no page and is still a failure; the reasoning is
-  written out above that test and the `ORIGIN=` example in `README.md` was changed to
-  `$SITE` rather than exempted.
-- **An asset the site's own code uses goes in `src/assets/` and is imported** — never
-  `public/` plus a hand-written path. Vite rewrites a root-absolute CSS `url()` to
-  include `base` **only at build time**, so `url('/fonts/x.woff2')` against a file in
-  `public/` makes the deploy correct and `astro dev` 404: that is how all six faces fell
-  back to Georgia for the life of the project, and why MUSE-14's `II:OO` was invisible
-  locally (MUSE-35). Importing instead means Vite emits the file with a content hash and
-  resolves every reference to it in both environments, with no base-path join anywhere.
-  `src/styles/fonts.css` uses a relative `url()` into `src/assets/`; `BaseLayout.astro`
-  preloads the *same files* via `?url` imports.
-- **A preload must name the same URL as the thing it preloads, and the preloaded set must
-  be exactly the set the page asks for.** Three failures, all silent. Point the preload at
-  a second copy of the font and both URLs are 200, both resolve, and the browser downloads
-  each face twice. Point it at a declared-but-unused subset (`-latin-ext` instead of
-  `-latin`) and you pay for bytes the page never paints with and lose the preload on the
-  ones it does. **Leave a needed face out and the page paints a word in two typefaces**
-  (MUSE-74): `@font-face` subsets split on `unicode-range`, every Croatian diacritic lives
-  in `latin-ext`, and `font-display: swap` paints the latin half of „Do**đ**i" in Cormorant
-  while the `đ` comes from the system fallback — measured at 221 ms on a throttled cold
-  load, 4 ms once both halves are preloaded together. `test/assets.test.ts` catches the
-  first against `dist`; `test/fonts.test.ts` catches the other two by loading each page
-  **with the preload tags stripped** and recording what the CSS engine then asks for — the
-  only way to measure it, since a preload is itself a request and so "was it requested" is
-  true by construction — and it compares the two sets **both ways**. The one-directional
-  version (`preloaded ⊆ needed`) was green for the life of the project while four of the
-  six faces were preloaded on no page at all.
-
-  **The set is therefore per page, and `src/lib/fonts.ts` is the only place it is
-  decided.** A Croatian page gets all six; an English page gets the three `latin` subsets
-  plus whatever `EN_LATIN_EXT` names. **No list may say a page does *not* need a subset** —
-  that list existed, for Cormorant's `latin-ext` per route, and two content PRs
-  invalidated it on one day (MUSE-71 put a `đ` in `/schedule`'s display heading; MUSE-72
-  put „Ožegovića" into the *English* privacy notice, making `/en/privacy` the first
-  English page to need `inter-latin-ext`). A list that can say "does not need" is wrong in
-  the direction a visitor reads; one that can only add is wrong in the direction the
-  budget counts. The cost is measured and paid: 33.0 KB of Cormorant on the three Croatian
-  pages whose headings are diacritic-free today.
-
-  English is additive-only because the same default there costs 135.9 KB against a 109.8 KB
-  payload, and because **a Croatian proper noun inside an English sentence will keep
-  happening** — a street, an instructor's name, a quoted phrase — and no locale rule
-  predicts it. Two things not to retry, both measured rather than assumed: the rendered
-  text does **not** answer the question, because it is per *face* and `/pricing/` carries
-  „Što je bachata" in `.navList a`, which is Cormorant and `display: none` at the measured
-  width; and `Astro.slots.render()`, which does expose the body before `<head>` is emitted,
-  **silently drops every component's hoisted `<script>`** — eight of fifteen pages lost
-  theirs. Residual risk, stated in the file: `npm test` gates pull requests, the scheduled
-  rebuild does not, so a *Sanity* edit putting a Croatian name into English copy can stale
-  `EN_LATIN_EXT` and deploy.
-- **There is a performance budget, it is `scripts/budget.mjs`, and it is deliberately
-  not Lighthouse** (MUSE-63). The original plan listed `lighthouse` among the blocking
-  checks; it was never built, and the only size guard was a `du -sm dist` step watching
-  the GitHub Pages **1 GB site** limit — which would not notice one page going from 60 KB
-  to 2 MB. What is budgeted is what is deterministic about the output: bytes per page per
-  resource kind, the request count, how many requests are render-blocking, and **how many
-  font faces the host actually serves the page**. **No timing and no composite score**: a
-  gate that goes red because the runner was busy is a gate people learn to re-run, and
-  then it protects nothing. The one timing collected is `advisory` — printed, and
-  `checkBudget` structurally cannot see it, which is a test rather than a comment.
-
-  **One budget for every page, with no per-route entries**, because the page set is read
-  off the build: a route that lands tomorrow is budgeted the day it builds and there is no
-  list to extend. Each number carries a sentence saying what it was measured at, and
-  `test/budget.test.ts` reads the source's own JSDoc so raising one without saying
-  anything is a red test. That is the whole argument for having done this now: today
-  every number passes at 1.2–1.6×, and after the gallery and the portraits land the same
-  numbers are a negotiation about which page to exempt. **The image line was the
-  tripwire and MUSE-64 is the ticket it was set for** — 0 → 16 KB, measured at 11.1 KB,
-  with the headroom sized for MUSE-40's icon and explicitly not for a photograph. The
-  *total* ceiling did not move, which is the shape to copy: raise the one kind on its own
-  merits and let the sum stay honest.
-
-  **That negotiation happened in MUSE-25, and the answer was neither a raise nor a
-  per-route exemption — it was to budget images per image.** `/gallery` was built against
-  a fixture at four album sizes and weighed in a browser with every `cdn.sanity.io`
-  request answered by a real photograph encoded at the width the URL asked for. Three
-  things came out of it. The weight is **linear in the number of photographs** — 1,023,
-  997 and 981 bytes of document per `<img>`, which is six Sanity URLs of `srcset` each, so
-  48 KB of html binds at about fifteen pictures, 360 KB of total at fourteen, and 14
-  requests at **four**. The multiplier is **editorial**: album size is Mina's decision,
-  taken in a Studio, with no pull request — and CI builds from the seed, which has no
-  photographs, so a flat raise would be a gate that stays green until the shoot and then
-  fails on her upload in `deploy.yml`, where nobody is reading. And the two halves have
-  different owners: *how many* pictures is hers, *how big each one is* is ours.
-
-  So `bytes.image` is gone as a per-page sum and `imageResponse` replaces it — **32 KB,
-  the heaviest single image response on any page** — which is stricter than the old line
-  everywhere except a gallery, fires on every page, and does not move with content. The
-  three content-sensitive lines carry a **`perImage` allowance** instead of a raise:
-  1,280 bytes on `html` and on `total`, one on `requests`, per `<img>` the document holds,
-  counted off the markup so there is still no list anywhere. `total` is additionally
-  compared **without photography**, which is why that ceiling did not have to move at all:
-  the heaviest page on the site is 307 KB on that basis whether the gallery holds nothing
-  or forty-eight. The cost is slack on image-heavy pages — a twenty-four-picture gallery
-  is allowed 110 KB of document and uses 65 — and that is the right side to be wrong on,
-  because the thing the line protects against is a page growing a *feature*, and a feature
-  is still 48 KB whatever the album is.
-
-  The **font count has a floor, and the floor is the half that finds things.** It is
-  MUSE-35: all six faces 404ed under `astro dev` for the life of the project, so
-  reproduced against a build that is six requests and **zero faces served** — which is why
-  the count is of faces the host *served*, not of requests made, and why a ceiling alone
-  reads zero as the leanest page it has ever seen. Measured with the preload tags stripped
-  out of the document first, `test/fonts.test.ts`'s technique and for its reason. Two
-  entry points, one set of numbers: `test/budget.test.ts` is the gate and builds both
-  deploy targets, `npm run budget` prints the table over `dist` and runs inside the
-  existing `a11y` job (MUSE-58's precedent — not a sixth check).
-- **The brand lockup is the supplied artwork, rendered by `Lockup.astro` and nowhere
-  else** (MUSE-64). Design system §12 forbids *"rebuild the lockup from separate parts"*
-  by name, and two spans of Cormorant and Jost is that construction — it renders
-  perfectly, passes every contrast check and looks deliberate, which is why
-  `test/lockup.test.ts` reads the markup rather than the page. `src/assets/
-  muse-lockup-white.png` is the supplied transparent PNG trimmed to its 855 × 622 of ink;
-  `logo/` stays a source directory. One 320px WebP, 11.1 KB, no `srcset` (the gate runs
-  at `deviceScaleFactor: 1`, so a 1× entry would budget a file almost nobody fetches) and
-  **no theme swap** — both bands are `--surface-deep`, so the white variant is right on
-  both. §12's clear space is a *fraction of the drawn size*, so it is derived in
-  `src/lib/lockup.ts`, which refuses to draw below §12's 100px rather than clamping.
-
-  **The masthead carries the icon-only mark instead, and which surface gets which is
-  arithmetic** (MUSE-67). 100px wide is 73px tall at 1.372:1 and 121px with its clear
-  space, against bands of 64px and 80px (§7.1) — so the lockup is out of the masthead at
-  *both* widths, not only on phones, and the size that would fit is 55px, where "DANCE
-  STUDIO" and "BY MINA" stop being words. §12's variants table names the icon-only mark
-  for the compact header; MUSE-40 shipped it, and at **36px tall — 27px wide against
-  §12's 24px floor, 12px of clear space, a 60px envelope** — it fits both bands. One
-  size in both, because a second size is a second dilation radius and so a second file.
-  The full table is in `logo/README.md`, which is where the next person will look. Do not
-  shrink the lockup into the band to make the guard green: it would pass, and the logo
-  would be illegible.
-
-  `REBUILT_FROM_PARTS` is now **empty**, and both halves of that machine worked in order:
-  the entry was asserted *still live*, so fixing the masthead turned the suite red asking
-  for the line to be deleted. What replaced the exemption is not an empty map — it is
-  `the built masthead presents the mark`, so "no component rebuilds the lockup" cannot be
-  satisfied by a band with no brand in it at all.
-- **The icon-only mark is a crop of the lockup, and the small sizes are thickened**
-  (MUSE-40). §12 specifies it as dancer + `M`; both were already in
-  `muse-lockup-white-transparent.png`, with a clean 18px run of transparent columns
-  between them and the type, so `src/assets/icon/` is a **crop and nothing else** —
-  `logo/README.md` writes the derivation out so nobody re-derives a similar mark instead
-  of the same one. The one intervention is optical sizing: below ~1 device pixel of
-  stroke there is nothing left to antialias, so the alpha is dilated by `STROKE_GAIN ÷
-  scale` before resampling, and `test/icon.test.ts` measures the committed pixels against
-  what an undilated crop would have given — a regenerated-without-it icon is otherwise
-  the right mark, right size, right colour, and a smudge. The masthead's copy
-  (`muse-mark-white.png`, MUSE-67) is the same intervention at a different size and so a
-  different amount — **0.3 CSS px per side, not 0.5**, because 36px is twice the tab
-  icon's worst case — and it is kept at the crop's own 461 × 622 with no resample, since
-  Astro emits the WebP from it. The unit is CSS pixels because one file serves every
-  display. **Both schemes, mutually exclusive `media`**: the artwork is white-only,
-  invisible on a light tab strip, and the plum variant is §12's recolour (RGB replaced,
-  alpha preserved) with a test pinning the two alpha channels byte-identical. All five
-  *tab* files carry **`?url&no-inline`** — they are under Vite's 4 KB threshold, and
-  inlined they became
-  `data:` URIs, which is 8.3 KB of base64 on every page, all five icons shipped to every
-  visitor, and the icons out of both the budget's `image` line and
-  `test/assets.test.ts`'s reach. The masthead mark does not need the suffix and must not
-  have it: it goes through `astro:assets`, which emits a file by construction, and the
-  query string would hand the component a URL instead of the `ImageMetadata` `<Image>`
-  needs. There is **no `public/`**: on the Pages sub-path a `public/favicon.ico`
-  publishes under the base prefix while the bare probe goes to the *origin* root, so it
-  would answer nothing and cost MUSE-35's resolution bug. **That argument stands and one
-  link was still missing** (MUSE-75): an unknown media feature is *false* rather than
-  ignored, so a UA that reads `media` but has no `prefers-color-scheme` ruled out both
-  branches and matched no icon at all. The default branch is the **opaque tile** — the
-  file the iOS entry already points at — because the four above need a `media` precisely
-  *because they are transparent*, and its 180 keeps the pair deterministic, since the
-  tie MUSE-40 avoided exists only between candidates of the same declared size. An apex
-  domain (MUSE-29) adds a root `favicon.ico` to this and nothing before it does.
-  **And the 16 is a smear at true size for the reason §12 implies**: the recipe
-  reproduces the committed files to three decimals, raising the gain makes it *worse*,
-  padding is a wash, and the only thing that works is cropping the dancer back — which
-  is a different mark at one size, so it is Mina's call and is raised rather than taken.
-  The measurements are beside `STROKE_GAIN`; do not re-run them. The share card is a
-  separate asset and a separate bullet, below.
-- **A shared link shows a picture, and `siteSettings.shareImage` is what decides which**
-  (MUSE-69). `BaseLayout.astro` emitted `og:title`, `og:description` and `og:url` and no
-  image, so every link in a WhatsApp group rendered as a bare line of text — and the CMS
-  field for it had existed end to end since MUSE-20 **with no reader**, under a Studio
-  description promising Mina that WhatsApp and Facebook would show it. `shareCard()` in
-  `src/lib/share-card.ts` is the one decision point: her upload if she has set one,
-  `src/assets/muse-share-card.png` if not. **The fallback is allowed and the reasoning is
-  the thing to keep**: the rule MUSE-49 and MUSE-36 share is *never assert something
-  nobody said*, and the studio's own mark asserts nothing beyond "this is Muse by Mina",
-  which every page already says. A fallback the editor does not know about reads as a bug,
-  so the field description tells her it exists and that uploading replaces it.
-
-  The URL is `new URL(card.src, Astro.site)` — **derived, never written**, which is the
-  whole of why MUSE-42 stays green; a root-relative `og:image` is silently ignored by most
-  scrapers, so it has to be absolute and it may not name a host. `og:image:width`/`height`
-  are not padding: without them Facebook renders the *first* share of a URL with no image,
-  because the card is laid out before the fetch, and `imageSize` answers them for an
-  upload off the asset id — clamped to what the asset has and fed back into `imageSrc`, so
-  the tag and the bytes cannot disagree. **No `og:image:type`** (`auto=format` makes it
-  unknowable) and **no `og:locale:alternate`**: it is an instruction, not a hint — Facebook
-  refetches the same URL with `?fb_locale=` expecting a different language, which a static
-  site with the locale in the path cannot give it, so it would cache Croatian as the
-  English rendering. The hreflang cluster is where the pairing is stated.
-
-  **The 404 carries a card**, unlike the canonical and the JSON-LD, because an image is
-  not a claim about a URL — the same reason it carries a tab icon and a `theme-color`. It
-  already emits `og:title` and `og:description`, so withholding only the image is exactly
-  the bare text card this ticket is about, on the page a dead shared link reaches.
-
-  The card itself is §12 executed rather than a new design (MUSE-40's principle): the
-  supplied lockup 500px wide on opaque plum, centred, §12's 120px clear space with 13px of
-  slack — `logo/README.md` has the arithmetic and why 500 rather than the 521 §12 allows.
-  **`npm run budget` structurally cannot see any of this** and reporting nothing is not
-  evidence: no page element references an `og:image`, so headless Chromium never fetches
-  one. `test/share.test.ts` weighs the committed file instead (23,745 bytes) and
-  re-measures its pixels against `muse-lockup-white.png` by **column *and* row** ink
-  profile — a mirrored copy scores 0.22 on columns and 0.9999 on rows, so one axis alone
-  passes it. `assetRefs` reads a `<meta>` image now, which is what gets the card resolved
-  against `dist` under both deploy targets by `test/assets.test.ts` with no build added.
-
-  **`og:site_name` was absent until MUSE-75, so a scraper credited „github.io".** With no
-  such tag the publisher falls back to the host, which MUSE-29 would only have changed
-  into a different wrong answer. It is `settings.studioName`, off the same memoised read
-  the footer, the JSON-LD and the card use, and ungated for `og:image`'s reason. The
-  assertion with teeth is the one that rebuilds from an edited `studioName`: every
-  equality test passes with a literal in the layout.
-- `rootPath()`/`rootUrl()` in `src/lib/site.ts` are for files the build publishes at the
-  deploy root — `robots.txt`, `llms.txt`, the sitemap — and for a future `CNAME`. They
-  are **not** the way to reference a bundled asset; see the bullet above, and note that
-  the favicon this used to name went the other way (MUSE-40).
-  Never interpolate `import.meta.env.BASE_URL` by hand: whether it carries a trailing
-  slash depends on `trailingSlash`, so `${BASE_URL}robots.txt` can silently yield
-  `/MuseByMinarobots.txt`. An apex build hides this; only the Pages sub-path 404s.
-- **A test that can only see `dist` cannot see a dev-only bug.** `test/fonts.test.ts` is
-  the one suite that drives `astro dev`, through `astroDev()` in `test/helpers/scratch.ts`
-  — the same module that owns `astroBuild()`, so `test/isolation.test.ts`'s child-process
-  allow-list stays one entry long. It asserts over three environments: dev, and both
-  deploy targets built and served. Two things it has to do and you have to keep doing:
-  pass `--ignore-lock` (Astro 7 auto-backgrounds the dev server when it detects an agent,
-  and a daemon cannot be torn down), and strip `VITEST` from the child env — Astro's
-  dev-server plugin returns early when it is set, so the server starts, greets you, and
-  answers every route with `Cannot GET`.
-
-  **A green dev-server suite on your machine is not evidence about CI** (MUSE-47). The same
-  agent detection that auto-backgrounds the server also switches Astro to **JSON** log
-  lines; a runner has no agent markers in its environment and gets the ANSI banner written
-  for a human. So the output `astroDev()` reads is a *different format* locally and in CI —
-  deterministically, not as a race. MUSE-47 shipped a suite that was green here and failed
-  there because `DevServer.base` was `new URL(greeting).pathname` and the character after
-  the URL in the ANSI form is a colour reset, which a class excluding whitespace, quotes
-  and backslashes does not exclude: the base came out `/MuseByMina/%1B[31m/`, every page
-  404ed, and the dev server's own 404 line re-coloured the terminal while printing the
-  path, so the symptom read as `//schedule/`. The JSON form put a literal backslash there,
-  which the class already had — for an unrelated reason.
-  To reproduce CI locally, unset `CLAUDECODE`, `AI_AGENT` and `CLAUDE_CODE_*` **and set
-  `FORCE_COLOR=1`**. Unsetting the markers alone is not enough and reads as a clean
-  reproduction: `kleur` turns colour off when stdout is not a TTY, which it never is under
-  a test runner, so the banner comes out plain and the escape sequence is simply absent.
-  CI has colour on. Both halves, or the defect is still unreachable.
-
-  Two rules came out of it. **The base is configuration, never something to discover from
-  a server**: `astroDev()` takes it from `astro.config.mjs` and only *cross-checks* the
-  greeting against it, so a disagreement is one named error instead of every page 404ing.
-  The **origin** is the one thing only the server knows, because the port is negotiated —
-  and the `/` required after `\d+` in `DEV_ORIGIN` is load-bearing, since stdout is a pipe
-  and a chunk can split between two digits of a port number.
-
-  Note what MUSE-48's landing assertion cannot do for you here: it compares the pathname
-  it *asked for* against the one it landed on, so it catches a redirect and not a URL that
-  was wrong before it was requested. `astro dev` serves `404.astro` at the bad path with no
-  redirect, and that page carries the same six faces and two preloads — so
-  `test/fonts.test.ts` measured the error page in all three environments and stayed green.
-  A check needs something from the page's own markup saying which page it is, and that is
-  one function: `fetchMeasuredPage` in `test/helpers/measured.ts` (MUSE-62), the `fetch`
-  side of what `openCheckPage` does for Playwright. It compares each response's
-  `<link rel="canonical">` against the path requested, which the 404 page cannot satisfy
-  because it declares none, and `assertMeasuredPage` makes the same claim about HTML
-  obtained another way — the DOM a browser-opened page ended up with. **Not body text:**
-  every page contains „Muse by Mina", so eight copies of one page pass for eight pages.
-
-  `astroDev()` itself fetches one page through it before handing the server over, so the
-  *base* is proven rather than cross-checked and no suite has to remember any of this;
-  `pagesRender: false` is the opt-out for `test/devcontent.test.ts`'s live arm, whose pages
-  are expected to be 500s. Behind that, `unmeasuredDevServers` in
-  `test/helpers/source-guard.ts` fails a file that imports `astroDev` without importing
-  `./measured` — the belt to the probe's braces, and it lives there because that module is
-  the only parser of the test tree (MUSE-61).
-- **Page URLs end in a slash.** `trailingSlash: 'always'` + `build.format: 'directory'`,
-  so `dist/en/index.html` is served at `/en/` and `/en` 301s to it. Build hrefs with
-  `localeUrl()` (`src/lib/i18n.ts`) and nothing else — it is the single place the slash is
-  added, and canonical, hreflang, `llms.txt` and every nav link go through it. A URL
-  spelled without the slash is a redirect, which disqualifies it as a canonical and gets
-  the hreflang cluster dropped (MUSE-9). `test/urls.test.ts` serves `dist` from a model of
-  GitHub Pages and fetches every declared URL; `astro preview` answers both spellings with
-  200, so it cannot see this class of bug.
-- **The position of an `import` in a component's frontmatter decides CSS cascade order.**
-  Astro orders the stylesheets it emits by import-crawl order — `cssOrder` sorts on the
-  *sum of the import indices* from a CSS module up to the page — so adding or moving an
-  import silently reorders the built `<head>`. It happened twice in one afternoon on
-  unrelated tickets (MUSE-35 added a `?url` font import to `BaseLayout.astro`; MUSE-20 put
-  a read-path import below `TrialForm` in `Contact.astro`) and one of the two shipped.
-  There is **no config for it**: stylesheet order is not configurable in Astro, the import
-  position is the only lever. So `import '../styles/globals.css'` is the **first** import
-  in `BaseLayout.astro`, and `BaseLayout` is the first import in every page wrapper —
-  Astro's own documented advice, and the order the design system needs, since
-  `globals.css` is `@font-face`, the `:root` tokens and the element defaults that
-  components override at equal specificity. `test/cascade.test.ts` asserts the resulting
-  order against `dist` under both deploy targets, keyed on each stylesheet's **role**
-  (global layer vs component-scoped) rather than its content-hashed filename, and the
-  failure names the component whose imports moved. It also checks the order *inside* the
-  shared chunk, because `BaseLayout.*.css` carries the globals and the header's and
-  footer's scoped styles together and reordering those two leaves the head untouched.
-- **Structured data is one module and one `<script>` tag** (MUSE-31).
-  `src/lib/structured-data.ts` projects the `SiteSettings` singleton into JSON-LD and
-  `BaseLayout.astro` emits it; `test/structured-data.test.ts` fails if a second `.astro`
-  file writes an `application/ld+json` tag, because two emission sites are two answers to
-  "does the markup agree with the page". It holds **no** studio details of its own — it
-  takes the same memoised `getSiteSettings()` promise `Footer.astro` awaits, so the block
-  and the visible page cannot disagree by construction (in a build; under a dev server
-  that is two queries — MUSE-47). The suite compares them field by
-  field anyway (street and city out of the `<address>`, the address out of the `mailto:`,
-  `sameAs` against the `rel="me"` links — the same claim in two syntaxes) and then
-  rebuilds the site from an edited dataset and demands both moved: that last assertion is
-  the only one a hardcoded copy fails, since every equality test passes while the literal
-  still happens to match (MUSE-50). Every URL inside a block comes from `localeUrl` — a
-  hand-built one is a 301 and names something other than the page it sits on (MUSE-9) —
-  and the 404 carries no block, for the same reason it declares no canonical.
-  **`DanceSchool` is not a schema.org type** (it 404s; there is no dance type under
-  `LocalBusiness` or `EducationalOrganization`) and an unknown `@type` fails *silently* —
-  the validator reports a node with nothing recognised on it — so the studio is
-  multi-typed as both and a test pins the names.
 - The theme is stamped pre-paint by an inline script (`src/lib/theme.ts`). Never move that
   into a component — it exists to prevent a flash.
-- **A browser check never takes a server it did not start** (MUSE-52). `npm run a11y`,
-  `npm run shots` and `npm run ux:schedule` get their origin from `openSite()` in
-  `scripts/dist-origin.mjs`: with nothing in the environment it serves `dist` from an
-  in-process `node:http` host on an **ephemeral** port, the same shape
-  `test/helpers/preview.ts` has always used — which is why the vitest suite was never
-  exposed to this and the scripts were. `astro preview` daemonises here and **silently
-  reuses a daemon on another port**, so `npm run a11y` audited a different agent's
-  worktree and reported every route clean in both themes. **`npm run preview` is that same
-  in-process host now, not `astro preview`** — the stale daemons were started by hand, so
-  retiring it only inside the gates would have left the supply intact — and it 301s the
-  unslashed spelling the way Pages does, which `astro preview` never did. Do not put the
-  daemon back; the CI step starts none either and `test/origin.test.ts` fails if one
-  reappears in the job, in an npm script, or if any browser script reads `ORIGIN` or names
-  a port. `ORIGIN` is still how you point a
-  check at a real server, and it is now **verified**: every URL the run will measure is
-  compared byte for byte against the local `dist` and a difference fails naming both
-  digests. `UNVERIFIED_ORIGIN=1` is the opt-out for the deployed site and the log says so.
-  Identity is a hash the reader computes over the output tree — **never a stamp in the
-  build**, because MUSE-20's byte-identical criterion is live; the suite fingerprints two
-  independent builds of the commit and demands they agree. Note the direction of the one
-  import that looks backwards: the GitHub Pages resolver lives in `scripts/dist-origin.mjs`
-  and `test/helpers/serve.ts` re-exports it, because a `.mjs` script cannot import a `.ts`
-  helper and two models of the host would drift (MUSE-9).
-- **A browser check measures the page it names** (MUSE-48). `/` client-side-redirects to
-  `/en/` unless the browser is Croatian, and every automation defaults to `en-US` — so a
-  check that did not pin the locale opened the Croatian homepage, measured the English
-  one, and labelled its results `/`. The primary page was the one page the tooling never
-  looked at; MUSE-35's QA nearly filed the redirect's refetching as a font-preload bug.
-  `scripts/browser-checks.mjs` is the only way to open a page: `openCheckPage(browser,
-  site, route)` derives the locale **from the route** — the route is the intent, asking
-  for `/en/` is asking for English — pins `navigator.language` *and* the stored language,
-  and asserts after navigating that it landed where it asked. That assertion is the
-  general half: it catches the next redirect too, whatever it is about. Two scripts used
-  to carry a hand-written `addInitScript` line instead, which is exactly the shape of
-  defence this repo has watched fail three times. So the module **owns Playwright** —
-  nothing in `scripts/` imports it, and no file in `scripts/` or `test/` may call
-  `newContext`, `newPage`, `addInitScript`, `setItem` or `chromium.launch`;
-  `test/browserlocale.test.ts` reads both directories and fails if one of them opens its
-  own browser, so a suite written next year inherits this without knowing it exists. Each
-  check prints `describeMeasured()` beside its result, so the log names the page and its
-  `<html lang>` rather than the route that was requested. `openRedirectProbe` is the
-  deliberate opt-out that asserts nothing, for `test/lang.test.ts` and
-  `test/localeswitch.test.ts`, whose subject *is* the redirect — it must be handed a
-  browser language rather than defaulted one, and `scripts/` may not use it.
-- **What `npm run a11y` audits is read off the build, and each page carries its URL and
-  its status** (MUSE-55). It ran over `ROUTES` — two homepages by default, a
-  comma-separated list in `ci.yml` whose own comment said "adding a page → add it". The
-  error page was never on it and **could not be**: `site.url('/404')` spells
-  `/MuseByMina/404/`, which the host answers 404 for because it is not a directory, and
-  the gate asserted 200 for everything. Both of those are *correct* — the slash rule is
-  MUSE-9 and the 200 was hard-won after the script reported "8/8 clean" against a stale
-  server 404ing every route — so the page no happy path links to and every lost visitor
-  meets was the one page nothing watched, right after MUSE-38 made it bilingual.
-  `auditTargets` in `scripts/dist-origin.mjs` walks `dist` instead and hands back an
-  `AuditTarget` per page: the **spelling** and the **status** both come from
-  `resolveRequest`, so a page whose correct answer is not 200 is audited at it while
-  anything *other* than the expected status is still a loud failure. There is no list to
-  extend and `ROUTES` is gone from both the script and CI; `test/origin.test.ts` fails if
-  either grows one back. The error page has no locale in its path and is bilingual
-  markup, so it is audited **once per locale** — `/MuseByMina/404` (200) and
-  `/MuseByMina/en/404` (404), both recorded host behaviours — and
-  `test/browserlocale.test.ts` asserts the two arrivals get the same bytes, so the pin
-  cannot quietly start selecting a language. `site.at(path)` is the only way to name a
-  spelling that is not `pagePath`'s; `pagePath` is still the one place a slash is added.
 
-  **And it runs every rule axe enables by default — there is no tag filter** (MUSE-75).
-  It filtered to `wcag2a`/`wcag2aa`/`wcag21a`/`wcag21aa`, and `heading-order` is tagged
-  `best-practice`, so `/pricing/` shipping `h1` → `h3` in both locales was a real axe
-  finding on a live page that this gate structurally could not report — MUSE-55's defect
-  again, one layer in, with "accessibility: pass" meaning something narrower than it
-  reads as. The filter is **gone** rather than extended by a tag: a list of standards
-  worth checking is a list to keep current, and with none the next axe-core release
-  widens what this sees. The noise was measured before it was adopted — the unfiltered
-  run over 16 pages × both themes found that one rule and nothing else at any impact.
-  Rules axe ships disabled (experimental, AAA) stay disabled. What a green run still does
-  not cover is printed under it: `incomplete` results are reported as notes and never
-  failed on, because axe raises them when it cannot compute the answer itself.
+### Pages, routes and metadata
+
+- **A page's `<title>` and `description` are a `page` document in Sanity**, read through
+  `getPage(route)`. `src/lib/pages.ts` holds only `ROUTES` — which routes the site serves —
+  so Sanity owns a page's words and never its existence. A new page needs **both** a route
+  in `ROUTES` and a document in the Studio. `astro build` will not catch a missing route;
+  `npm test` is that gate. → `content-model.md`
+- **Three lists disagree and `src/pages/` is the only one that cannot lie** (MUSE-46).
+  `test/routes.test.ts` anchors every check on the filesystem. A `page` document for a
+  route the site does not serve is a **warning, not a failed build** — do not promote it.
+  → `content-model.md`
+- **Page URLs end in a slash.** `trailingSlash: 'always'` + `build.format: 'directory'`.
+  Build hrefs with `localeUrl()` (`src/lib/i18n.ts`) and nothing else — it is the single
+  place the slash is added. A URL spelled without it is a redirect, which disqualifies it
+  as a canonical. → `build-and-deploy.md`
 - **"Should a crawler index this" and "may this page route by language" are two props**
-  (MUSE-38). `BaseLayout.astro` takes `indexable` and `localeTwins`, and neither is derived
-  from the other — `const localeRouting = indexable;` is the regression, it reads as a
-  tidy-up, and `test/nav.test.ts` pins its absence against the source as well as the
-  behaviour. `indexable` governs canonical, `og:url`, JSON-LD and the sitemap.
-  `localeTwins` governs the switcher, the URLs `langInitScript` is handed, **and the
-  hreflang cluster**. **`langInitScript` ships on every page**;
-  `urlFor` answers `string | null` *per locale*, so "there is nowhere to send them" is a
-  fact about each URL rather than a flag, and the one `go()` funnel enforces it. The error
-  page is `localeTwins={[]}`, and it reads `?lang=`, folds it and
-  persists it like everywhere else — it just does not move anybody, because `/en/404/` is
-  itself a 404.
+  (MUSE-38). `BaseLayout.astro` takes `indexable` and `localeTwins`; neither is derived
+  from the other, and `const localeRouting = indexable;` is the regression. A cluster of
+  one hreflang is not emitted. `404.astro` is bilingual, not client-side-selected.
+  → `build-and-deploy.md`
+- **A link that offers a language must name it** (MUSE-33, MUSE-56). `carryLocation` is the
+  only place that rule lives; `/` is the one route that language-detects, so a bare
+  homepage href hands the click to browser detection. → `build-and-deploy.md`
+- **Structured data is one module and one `<script>` tag** (MUSE-31).
+  `src/lib/structured-data.ts` projects `SiteSettings` into JSON-LD and `BaseLayout.astro`
+  emits it; a second emission site is a red test. `DanceSchool` is **not** a schema.org
+  type and an unknown `@type` fails silently. → `build-and-deploy.md`
+- **The position of an `import` in a component's frontmatter decides CSS cascade order.**
+  There is no config for it. `import '../styles/globals.css'` is the **first** import in
+  `BaseLayout.astro`, and `BaseLayout` is the first import in every page wrapper.
+  → `build-and-deploy.md`
 
-  **It was `localeTwin?: boolean` until MUSE-26 and the blog is what made a set
-  necessary.** A post may be written in one language, so „is there a twin" is one answer
-  *per locale* — which is the shape `urlFor` always had — and the hreflang cluster moved
-  onto the same function rather than being emitted for `LOCALES` unconditionally. **A
-  cluster of one is not emitted**: a lone `hreflang="hr-HR"` is not a self-reference
-  inside a group, it is a statement that the page is *for* Croatian speakers, which would
-  ask Google to withhold a post from the English search it answers. `@astrojs/sitemap`
-  takes that position on its own — `createGetI18nLinks`, `if (links.length <= 1) return
-  undefined` — so the page and the sitemap now agree **by rule** rather than by having
-  both locales for every route. A one-locale post is also the first live counterexample to
-  collapsing the two props: it is indexable and has no twin.
+### Assets, fonts and the brand
 
-  **`404.astro` is bilingual, not client-side-selected.** One document serves both
-  languages, and a bilingual body needs no mechanism, survives JavaScript being off and
-  `localStorage` being blocked, has no flash of the wrong language, and gives each locale an
-  exit link that resolves 200. A second way of deciding which language to show — separate
-  from the redirect, living on one page — is how MUSE-38 happened in the first place: two
-  individually-correct mechanisms answering one question between them.
+- **An asset the site's own code uses goes in `src/assets/` and is imported** — never
+  `public/` plus a hand-written path. A root-absolute CSS `url()` is rewritten with `base`
+  **only at build time**, so it makes the deploy correct and `astro dev` 404 (MUSE-35).
+  There is **no `public/`**. → `design-and-assets.md`
+- **A preload must name the same URL as the thing it preloads, and the preloaded set must
+  be exactly the set the page asks for.** Leave a face out and a word paints in two
+  typefaces: every Croatian diacritic lives in `latin-ext`. `src/lib/fonts.ts` is the only
+  place the per-page set is decided, and **no list may say a page does *not* need a
+  subset** — English is additive-only. → `design-and-assets.md`
+- **There is a performance budget, it is `scripts/budget.mjs`, and it is deliberately not
+  Lighthouse** (MUSE-63). Bytes per page per resource kind, request count, render-blocking
+  count, and how many font faces the host **served**. **No timing and no composite score.**
+  One budget for every page, no per-route entries; the font count has a **floor**. Each
+  number carries the measurement that set it, and `test/budget.test.ts` reads that JSDoc,
+  so raising one silently is a red test. → `design-and-assets.md`
+- **The brand lockup is the supplied artwork, rendered by `Lockup.astro` and nowhere else**
+  (MUSE-64) — two spans of Cormorant and Jost is the rebuild §12 forbids by name. The
+  masthead carries the **icon-only mark** instead, because the lockup does not fit either
+  band at a legible size. Do not shrink the lockup into the band to make the guard green.
+  → `design-and-assets.md`
+- **The icon-only mark is a crop of the lockup, and the small sizes are thickened**
+  (MUSE-40). The alpha is dilated before resampling; a regenerated-without-it icon is the
+  right mark and a smudge. All five tab files carry **`?url&no-inline`**; the masthead mark
+  must **not**. Both colour schemes, mutually exclusive `media`, plus a default opaque tile
+  — an unknown media feature is *false*, not ignored (MUSE-75). → `design-and-assets.md`
+- **A shared link shows a picture, and `siteSettings.shareImage` decides which** (MUSE-69).
+  `shareCard()` is the one decision point. The URL is `new URL(card.src, Astro.site)` —
+  **derived, never written**. `og:image:width`/`height` are required, not padding. No
+  `og:image:type` and no `og:locale:alternate`. The 404 carries a card.
+  → `design-and-assets.md`
+- `rootPath()`/`rootUrl()` in `src/lib/site.ts` are for files published at the deploy root
+  — `robots.txt`, `llms.txt`, the sitemap. They are **not** how you reference a bundled
+  asset. Never interpolate `import.meta.env.BASE_URL` by hand. → `build-and-deploy.md`
 
-  **A link that offers a language must name it, and `carryLocation` is the only place that
-  rule lives** (MUSE-33, MUSE-56). The two exits were built with `localeUrl('/', l)` alone,
-  which is asymmetric in a way that is invisible beside MUSE-38's criteria: `/en/` does not
-  language-detect, so the English exit always worked, while the Croatian one points at the
-  bare deploy root — **the single route on the site that does** — and handed the click to
-  browser detection, which overruled it. An `en-US`, `de-DE` or `en`-storing visitor who
-  deliberately pressed „Početna" was given the English site, and *neither* exit persisted
-  the press. This is the second time a bare homepage href has been reinterpreted; MUSE-33's
-  middle-click case was the first. So the guard is the class, not the instance:
-  `test/lang.test.ts` reads every page in a browser and fails if a link the page has
-  **marked with a language** — `lang` on the anchor or on an ancestor below `<html>`, or
-  `hreflang` on the anchor — has an href that does not name that language. Marking rather
-  than "crosses locales", because `/` from an `hr-HR` document crosses nothing and is
-  exactly the href that broke; in a browser rather than against `dist`, because the
-  switcher's `?lang=` is attached on load and the error page's is stamped at render time,
-  and the href the browser would navigate to is the one level both are true at. The census
-  is pinned too — two exits on the error page, one switch everywhere else — because a guard
-  that finds no affordances passes.
+### The deploy host
 
-  **The error page's monolingual chrome is deliberately not stamped.** Its logo, nav and
-  CTA have the identical exposure (`/` and `/#trial` land on the detecting route) and are
-  not a language affordance: each is offered once with no counterpart, so following one
-  asserts nothing about language, where the exits are a pair and pressing one is a choice.
-  There is also no 404-only chrome — stamping it would stamp every Croatian page, which
-  would freeze an `en-US` visitor who followed a shared Croatian deep link into Croatian
-  the moment they clicked the logo, i.e. break the cohort MUSE-38 exists for. A pressed
-  exit stores the language and a stored choice outranks the browser, so the fix governs the
-  chrome from the first press anyway; `test/lang.test.ts` pins that composition and pins
-  `#trial` surviving the CTA's redirect in both directions (MUSE-10).
+- **The deploy host lives in exactly one file**, `astro.config.mjs`, as the overridable
+  `SITE`/`BASE` default — which makes a domain move (MUSE-29) a config change.
+  **The guarantee is against `dist`, not against a list of directories** (MUSE-42):
+  `test/seo.test.ts` builds under a second host and asserts the first appears nowhere in
+  the output. Alongside it a **fast source scan** names the offending file and walks the
+  whole repository, taking its exclusions from `.gitignore`. Three paths may name the host
+  — `astro.config.mjs`, `.github/workflows/deploy.yml` and `test/`. **Everything else
+  fails, prose included.** → `build-and-deploy.md`
 
-  The **footer** marks the current route with `aria-current="page"`, because `/privacy/` is
-  reachable only from there (the nav omits it on purpose, MUSE-7) and nothing else on the
-  site can mark it. It stays an `<a>`: MUSE-39's rule is that whatever carries
-  `aria-current` must either not be a link **or be a link to exactly where we already
-  are**, and a footer entry for the current route is the second. It is also `/privacy/`'s
-  only self-reference, which `test/nav.test.ts`'s orphan rule is calibrated against.
-- **`/privacy/` is a statutory document, so it stays in code — and the one fact that varies
-  is read off the form's own configuration** (MUSE-72). It had asserted, in both locales and
-  the present tense, that Formspark was the studio's processor under an Art. 28 agreement
-  and emailed the messages through, with `PUBLIC_FORM_ENDPOINT` unset for the life of the
-  project; that AZOP sat on Selska cesta, which it left in May 2025; and that enquiries are
-  kept twelve months and then move to „evidencija polaznika", neither of which anybody had
-  decided. Prose in a component cannot be watched, which is MUSE-50's argument — but
-  **moving a legal notice to the CMS was weighed and declined**, and the reasoning is
-  written out in `Privacy.astro`: AZOP's address has no second surface for a test to compare
-  it against in *either* home, so Sanity would buy editability at the price of review and
-  gain nothing; and a `required()` retention field can only be satisfied by inventing a
-  number, which is how this defect happened. What it got instead is a **dated provenance
-  comment** on the address (re-read `azop.hr` and move the date) and `FORM_HAS_PROCESSOR` in
-  `src/lib/forms.ts` — the same expression `TrialForm.astro` tests before it will `fetch` —
-  gating the recipient paragraph, so the notice and the form are one fact rather than two
-  copies. Art. 13(1)(e) takes *categories* of recipient, so the live paragraph names no
-  provider: an environment variable says somebody receives the data, never who, and a name
-  would be the next unwatched fact. **The guard is both directions** — endpoint unset must
-  name no processor, endpoint set must — proved against two real builds at the end of
-  `test/trialform.test.ts`, which is the one suite that already serves both states, so it
-  cost zero against `DECLARED`'s headroom. **Retention and whether student records exist are
-  Mina's decisions and still outstanding**; until she gives them the page says purpose
-  limitation and the erasure right and no number. `test/contact.test.ts` used to *demand*
-  the string `Formspark`, so the notice could only have been corrected by reddening a test —
-  worth remembering the next time an assertion pins a vendor's name.
-- **The host model serves the error page's *body* on a 404** (MUSE-38). `resolveRequest`
-  returns `404.html` as the `file` on a 404 inside the deploy's prefix, the way GitHub Pages
-  does; outside the prefix it returns no body, because that URL space is not ours (MUSE-8).
-  It used to answer the status and invent the body, so no browser suite in the repo could
-  reach the error page at all and an all-Croatian 404 was only reproducible against the
-  deployed site. Drive it with `test/helpers/preview.ts` and an unknown path.
-- **A test never chooses where it builds.** `npm test` performs **84 heavyweight
-  operations — 71 real `astro build`s, 4 `astro dev` servers and 9 browser launches —
-  across 32 of its 40 files**, in a pool of `availableParallelism() - 1` workers, which
-  is 15 on a developer box and 3 on `ubuntu-latest`. (It said *"ten real `astro build`s
-  in parallel workers"* until MUSE-68 counted; nothing had ever made that true, and
-  `test/lockup.test.ts` reasoned from it.) `test/helpers/scratch.ts` mints a directory
-  per build with `mkdtemp` and passes each one its own cache root, so two suites cannot
-  share an output tree and nothing has to be wiped. There is nothing to remember here —
-  that is the point. This bug was fixed three times as a naming convention (MUSE-9,
-  MUSE-10, MUSE-17) and came back twice; `test/isolation.test.ts` now fails if a suite
-  names a build directory, deletes anything, or spawns its own build.
+### Tests
 
-  **And the total is now metered, because adding to it breaks a different file**
-  (MUSE-68). MUSE-67 gave a new `describe` a build of its own and
-  `test/localeswitch.test.ts` went red — `page.waitForEvent: Timeout 20000ms exceeded
-  while waiting for event "framenavigated"`, read at the time as a correct wait that never
-  got CPU. It was a correct wait on an event that had already been lost; MUSE-70 has the
-  measurement, and the load sensitivity below is real either way. Measured
-  across two agents: **4 of 15 runs fail at 78 operations and 5 of 8 at 79** — every one
-  of them the middle-click MUSE-70 then fixed, so the table's post-MUSE-70 row (MUSE-24:
-  5 runs at 81, 0 failures) says that defect is still fixed and **not** that there is
-  headroom. So the count is the thing to watch and **the count is measured, not read off
-  the source**: a
-  scan for `astroBuild`/`astroDev` call sites undercounts by about a fifth, because the
-  heavyweight helpers wrap each other (`startPreview` → `buildPreview` → `astroBuild`)
-  and a rule stated against a callee — the only kind `source-guard.ts` may state — sees
-  the outer name. `scripts/heavy-census.mjs` records one line per operation from the two
-  places that can start one, each already the only permitted source by an existing rule;
-  `test/helpers/concurrency-reporter.ts` judges the run at `onTestRunEnd`, the first
-  moment the count is complete, and prints the total, the pool size and the headroom on
-  **every** run so the number in this paragraph cannot go stale the way the last one did.
-
-  `DECLARED` in `test/helpers/concurrency.ts` is a per-file table, so the failure names
-  **the file whose count changed** rather than the one counted last; adding a build is a
-  one-line edit there, deliberately, because that is where the cost belongs. **The
-  headroom is zero and the ceiling is a ratchet, not a safety line** — the flake is
-  load-sensitive with no threshold and is present at today's total — so read the
-  measurement table above `BUDGET` before changing either number, and do not raise it
-  quietly. MUSE-69 is the worked example: its two builds took the run to 80, the guard
-  exited 1 on 34 green files naming `test/share.test.ts`, and the entry and the number
-  moved together with the measurement. MUSE-24 is the second and took it to 81, for
-  **one** build: `/events` needs a dataset with an event in it and no build in the tree has
-  ever had one, while the other sixty tests in that file are Astro container renders and
-  cost nothing. That split is the thing to copy — the container sees markup, and a build is
-  for `getStaticPaths`, a URL and the emitted CSS. The worker count is deliberately **not** the
-  divisor: the pool is 15 here and 3 in CI, so dividing
-  by it would pass on a laptop and fail on a runner, and pinning it to 10 was measured
-  neutral on wall clock and still flaked.
-
-  **The cache root is the half that actually fixed it, and it lives in
-  `astro.config.mjs`** — two lines taking `cacheDir` and `vite.cacheDir` from
-  `BUILD_CACHE_DIR`. `outDir` never was the whole story: Astro's and Vite's caches derive
-  from the *project root*, so no per-suite output name can isolate them, and Vite's dep
-  optimiser commits by renaming `node_modules/.vite/deps` aside and deleting it under the
-  other nine builds. Until MUSE-34 nothing asserted those two lines — deleting them left
-  all ten files and 204 tests green with the shared cache back. They are now checked twice:
-  the config is evaluated with the variable set and unset, and a real build has to leave
-  its caches under the directory it was given. ("Afterwards `node_modules/.astro` does not
-  exist" was tried and rejected — `npm run build` creates it legitimately and vitest
-  creates `node_modules/.vite` itself, so the absence check is vacuous or flaky depending
-  on what ran first.)
-
-  **The guard reads syntax, not words** (`test/helpers/source-guard.ts`). The old scan
-  searched raw text for `rmSync`/`rmdir`/`promises.rm(` across `test/**/*.ts`, which was
-  wrong in three directions at once: an `.mjs` helper was never walked, `import { rm }
-  from 'node:fs/promises'` matched no needle, and a doc comment mentioning `rmSync` failed
-  CI while a real `rm` beside it passed. Rules are now stated against an import's
-  *exported* name, a call's callee and a string literal's value, so an alias cannot hide
-  and prose cannot trip them; every extension under `test/` must be declared parsed,
-  markup or inert, so a file nothing reads is a failure rather than a blind spot. The
-  textual scan survives as a *tripwire* over comment-blanked code — it is what catches an
-  `rm -rf` handed to a shell — and the guard's own behaviour has tests, including the
-  evasions MUSE-34 demonstrated. One trap if you edit it: blank comments from the
-  **parser's** comment ranges, never a bare `ts.createScanner` loop, which desyncs on the
-  first template literal with a substitution and then reads every comment as code.
-
-  **`globalSetup` prunes by age; it does not empty the scratch root.** The root was the
-  last shared mutable path in the design, and emptying it meant a second vitest in the
-  same checkout — `--watch` in another terminal, or a second agent in one worktree —
-  deleted the first one's builds mid-flight, which is MUSE-17's flake wearing a different
-  hat. An hour is fifteen times the longest a build can live, needs no lock and no pid
-  file, and cannot reach anything a live run could still be using.
-
-  **And it prunes every scratch root under the checkout, not only the one it runs in**
-  (MUSE-79). That policy is untouched — same rule, same age, wider reach — because the
-  defect was never the rule: one worktree per ticket meant a run in `muse-71` never looked
-  at `muse-64`, and a worktree whose pull request merged is never run in again, so
-  **30,061 stale build directories accumulated across 43 worktrees** and a run died with
-  `ENOSPC`. Every one was older than the age the prune already allowed itself to delete.
-  Age stays the only discriminator and that is what makes the wider reach safe: another
-  agent's live build is minutes old wherever it lives, so no lock and no pid file is
-  needed here either. `scratchRoots()` in `test/helpers/scratch.ts` is where the roots come
-  from — it reads `.git` rather than asking `git`, because a `globalSetup` may not start a
-  child process — and `test/isolation.test.ts` proves both directions against a
-  two-worktree tree.
-
-  **A worktree is the other half of that disk, and it is swept by hand on purpose.** 42 of
-  the 52 present belonged to merged pull requests, each with its own 653 MB of
-  `node_modules`. `npm run worktrees:sweep` prints a verdict per worktree and removes
-  nothing until it is run again with `--remove`; it removes one only when its pull request
-  is **merged**, its tree is **clean** and its tip commit exists somewhere other than that
-  directory, and it calls `git worktree remove` without `--force` so git re-checks. **Do
-  not make it automatic** — an agent's worktree is indistinguishable from an abandoned one
-  between two tool calls, and deleting one mid-ticket is worse than the disk pressure. And
-  **the signal is the pull request, never the commit graph**: this repository
-  squash-merges, so a merged branch is never an ancestor of `main` and
-  `git merge-base --is-ancestor` calls all 42 of them unmerged. The per-worktree
-  `node_modules` stays — README says which three things break if it is shared, all
-  measured — so the sweep is the whole of that answer.
-
-  **A build stages where it outputs, which is why `outDir` may not leave the project
-  root** (MUSE-41). The staging area is the *third* directory a build writes, after the
-  output and the caches, and it is the one nothing chose: Astro puts it in
-  `<outDir>/.prerender/` only while `outDir` starts with `process.cwd()`, and otherwise
-  in `<cwd>/.astro/`, renaming every emitted asset out of there. So an `outDir` outside
-  the root is either a cross-device `fs.rename` — `EXDEV`, not retryable, an Astro stack
-  that never names `outDir` — or, between two concurrent builds, **one shared staging
-  directory with content-hashed filenames**, which collides deterministically: both
-  builds exit 0 and print `Complete!`, and the second ships nine pages linking a
-  stylesheet and six fonts that are not there. Astro exposes no setting for it, so
-  `astro.config.mjs` refuses such a build in `astro:config:setup`, naming `outDir`, the
-  root and the staging path; satisfy it and the staging directory is inside an output
-  `mkdtemp` already made unique, so it is per-build and on the output's own filesystem by
-  construction. `test/isolation.test.ts` holds it three ways — the model pinned to Astro's
-  own `getPrerenderOutputDirectory`, two claimed output directories yielding two staging
-  directories, and a witness file in the shared path that a real build must not delete.
-  **`SCRATCH` being inside the repository is therefore a requirement, not a preference**:
-  moving it to `os.tmpdir()` was harmless before MUSE-35 emitted any assets, and now puts
-  all ten builds back on one staging path.
-
-  **The rule is a test on `outDir` against the root, and asking it about the staging
-  directory instead is what deleted a project** (MUSE-92). `stagingFault` used to ask
-  *"does this build stage inside its own output?"* — the same question as the rule for a
-  descendant and the **opposite** one for an ancestor, because Astro's fallback
-  `<cwd>/.astro/.prerender` *is* inside an `outDir` above the root. So the guard allowed
-  the one shape its own message ruled out, and QA's `outDir = <root>/..` was emptied by
-  Astro and Vite with the project root inside it: sources, caches and all gone, Vite's own
-  generic warning the only thing that objected and only after the fact.
-
-  The rule now enforced, and stated, is **`outDir`'s path must start with the project
-  root's path and may not be the root itself** — which is *not* „under the project root",
-  and the difference is the half that is easy to undo twice. The prefix is **Astro's own
-  raw string test**, the one `prerenderStagingDir` models, so a sibling whose name extends
-  the root's (`<root>-other/dist`) is allowed: it is outside the root as a *tree* and
-  inside it as a *string*, Astro therefore stages it under its own output, and
-  `path.relative` would refuse a safe build for nothing. And the root itself is **refused**
-  rather than admitted by that prefix — Astro's `validateConfig` refuses the build too, so
-  no outcome changed, but a guard against deleting the project may not rest on a check
-  inside a dependency.
-
-  **So the message says the prefix rule, says it is Astro's, and names the sibling it
-  admits.** MUSE-41's wording outlived MUSE-41's predicate and reads as proof the defect
-  was impossible; leaving it would have been the same mistake one case narrower, with the
-  allowance this ticket asserted as the counterexample. `test/isolation.test.ts` pins the
-  headline — the line `buildErrorHeadline` carries into a failed build's report — against
-  both halves, and the ancestor cases are asserted against `stagingFault` as a function
-  and **never reproduced**: there is nothing to learn from deleting a second project, and
-  the function is what `astro:config:setup` consults.
+- **A test never chooses where it builds.** `test/helpers/scratch.ts` mints a directory per
+  build and passes each its own cache root. `test/isolation.test.ts` fails if a suite names
+  a build directory, deletes anything, or spawns its own build. **The cache root lives in
+  `astro.config.mjs`** and is the half that actually fixed the flake.
+  **`SCRATCH` being inside the repository is a requirement, not a preference** — an `outDir`
+  outside the project root shares one staging directory (MUSE-41, MUSE-92).
+  → `testing.md`
+- **The heavyweight-operation total is metered and the headroom is zero.** `DECLARED` in
+  `test/helpers/concurrency.ts` is a per-file table; adding a build is a one-line edit
+  there, deliberately. **Read the measurement table above `BUDGET` before changing either
+  number** — the flake is load-sensitive with no threshold. The count is **measured, not
+  read off the source**. → `testing.md`
 - **A browser suite waits for a condition, never for the clock** (MUSE-54), and
-  `test/helpers/browser-settle.ts` is the only place it waits. Three suites flaked in one
-  afternoon with no code in common and one defect in common: a measurement taken at a
-  moment. The helper samples on the page's own `requestAnimationFrame` clock, because
-  everything these suites wait for — a smooth scroll, a CSS transition — is produced by
-  that clock, so on a loaded box the animation and the sampling of it starve *together*.
-  Measured: under a starved renderer a smooth fragment scroll does not begin for three to
-  seven frames after the click — 90 ms at 10× CPU throttling, 350 ms at 80×, **1272 ms at
-  150×** — and the deleted helper's entire defence against that was a fixed `150` with a
-  25 ms poll behind it, whose exit condition ("two equal reads") the unmoved page
-  satisfies. It then returned the page still at the top, which is exactly the symptom
-  MUSE-50 reported. `minFrames` is that pause counted in frames instead, so the margin
-  survives the load; the wall clock appears only on the failure path, where it bounds how
-  long a *failure* takes to report and the message names the condition and the last thing
-  observed. `fixedSleeps` in `test/helpers/source-guard.ts` keeps new sleeps out — as a
-  rule about a *call*, so the sentence explaining why a sleep was removed can stay in the
-  file it was removed from. What that rule cannot reach is written out beside it and
-  asserted: a measurement that never waited at all, a fixed-interval poll spelled with
-  `setTimeout`, and a correct wait given too small a budget.
-
-  **And the condition has to be about the document being measured** (MUSE-61). The
-  middle-click test waited on three real conditions, every one of them satisfiable while
-  the tab was still `about:blank`: `context.waitForEvent('page')` resolves when the tab
-  *object* exists, `load` has already fired on a blank document, and a `localStorage` read
-  there answers from an opaque origin — it raises `SecurityError`, measured. So
-  `expect(tab.url())` compared against the empty document Chromium opens a middle-clicked
-  tab at, and reddened a pull request that touched no browser code. `settleNewTab` and
-  `settleMove` are the gate, and what they wait for is a **main-frame commit read from
-  Playwright's own `framenavigated`** — the same bookkeeping `page.url()` reads. An in-page
-  `location.href` poll observes the commit too, but in the renderer, and the gap between
-  the renderer knowing and the frame bookkeeping knowing is where this was lost: 11 of 160
-  trials reproduce the exact CI failure with the tab's first document request delayed 8–14
-  ms, and 0 of 240 do with the commit awaited. **Never gate on
-  `waitForURL(theExpectedUrl)`** — that hands the judging to the wait, so a dropped
-  `?lang=` becomes a 15-second timeout instead of a comparison naming what it got, and
-  `?lang=` is the whole subject of those tests. The predicate is a property of the URL
-  (*not blank*, *not where we started*); `expect` stays the judge. The `localStorage` wait
-  is **gone rather than moved**: `langInitScript` is a blocking head script, so
-  `readyState === 'complete'` already proves it ran, and waiting for the thing the next
-  line asserts made that assertion unfailable except by timeout. `uncommittedTabs` keeps
-  the shape out, and the suite takes delivery of a new tab in exactly one helper so that
-  name-scoped rule has one binding to watch rather than three.
-
-  **For a tab Chromium opened, `page.url()` is not that bookkeeping — it is a mirror that
-  can be permanently wrong** (MUSE-70), and that was the last flake in the suite: about one
-  full `npm test` in four, on branches that had touched no browser code, and three tickets
-  were reported red for it innocently. A tab Playwright adopts *after* Chromium opened it
-  keeps `page.url() === 'about:blank'` **for the rest of its life** when its first document
-  commits inside the adoption window. Measured in the failing run: the tab requested the
-  destination's four fonts 60 ms after the `page` event and answered 200 to all of them,
-  and twenty seconds later `page.url()` was still `about:blank` while the document's own
-  `location.href` was the destination. So the event MUSE-61's wait watches for had come and
-  gone, and **raising the 20 s — the obvious fix, and the one the ticket was filed asking
-  for — would have bought a slower failure at the same rate.** `settleNewTab` therefore
-  asks the document (`waitForFunction`: a non-blank `location.href`, then `readyState ===
-  'complete'`) and **returns the URL it established**, so the assertion reads the record the
-  wait read — MUSE-61's rule applied, not bent. `middleClickOpens` hands the three tests
-  that URL, the `<html lang>` and the stored language rather than a `Page`, which is what
-  makes the stale mirror unreachable rather than merely discouraged. `settleCommit` and
-  `settleMove` are **unchanged and still right**: a page the test opened is Playwright's
-  before it navigates. The 20 s is now sized against a measurement recorded beside it —
-  click to a complete document is 524–1288 ms idle, 429–1704 ms at a load average above
-  100, over 28 trials.
-
+  `test/helpers/browser-settle.ts` is the only place it waits — on the page's own
+  `requestAnimationFrame` clock. **The condition must be about the document being
+  measured** (MUSE-61): a blank tab satisfies `load` and a `localStorage` read. For a tab
+  Chromium opened, `page.url()` is a mirror that can be permanently wrong (MUSE-70) — ask
+  the document. **Never gate on `waitForURL(theExpectedUrl)`**; `expect` stays the judge.
+  → `testing.md`
+- **A browser check never takes a server it did not start** (MUSE-52). `openSite()` in
+  `scripts/dist-origin.mjs` serves `dist` in-process on an ephemeral port. Do not put the
+  `astro preview` daemon back. `ORIGIN` is **verified** against the local `dist`.
+  → `testing.md`
+- **A browser check measures the page it names** (MUSE-48). `openCheckPage()` in
+  `scripts/browser-checks.mjs` is the only way to open a page; it derives the locale from
+  the route and asserts where it landed. That module **owns Playwright** — nothing else in
+  `scripts/` or `test/` may call `newContext`, `newPage`, `addInitScript`, `setItem` or
+  `chromium.launch`. → `testing.md`
+- **A test that can only see `dist` cannot see a dev-only bug.** `test/fonts.test.ts` is
+  the one suite that drives `astro dev`, through `astroDev()`. Pass `--ignore-lock` and
+  strip `VITEST` from the child env. **A green dev-server suite on your machine is not
+  evidence about CI** (MUSE-47) — to reproduce CI, unset `CLAUDECODE`, `AI_AGENT` and
+  `CLAUDE_CODE_*` **and set `FORCE_COLOR=1`**. Both halves, or the defect is unreachable.
+  The base is configuration, never discovered from a server. → `testing.md`
+- **Every page read from a dev server goes through `fetchMeasuredPage`** (MUSE-62), which
+  compares the response's canonical against the path requested — the 404 page declares
+  none, so it cannot pass for a real page. Not body text: every page contains „Muse by
+  Mina". → `testing.md`
+- **What `npm run a11y` audits is read off the build, and each page carries its URL and its
+  status** (MUSE-55). `auditTargets` walks `dist`; there is no list to extend and no
+  `ROUTES` in the script or CI. **It runs every rule axe enables by default — there is no
+  tag filter** (MUSE-75). `incomplete` results are notes and are never failed on.
+  → `testing.md`
+- **The host model serves the error page's *body* on a 404** (MUSE-38), and outside the
+  deploy prefix it returns no body. Drive it with `test/helpers/preview.ts`. → `testing.md`
+- **A component can be built before its page can be routed** (MUSE-23):
+  `MUSE_PREVIEW_ROUTES=<name> npm run build` injects `/<name>-preview`. **Delete the entry
+  with the ticket that routes the page.** The registry is empty, which is the healthy
+  state. → `testing.md`
 - **The formatting convention is stated in `prettier.config.mjs`, and `prettier --write`
-  over the tree is still wrong** (MUSE-58). Nothing stated it before, and Prettier's
-  default is `singleQuote: false` — so a bare `npx prettier --write <file>` did not follow
-  this repository, it overrode it: MUSE-45's pull request arrived as 538/319 for a 96-line
-  change, 348 added lines pure requoting, all five checks green. Every value in the config
-  was **measured** against the tree, so only the two settings that differ from Prettier's
-  defaults are written down; the rest would be a value to re-measure when a default moves.
-  Run it on **one file**, the one you touched (`npm run format -- <file>`).
-
-  **Then read `git diff`, because the scoped form is not safe either** (MUSE-82). Prettier
-  has no range mode: run it on one file you changed and it reformats *the whole file*. 47 of
-  the 96 files it owns differ from its output in wrapping only, so a 12-line change to
-  `test/home.test.ts` came back as 65 lines and a 14-line hunk in `test/contact.test.ts` as
-  95 — eight blocks of untouched code reflowed, `npm run format:check` green either way,
-  because wrapping is deliberately not its business. **That is this design working, not a
-  defect**; the alternative is the tree-wide reformat the next paragraph refuses. So the
-  working rule is: **run it, read the diff, and if it rewrapped code you did not touch,
-  revert the file and re-apply your hunk by hand.** Converging a file is for a branch that
-  is *about* that file; it is not worth burying a two-line fix in sixty lines of reflow a
-  reviewer then has to read. (Teaching `npm run format` to warn when its output would move
-  lines outside your hunk was considered and rejected: it would have to guess your base to
-  know which lines are yours, it would fire on roughly half of all files touched, and it
-  could only ever *report* what `git diff` already shows — whether a given reflow is
-  reviewable is the judgement, and a wrapper cannot make it.)
-
-  **`prettier --check` is not the gate and must not become one.** The tree is not
-  Prettier-formatted: 49 of the 96 files Prettier owns are byte-identical under the config,
-  47 differ in wrapping only, and 35 are clean at *no* print width because they were
-  wrapped by hand. Making that check pass means reformatting the tree, which is a diff
-  nobody can review and invalidates every open branch at once — this ticket committing the
-  defect it exists to prevent. `npm run format:check` (`scripts/check-format.mjs`) asserts
-  the invariant the tree actually holds instead, which is also the whole of MUSE-45's
-  damage: **where the quote character is a free choice, this repository picks single.** It
-  takes the preferred quote from the resolved config rather than restating it, reads syntax
-  so a quote in prose cannot trip it, names `file:line`, runs in 1.3 s, and lives as a step
-  in `ci.yml`'s `designsystem` job — the only one needing neither a build nor a browser —
-  rather than as a sixth check. Files conform the rest of the way as they are touched.
-
-  Two things in there that look cosmetic and are not. **`sanity typegen` resolves
-  `prettier.config.mjs`** for its own output and `resolveConfig` cannot see
-  `.prettierignore`, so `src/lib/sanity/sanity.types.ts` is pinned by an `overrides` entry
-  to the Prettier *defaults* its generator emits; without it the next
-  `npm run sanity:types` rewrites all 146 lines and `ci.yml`'s `sanity` job goes red on a
-  branch that never touched the schema. And `*.css` is ignored because Prettier flattens
-  `tokens.css`'s hand-aligned table and lowercases hex that is transcribed from the design
-  system document; `*.md` because prose wrapping is a judgement and this file is edited by
-  every branch at once; `*.astro` because no Astro parser is installed, which is asserted
-  still true — add `prettier-plugin-astro` and `test/format.test.ts` fails telling you to
-  widen the quote rule past the frontmatter fence.
+  over the tree is still wrong** (MUSE-58). Run `npm run format -- <file>` on the one file
+  you touched. **Then read `git diff`** — it reformats the whole file, and if it rewrapped
+  code you did not touch, revert and re-apply your hunk by hand (MUSE-82).
+  `npm run format:check` is the gate; **`prettier --check` is not and must not become
+  one.** → `testing.md`
 
 ## Sanity (MUSE-19, MUSE-20)
 
-- **The build reads Sanity, so a Sanity outage blocks every PR and every deploy.** Three
-  jobs run `npm run build` and it fetches live; there is no cached snapshot and no retry of
-  our own beyond `@sanity/client`'s defaults. That is the deliberate trade — the
-  alternative is publishing pages with empty titles, which `src/lib/sanity/decode.ts`
-  exists to refuse — but it is a real availability dependency, and the `continue-on-error`
-  probe step in `ci.yml` no longer protects anything from it.
+- **The build reads Sanity, so a Sanity outage blocks every PR and every deploy.** That is
+  the deliberate trade — the alternative is publishing pages with empty titles.
+  → `content-model.md`
 - **It reads the *uncached* host, and that is a correctness setting, not a tuning one**
-  (MUSE-81). `useCdn: false` in `src/lib/sanity/client.ts`. The cached read host is
-  eventually consistent, so a build starting inside the refresh window after a publish
-  reads the **previous** revision and publishes it with every gate green — 200 from the
-  API, every document present, nothing for `decode.ts` to object to, `deploy.yml`'s alert
-  silent, because nothing failed. Observed: an import verified in the dataset at 10:12, a
-  successful rebuild at 10:13, the old text live at 10:14, correct after a second rebuild
-  at 10:18. What that breaks is **MUSE-21's promise**: the cron fires at `20 1,7,13,19`
-  and Mina is told a *duration*, so an edit published shortly before a run can be read
-  pre-publish by that run and wait six hours more than the maximum she was given. The
-  comment this replaced argued the opposite and its flaw is worth keeping in mind — it
-  reasoned about the *expected* gap between an edit and the next build, when the thing
-  being promised is the *worst* one.
-
-  `useCdn` is now the literal type `false` in `SanitySource`, the way `perspective` is
-  `'published'`: the two settings here whose loss is silent, each pinned at compile time
-  and again by a test. The cost was measured rather than waved away, because the cost is
-  the whole argument — five interleaved pairs of real `astro build` runs, median 2.70 s
-  cached against 3.13 s uncached, which is **+0.43 s** and inside the noise of a fifteen
-  second `npm run build`. The **`[content]` line names the host** beside the dataset, and
-  that is the only place „was this build's content current?" can be answered after the
-  fact; `contentEndpoint()` asks the client's own `getUrl()` rather than restating the
-  rule that turns the flag into a hostname. **Every script reads the same host through
-  `queryUrl` in `scripts/seed-compare.mjs`** — `scripts/sanity-read-check.mjs` wrote its
-  own URL against the cached one, which could make it report `EMPTY` for a document that
-  was in the dataset, the single verdict it exists to tell apart from a broken query.
-  `test/endpoint.test.ts` fails on the cached hostname appearing anywhere under `src/` or
-  `scripts/`, **prose included**, for `test/seo.test.ts`'s reason; say „the cached host"
-  instead.
-
-  **A post-deploy check comparing the published bytes against the dataset was weighed and
-  declined.** It would have caught this one, and the ordering objection is real: the
-  dataset legitimately moves between a build and a check, so the naive comparison goes red
-  on Mina's ordinary evening edit — the loudest possible false alarm, since MUSE-21's
-  response to a failed deploy is an assigned issue. The honest version needs each
-  document's `_rev` captured at build time *plus* the build's start instant, so that „we
-  read a superseded revision" (fatal) can be told from „she edited after we read" (fine) —
-  a new build artefact and a new workflow job, to detect a failure the type pin above now
-  makes structurally unreachable, and one that **cannot be exercised at all** without a
-  content-write token this project deliberately does not have (MUSE-21, MUSE-45). A gate
-  nobody can test is a gate that rots, and this repository has three recorded instances of
-  exactly that. The proportionate half shipped instead: the log now names the endpoint, so
-  a stale deploy is diagnosable after the fact from the build log alone.
+  (MUSE-81). `useCdn: false`, pinned as the literal type `false`. The cached host is
+  eventually consistent, so a build inside the refresh window publishes the previous
+  revision with every gate green. The `[content]` line names the host. → `content-model.md`
 - **The seed lives in `content/`, not in `sanity/`, and that is load-bearing** (MUSE-45).
-  `scripts/check-sanity.mjs` hashes every file under `sanity/` with **no extension
-  filter** — the MUSE-19 rule — and the fingerprint it produces means one thing: *the
-  generated artefacts still describe the schema*. Every consumer was written for that one
-  meaning, so while the seed sat at `sanity/seed/content.ndjson` a reworded page title
-  failed the build until the types were regenerated, made CI print „The Sanity schema
-  changed" at somebody who had not been near the schema, and triggered `studio.yml` —
-  **the one job that uses `SANITY_DEPLOY_TOKEN`, a write credential** — republishing the
-  Studio Mina may have had open. **Do not fix the next instance of this by teaching the
-  walk to skip something:** the sweep's whole value is that it has no exceptions, and a
-  skip list is MUSE-19's allow-list wearing the other hat. Move the file instead, so
-  *"every file under `sanity/` is schema source"* stays true. `test/sanity.test.ts`, "keeps
-  the content seed outside the schema fingerprint", states it against
-  `MUSE_CONTENT_FIXTURE` rather than a path literal — the file the run actually reads and
-  the file `npm run sanity:seed` imports — and checks all four surfaces: `fingerprint()`,
-  the committed stamp, `SOURCE_GLOBS` and `studio.yml`'s `paths:`.
-- **The seed is both the migration and the test fixture.** `content/seed.ndjson`
-  holds every document that exists — the `siteSettings` singleton, the `page` documents,
-  the timetable (MUSE-36), the two `pricingTier` documents (MUSE-59) and the `studioStory`
-  singleton (MUSE-60) — and `npm run sanity:seed` imports it, replacing by `_id`, so the
-  migration is reviewable and re-runnable. `vitest.config.ts` points every test build at that same file
-  (`MUSE_CONTENT_FIXTURE`) and `src/lib/sanity/fixture.ts` evaluates the *real* queries
-  against it with `groq-js`. **The suite never touches the network**, and there is no second
-  copy of the content to drift. The deploy has no such variable and fetches live; there is no
-  default path and no fallback, so a fixture build cannot happen by accident — and the build
-  log says which source it read. What can still age is the seed against the dataset once Mina
-  edits in the Studio: `npm run sanity:seed:check` is how you find out, and CI runs it
-  `continue-on-error` so drift is reported without failing a pull request. The fixture
-  drops `drafts.` documents, because `perspective: 'published'` does and a seed refreshed
-  with `sanity dataset export` carries drafts — otherwise the fixture sees a page the
-  deploy cannot.
-- **A dev server re-reads content per request; a build reads once per reader** (MUSE-47).
-  „Each reader is memoised for the life of the build" was read as a property of the
-  module, and a dev server is also one process that lives for days: measured, three
-  reloads of `/schedule/` issued `PAGES_QUERY` once, `SITE_SETTINGS_QUERY` once and
-  `SCHEDULE_QUERY` three times, so the timetable followed the Studio and the `<title>`,
-  the footer and the JSON-LD did not. *Partly* fresh is what reads as „my change didn't
-  save". Both caches are per-build now — `perBuild` in `src/lib/sanity/index.ts` and
-  `dataset()` in `fixture.ts`, which froze everything on its own — and the `[content]`
-  line names which regime is in force, which is how `test/devcontent.test.ts` asserts it
-  off a real `astro build` and a real `astro dev`. One dev-only cost, documented rather
-  than fixed: the footer and `structured-data.ts` are then two `SITE_SETTINGS_QUERY`
-  calls per render rather than one shared promise.
-
-  **Anything that logs from inside a memoised reader now needs to say which it meant.**
-  MUSE-46's inert-`page`-document warning sat in `pagesByRoute`, where "warn when it
-  happens" and "warn once" had been one sentence; per request they are two, and it would
-  otherwise repeat on every reload into the stream the `[content]` line is in. The guard is
-  the `inertWarned` comparison beside it, and it is keyed on **the message, not on a
-  count**: "once per process" is MUSE-47's own defect in miniature — a log still reporting a
-  condition that stopped holding the moment you fixed the document and reloaded. So a
-  *changed* warning prints, an identical one does not, and a fixed one goes quiet.
-  `test/devcontent.test.ts` drives two different inert documents through one dev session,
-  because de-duplicating on "have I ever warned" passes the repeat count and then goes
-  silent about the second one. A build is byte-identical to MUSE-46's, which is where
-  `test/routes.test.ts` asserts it.
-
-  **The gate is `import.meta.hot` (`src/lib/sanity/dev.ts`), and that is the whole
-  point.** `NODE_ENV`, `process.argv` and `npm_lifecycle_event` all tell `astro dev` from
-  `astro build` just as reliably — all three measured — and all three are settable by
-  whoever starts the build, which disqualifies them for a gate deciding whether content
-  may come from a file in the repository. Nothing in a workflow or a script can produce
-  an HMR handle. Write it as the literal `import.meta.hot`: Vite's dev transform rewrites
-  that exact member access, so `'hot' in import.meta` is **false** in dev. It is not what
-  `test/sanity.test.ts` forbids — that rule is about reading *configuration* off
-  `import.meta.env`, which Vite substitutes into client bundles.
-- **Offline dev is `MUSE_CONTENT_FIXTURE=content/seed.ndjson npm run dev`, and
-  MUSE-47 deliberately built no mechanism for it.** No fallback (a build that substituted
-  the seed for an unreachable dataset is the deploy MUSE-20's four barriers exist to
-  prevent), no `dev:offline` script (barrier 3 forbids a `package.json` script from
-  assigning the variable, correctly), and no second gated boolean — it would buy forty
-  characters of typing and cost a name every future guard has to remember. Discoverability
-  is carried by the error instead: `runQuery`'s unreachable-API message prints that command
-  **only under a dev server**, because a deploy log must never propose publishing the seed,
-  and `deploy.yml` greps that same error to retry. `test/devcontent.test.ts` asserts the
-  hint names a seed that is really there and the one `vitest.config.ts` reads.
-- **What the site published before the migration is frozen in `test/content.test.ts`.**
-  `PUBLISHED_BEFORE_THE_MIGRATION` is the only remaining copy of those strings and it is
-  what makes "renders byte-identically to the previous deploy" a test rather than a command
-  somebody once ran — comparing the build to the seed it just read asserts nothing. When
-  Mina legitimately rewords something, delete the entry with a sentence saying so; do not
-  quietly update it to match.
-- **`siteSettings.address` is one field, rendered on five surfaces.** `addressLines`
-  (`src/lib/sanity/decode.ts`) splits it on its one comma for the footer's two-line
-  `<address>`; `ADDRESS_PATTERN` makes the Studio refuse what the build would refuse. The
-  rule exists because a CMS field nothing renders is worse than no field — it looks like it
-  works. Only `country` (a translated word) and `maps` (no field in the schema) are still
-  code, in `STUDIO`.
-
-  It said **four** until MUSE-50: `/schedule`'s hero eyebrow spelled the street as a
-  literal inside a composed label („Raspored · …"), and MUSE-20's review found its
-  surfaces by grepping for the identifier `STUDIO.street`, which a string buried in a
-  longer string does not match. **The guard for this existed and was green** —
-  `test/content.test.ts` scanned `src/` for the seeded values — because its needle was the
-  whole field while the copy was the street half, and because its field list was written
-  by hand, so `class.slug` and `scheduleSlot.start` were never on it.
-  `test/contentdrift.test.ts` replaces it: a **registry** of every string field in the
-  seed, each one classified as CMS-owned or legitimately-in-code with the reason beside
-  it, the completeness of that classification asserted so a new field forces the decision,
-  the needles including what the read path *derives* (the street, not the city — „Zagreb"
-  is a declined word in the homepage h1 and the regulator's address in the privacy
-  notice), every exemption asserted still live, and a failure that names `file:line`. The
-  same file rebuilds the site from an edited address and demands all five surfaces move,
-  which is the only assertion a literal fails while it still happens to match.
-- **A component can be built before its page can be routed** (MUSE-23), and
-  `MUSE_PREVIEW_ROUTES=<name> npm run build` injects `/<name>-preview` so it can still be
-  asserted on against `dist` — the only way to check CSS, since Astro's container API
-  renders markup without the stylesheet pipeline. `src/lib/preview.ts` is the registry,
-  the entry points live under `test/` so `test/seo.test.ts`'s page list cannot see them,
-  and unset the variable injects nothing. **Delete the entry with the ticket that routes
-  the page**; an entry that outlives its ticket is a page nobody shipped.
-
-  **The registry is empty, and that is the healthy state** (MUSE-60). `aboutus` was the
-  only entry there has ever been and MUSE-60 routed the page. Note what that costs and
-  what replaced it: "every entry point is under `test/`" is a *loop over the registry*, so
-  it now passes without asserting anything — the shape of green test this repo keeps
-  re-filing. `test/aboutus.test.ts` keeps it for the next entry and leans on the half that
-  still has a subject, which is that `requestedPreviews('aboutus')` **throws** naming the
-  name, so a stale variable is an error rather than a build that silently injects nothing.
-  The guard on no workflow and no npm script *assigning* the variable is a claim about the
-  variable rather than the registry and is unaffected.
-- **`/aboutus` ships placeholder prose, and it is placeholder where a human can see it**
-  (MUSE-60). The owner asked for a few generated sentences so the page could ship. That is
-  a stopgap, and it is only a stopgap because of three things, none of which is optional:
-  the text is in **`content/seed.ndjson`** rather than in `AboutUs.astro`, so Mina replaces
-  it by typing over it; it **asserts nothing checkable** — no founding year, no student
-  count, no award, no claim about anybody's training; and the Studio field descriptions say
-  `PRIVREMENI TEKST` in Croatian, which is the only instruction she reads. Replacing it is
-  a Studio edit and needs no ticket. **Silent** placeholder text is what MUSE-36 is about;
-  placeholder text is allowed.
-
-  `studioStory.foundedOn` came off the required list with it, and that is the same
-  decision rather than a relaxation: MUSE-23 made the origin story dated on purpose, no
-  founding date for this studio is recorded anywhere, and a `required()` date could only
-  have been satisfied by picking a plausible day. The page omits the line; the decoder
-  still refuses a value that is present and is not a calendar date, and `shape.ts` asserts
-  the field *as* optional, because a field with no assertion is a field nothing watches.
-  **No bio is written for Mina or Antonio and none should be** — see the optional-field
-  note below, which is the same argument on the same page.
-- **Routing a page is two pull-request-shaped halves, and the dataset goes first**
-  (MUSE-59, MUSE-60). The build fetches live, so the route and the documents cannot land
-  in the same push: the moment `/pricing` was in
-  `ROUTES`, every build without a `page` document and two `pricingTier` documents in the
-  **live dataset** failed — each PR, the deploy, the scheduled rebuild. So the branch
-  prepares `content/seed.ndjson` *and* the route together, says in the PR body that it
-  must not be merged yet, and somebody runs `npm run sanity:seed` between review and
-  merge. **An agent does not run that command**: it writes to Mina's content, replacing by
-  `_id`. `test/pricing.test.ts` keeps the trap as a test — the route with the documents
-  removed must fail naming `pricingTier`, and must not carry `TRANSIENT_BUILD_FAILURE`,
-  because MUSE-21's retry would otherwise spend three attempts on a dataset that will not
-  seed itself.
-
-  **MUSE-60 ran the same sequence for `/aboutus` and found why it matters beyond a red
-  build.** The live dataset already held a `studioStory` — created outside any seed,
-  carrying `foundedOn: "2025-01-01"`, a founding date nobody has confirmed, and
-  paragraphs reading „PLACEHOLDER … nije istinit". It published nothing only because
-  the route did not exist. Had the route landed without the seed import, the build
-  would not have failed on *that* document — it would have rendered it. So the half of
-  the rule that reads as bureaucratic is the load-bearing half: **the dataset is
-  authoritative at build time, and a document nobody reviewed is a page nobody
-  reviewed.** `npm run sanity:seed:check` is how you find that out before merging, and
-  it is worth reading rather than glancing at.
+  Everything under `sanity/` is schema source and is fingerprinted with no extension
+  filter. **Do not fix the next instance by teaching the walk to skip something** — move
+  the file. → `content-model.md`
+- **The seed is both the migration and the test fixture.** `content/seed.ndjson` holds
+  every document that exists; `npm run sanity:seed` imports it, replacing by `_id`. Every
+  test build reads that same file and **the suite never touches the network**.
+  → `content-model.md`
 - **Editing content in a branch is two steps and the order is the whole of it: import,
-  then merge** (MUSE-78). An *added* document is safe by accident — the build refuses to
-  run without it, so the deploy cannot publish stale content. An **edit to a document
-  that already exists publishes the old value successfully**, and had no signal anywhere:
-  green PR, green suite, the new text in the diff, the old text on the page. So, for a
-  branch that touches `content/seed.ndjson`:
-
-  1. `npm run sanity:seed` — **before the merge**, not after. `--replace` is keyed on
-     `_id` and the documents already exist, so importing content whose PR has not landed
-     is safe; it is an edit to copy, and the site reads copy from the dataset either way.
-  2. Merge. The push deploy is a build, and a build is the only thing that reads the
-     dataset, so that build is the one that publishes it. No stale window.
-
-  **Importing after the merge is not enough, and that is the part that caught somebody.**
-  MUSE-71 merged at 08:34, the deploy fetched the dataset immediately, the import ran at
-  08:41, and the live page still carried the retired claim at 08:42 — everything green.
-  Left alone it would have corrected at the next scheduled rebuild, up to
-  `MAX_WAIT_HOURS` later, with nothing indicating staleness; it took a
-  `workflow_dispatch`. So merging first makes it **three** steps — merge, import, then
-  Actions → Deploy to GitHub Pages → Run workflow — and the last is the forgettable one,
-  because the import succeeds and looks like the end of the job.
-
-  `npm run sanity:seed:release` is the gate, a step in `ci.yml`'s `sanity` job, and it
-  **blocks** — which `sanity:seed:check` beside it still must not (MUSE-45: a Studio edit
-  may never fail a deploy). The two are different claims and the difference is
-  *direction*. `DRIFTED` is one word for the dataset being ahead, which is Mina editing
-  and is nobody's blocker, and the seed being ahead, which is our unshipped change and
-  is. The seed is in git, so authorship comes from the diff against the merge base and
-  needs no credential: **a value that differs from the dataset *and* from the merge base
-  is ours.** A branch that does not touch the seed cannot fail the gate however far the
-  dataset has drifted. When both have moved the message says so instead of choosing — on
-  one field it prints all three values and asks for the decision to be written into the
-  seed; on different fields it warns that the import is `--replace` over the **whole
-  file**, so shipping our two fields reverts whatever else Mina changed. It fails open on
-  an unreachable API (`npm run build` is already red everywhere on an outage) and it is
-  structurally read-only: **auto-seeding on merge was rejected**, because it needs a
-  content-write token in CI and MUSE-21 and MUSE-45 both exist to keep one from
-  appearing. Do not add one.
-- **`/whatisbachata` says what the dance is, and nothing about the curriculum**
-  (MUSE-65). It is the one of MUSE-27's four trust pages that could be written without
-  Mina, because its subject is general knowledge; the other three are studio facts and
-  stay in that ticket. Every sentence on it is either **a fact about the dance** or **a
-  fact already published from the dataset**, and the second kind is *read* — the levels
-  present in the timetable in `LEVELS` order, the evenings from `groupByDay`, the length
-  from `uniformDuration`, the teachers joined by `formatNames`. A literal that happens to
-  match today's seed passes every equality test there is; `test/whatisbachata.test.ts`
-  rebuilds from an edited dataset and demands the seeded words appear in no byte of
-  `dist` (MUSE-50).
-
-  **The styles are allowed as a sentence and forbidden as structure.** The page may say
-  that traditional Dominican, modern and sensual exist and differ — that is true of the
-  dance. It may not say which is taught here, and MUSE-36's `STYLES` may not come back:
-  no schema field named after a style (`test/sanity.test.ts`), no route, no filter, and
-  **no section per style**, because three headings in the shape of a course outline read
-  as a curriculum whatever the words say. So the three names live in **one** paragraph of
-  the CMS body, that is asserted, and the page links to `/schedule` rather than
-  explaining the programme. Note the needle: „Dominikanska Republika" is also where the
-  dance comes from, so the guard keys on `sensual` and `moderna`, the two words that can
-  only be style names here.
-
-  **`prosePage` is one document type designed for four pages and used for one.** Keyed by
-  `route` exactly as `page` is, so the Studio dropdown is `ROUTES` and a document cannot
-  describe a page the site does not serve; `getProsePage(route)` indexes all of them and
-  fails naming the route when there is none **or two**, with `minimum: 0` for
-  `pagesByRoute`'s reason. Its body is an array of bilingual paragraphs and **not
-  Portable Text**: when MUSE-65 was written nothing on this site rendered it, so the first
-  consumer would have had to write a renderer, and Mina would get headings, bold and links
-  inside a paragraph whose type scale the design system fixes anyway. `studioStory.story`
-  took the same decision and argues it at length. **MUSE-26 wrote the renderer** — it is
-  `src/lib/portable-text.ts` and `post.body` is its only caller — and the decision here
-  stands for the second reason rather than the first: a page of prose the design system
-  sets at one scale has nothing to gain from an editor that can pick a different one. There is no image field, for the
-  optional-field reason: no photography of this studio exists.
-
-  One limit, stated rather than discovered: a `prosePage` for a route the site *does*
-  serve but whose page renders no prose publishes nothing and nothing says so — MUSE-46's
-  inert document minus the half that is detectable. `getProsePage` is asked about one
-  route at a time and "which routes have prose" is written down nowhere, deliberately,
-  because a fourth list of pages is what MUSE-46 argues against. The dropdown is the
-  instrument that reaches Mina. `test/helpers/structural-content.ts` keeps the fixture's
-  own list in `PROSE_ROUTES`, and forgetting to extend it is loud: every suite that
-  builds the site against `FULL` goes red naming the route.
-
-  **The `<h1>` and the nav label are deliberately different strings** — „Što je bachata?"
-  against „Što je bachata" — and `prosePage.heading` is in `test/contentdrift.test.ts`'s
-  `CMS_OWNS` while the label is code. The seeded `<title>` *does* repeat the heading,
-  which is a copy in the dataset and allowed; the edited-dataset build therefore moves the
-  `page` document too, so "the seeded prose appears nowhere in the output" stays a flat
-  claim rather than one with a carve-out a real literal could hide inside — the move
-  `test/contentdrift.test.ts` makes with `siteSettings.summary`, with a test beside it
-  asserting the reason is still true.
-
-  `MORE_NAV` is non-empty for the first time since MUSE-13, which brings the header's
-  "More" disclosure back. That is where a trust explainer belongs: the desktop bar is the
-  decision path and is budgeted at four links plus the disclosure, a fifth uppercase link
-  at 0.18em tracking is what makes it wrap, and the entry is still complete in the mobile
-  panel and in the footer's quick list. `test/nav.test.ts` was already written as a
-  conditional on `MORE_NAV` rather than as "there is no More button", so the disclosure is
-  held to its own criteria the day it comes back.
-- **`/events` ships empty, and being honest about that is the page** (MUSE-24). There are
-  no `event` documents and nobody has given us any; `getEvents` supports `minimum: 0`, so
-  an events page with nothing on it is a legitimate page rather than a broken one — which
-  is the whole reason this one could be built while `/gallery` and the trust pages cannot.
-  The empty state says „Nema objavljenih događaja.", renders **no list and no section
-  heading** (an empty grid reads as a page that failed to load), offers `/schedule` and
-  `/contact`, and says nothing at all about past events. Its words are `EVENT_COPY` in
-  `src/lib/events.ts` and are deliberately **not** in the CMS: „there are no events" is a
-  statement about the dataset, and Mina cannot keep a field describing the dataset true
-  because she cannot see when it renders. No invented event anywhere — not in the seed, not
-  „to show the layout"; the fixtures are `EVENTS_RENDERED` under `test/`.
-
-  **Three queries over one document type, and the third is the point.** `EVENTS_QUERY` and
-  `PAST_EVENTS_QUERY` are **exact complements** given the same `$now`, so every event is on
-  exactly one page; they are written out rather than negated, because `endsAt >= $now` over
-  an absent `endsAt` is `null` in GROQ and `!null` is `null`, so `!(upcoming)` would drop
-  every event with no announced end from *both* lists. `ALL_EVENTS_QUERY` takes **no
-  clock** and is what `getStaticPaths` reads: which pages a build emits may not depend on
-  when it ran, or an archived event's URL would stop resolving. The partition, and that
-  `hasPassed` — the sentence „Ovaj je događaj prošao." on the detail page — agrees with it
-  row for row, are `test/projections.test.ts`.
-
-  **The transition is a build, and the window is `MAX_WAIT_HOURS`.** Nothing moves until
-  something builds; what builds is a push and MUSE-21's cron, so an event that finished
-  just after a run can sit in the upcoming list for very nearly the largest gap between
-  runs. Accepted: the alternative is a second answer to the same question in JavaScript on
-  a page whose most important reader is a crawler, it is wrong in the harmless direction
-  (last night's party, with last night's date printed on it), the detail page says so in
-  words, and **no URL depends on it**. The number is cited by name and never written out —
-  `test/events.test.ts` fails on an hour count in those files, for the reason MUSE-21
-  promises a duration and not a clock time. Nothing on the page is stamped with a build
-  time, which would break MUSE-20's byte-identical criterion.
-
-  **The slug is permanent, so the Studio prefixes the year.** `/events/<slug>/` is the
-  document's stored slug — not derived from the date at build time, because a derived URL
-  moves when Mina corrects a typo and an archive URL that moves is one that 404s for
-  everyone who ever linked it. `source: 'title.hr'` alone collides with a repeat annual
-  event and leaves her inventing `noc-bachate-2` as that edition's permanent address, so
-  the source is a function giving `2026-noc-bachate`. **`archive` is refused**: Astro gives
-  a static segment priority, so an event slugged that would build a page nothing can reach.
-  `reservedEventSlugs()` reads the children of `/events` off `ROUTES` rather than listing
-  them, and `assertEventSlugs` fails the build naming the event, the slug and the route it
-  collides with. It is a build guard and not a Studio one on purpose — `Rule.custom` is the
-  only instrument Sanity offers for this, and `enums.ts` records that a custom rule is
-  skipped without a client, so it would be real in the Studio and unobservable in a test.
-
-  Four smaller things that are easy to undo. **`/events/[slug]` is a template, not a
-  page** — it is in `NOT_A_ROUTE`/`NOT_A_PAGE` with the reason, it has no `ROUTES` entry
-  and no `page` document (its `<title>` is derived from the event), and it is in the
-  **sitemap** and deliberately not in `llms.txt`, which is a short index of the site's
-  sections and links the sitemap for the rest. **`getStaticPaths` runs before any page
-  renders**, so it is the first read of the build and the one a Sanity outage hits — and
-  Astro prints a `getStaticPaths` rejection *without* the error's class name, which would
-  have quietly removed `SanityUnavailableError` from the one log that tells `decode.ts`'s
-  three outcomes apart; `readStaticPaths` in `src/lib/sanity/index.ts` folds it back in and
-  `test/content.test.ts`'s unreachable-API build is the guard. **`/events/archive` is in no
-  nav list** — a site-wide „Arhiva" entry would advertise past events on every page of a
-  site that has never held one, so it is reached from `/events/`, unconditionally — which
-  makes it the first page here whose route the footer does not list, and
-  `test/nav.test.ts`'s `aria-current` block is now a partition on „does the footer list
-  this section" rather than a claim about every page. And **`src/lib/events.ts` is schema
-  source**: the schema imports `EVENT_TYPES`/`EVENT_TYPE_NAME` out of it, so it is in
-  `check-sanity.mjs`'s `SOURCES` *and* in `studio.yml`'s `paths:` — two lists, asserted
-  equal, and no third.
-- **`/gallery` ships with no photographs, and that is the honest hard case** (MUSE-25).
-  `/events` and `/blog` ship empty too, and the difference is worth stating because it is
-  what the design had to answer: **their purpose survives having no content and a
-  gallery's does not.** An events page with nothing on it still tells you the studio runs
-  a weekly timetable; a gallery with nothing on it tells a visitor nothing they came for.
-  So the page is thin and is not disguised — no placeholder tiles, no decorative frames,
-  no stock imagery, and **no lede**, which is the one thing this empty state withholds
-  that `/events` keeps, because a lede here could only describe photographs that do not
-  exist. It says „Nema objavljenih fotografija.", renders no grid and no section heading,
-  states a present fact (the studio has not been photographed) rather than a promise, and
-  offers `/schedule` and `/contact`. The words are `GALLERY_COPY` in `src/lib/gallery.ts`
-  and are **code, not CMS**, for `EVENT_COPY`'s reason. No `galleryImage` in the seed; the
-  fixtures are `GALLERY_RENDERED` under `test/`.
-
-  **It is in `MORE_NAV` and not in the desktop bar**, and that is the ticket's own
-  instruction rather than the four-link budget alone: a „Galerija" entry in the masthead
-  of all fourteen pages, promising pictures, leading to a page that says there are none,
-  is an invitation the site cannot honour repeated fourteen times. Promoting it is the
-  shoot's ticket, which is how „the photographs landed" shows up in a diff.
-
-  **The lightbox is a native `<dialog>` opened with `showModal()`, and the reason is one
-  word: inertness.** The built output has zero `.js` files, so the mechanism had to be
-  CSS, markup or an inline `<script>`, and the three candidates are argued in
-  `Gallery.astro`. `:target` cannot trap focus at all and spends the Back button — twelve
-  history entries for twelve photographs. `popover="auto"` needs no script, light-dismisses
-  and returns focus, and is **specified not to make the rest of the document inert**, so
-  Tab walks straight out of a thing that looks, reads and announces as modal. `showModal()`
-  gives the trap, Escape, and focus returned to the thumbnail, from the platform — so the
-  script writes none of them, and the test for the trap is a test of *inertness* (focus a
-  tile behind the dialog; nothing happens) rather than a test that a handler wrapped an
-  index. **With scripting off the grid is the gallery**: every photograph is on the page
-  with its alt text, and each tile is an `<a href>` to that picture's own 1200w CDN URL, so
-  a tap opens the browser's own image view. A `:target` panel underneath was rejected for
-  MUSE-38's reason — two mechanisms answering one question, only one of them ever audited.
-
-  **`.frame[hidden] { display: none }` is load-bearing and its absence is silent.**
-  `[hidden]` is a *user-agent* rule and any author `display` beats the UA stylesheet, so
-  `.frame { display: grid }` quietly put all seven photographs in the layout at once and
-  fetched every full-size file the moment the lightbox opened — a stage 5,002px tall in a
-  900px viewport, with the picture that was asked for 636px above the top of the screen.
-  Found by measuring boxes, not by looking; `test/gallery.test.ts` counts layout boxes and
-  full-size requests with the lightbox open, which is why both numbers are pinned.
-
-  **`npm run a11y` only sees a page at rest, so the open lightbox is audited in the
-  suite** — both themes, no tag filter, `test/contact.test.ts`'s precedent for the trial
-  form's error state and the gap this ticket names.
-
-  **`imageSrcSet` arrived here** (`src/lib/sanity/images.ts`), with the ladders in
-  `src/lib/gallery.ts` derived from the boxes the layout can paint rather than rounded —
-  three rungs each, every box covered within 1.21× in the grid, nothing above 600w for a
-  tile. `test/gallery.test.ts` measures `img.currentSrc` against the painted box in a real
-  browser at 390 and 1280, because a model of the selection algorithm passes whenever the
-  model is wrong. **§7.4 and §9 disagree about the grid and §9 wins**: §7.4 says „mixed
-  aspect ratios", §9 rule 4 says 1:1 for a gallery, the Studio field promises Mina 1:1 and
-  the ticket asks for 1:1 — noted in `Gallery.astro` rather than silently resolved.
-
-  Two things raised and not fixed, both in `Gallery.astro`: a modal `<dialog>` does not
-  lock the page behind it, and the CSS-only fix (`:has()` plus `overflow: hidden`) costs a
-  visible 15px jolt on close unless `scrollbar-gutter: stable` goes on every page of the
-  site, which is a layout change that does not belong in this ticket; and nothing here has
-  seen Sanity's own encoder, because no photograph has ever been uploaded to this dataset —
-  the budget's bytes are a real encoder at the real widths, but not *their* encoder.
-- **`/pricing` publishes the studio's three rates, and that is the whole rate card**
-  (MUSE-73). 55 € regular monthly, 40 € student monthly, 20 € drop-in — confirmed by the
-  owner on 2026-10-09, in those words, after being asked for the complete card.
-  `test/pricing.test.ts`'s `CONFIRMED_TIERS` is the receipt and a fourth document in the
-  seed is a red test. None of the three is `featured`: nobody has asked which to single
-  out, three cards is exactly the arrangement a „most popular" tab is written for, and
-  `resolveFeatured` treats zero as a complete page. `features` is `required().min(1)`, so
-  „an empty optional field is a decision" could not be taken — each line restates what the
-  rate *is* rather than claiming what a month of classes contains, which is the only
-  honest thing to put there when the card gives a name, a price and a period and nothing
-  else.
-
-  **It said „two periods: 55 € for one month, 100 € for two — and the whole of it" until
-  MUSE-73, and that sentence is the shape to learn from.** It was true that MUSE-59 was
-  told so; it was not the rate card. The studio's own enrolment form charges three rates
-  and no two-month package, so the site was missing the student rate and the drop-in and
-  publishing a price nobody offers. **Every mechanism on this board stops the site saying
-  more than is true, and nothing watches it saying less** — a frozen list, a document
-  count, a residue subtraction and an invented-price scan are all one-directional, and
-  all four were green. The receipt now records *who was asked and when*, because that is
-  the only instrument there is for the other direction.
-
-  **Retiring a rate is a seed deletion, which is a case this repository cannot finish.**
-  `npm run sanity:seed` is `sanity dataset import --replace`: it replaces by `_id` and
-  **never deletes** what it was not given, so dropping the line leaves the document live
-  and rendering while the suite, reading the seed, shows it gone and passes. The dataset
-  half is `sanity documents delete <id>`, a write, and **an agent does not run it** — same
-  rule as the import. Order matters and the gap is the reason: delete first, then import.
-  Between the two writes the dataset is briefly inconsistent either way, and MUSE-21's
-  cron can rebuild inside that window — import-first publishes four cards including the
-  retired price, delete-first publishes a truthful page that is one rate short.
-- **`/blog` ships empty, and a post may be written in one language** (MUSE-26). Four
-  decisions, and the second is the one the ticket was really about.
-
-  **The empty state is the shipped state.** No `post` exists and nobody has written one,
-  so `getPosts({ minimum: 0 })` and `Blog.astro` say there is nothing — as the section's
-  own heading, with no list rendered at all, offering `/schedule` and `/contact` instead.
-  The copy is `BLOG_COPY` in **code, not the CMS**: „there are no posts" is a statement
-  about the dataset, and Mina cannot keep a field describing the dataset true because she
-  cannot see when it renders. It promises nothing either — „ništa za sada" is a claim
-  about a post nobody has written, which is MUSE-36 in a smaller font. **Do not seed a
-  post to furnish the page.**
-
-  **A post that exists in only one locale is hidden in the other, and one fact decides
-  it.** `post` carries up to two `postTranslation` objects — one per language, each with
-  its own title, lede and body — instead of three bilingual fields, and „published in
-  Croatian" is „`post.hr` exists". That one fact is what the index filters on, what
-  `getStaticPaths` filters on, what `localeTwins` is built from, and therefore what the
-  `hreflang` cluster and the switcher read; the sitemap drops a one-member alternate group
-  on its own. **All four agree because there is nothing for them to disagree about.** The
-  inversion is deliberate and it is the only place on the site it is right: everything
-  else bilingual is short, and **nobody writes eight hundred words twice** — a `required()`
-  English body can only be satisfied with a machine translation, which is a `required()`
-  field filled with fiction. Sanity validates a nested `required()` only when the parent
-  object is present, which was **measured against its real validator**, so a *half*
-  translated post is still refused naming the field. The one rule it cannot state —
-  „at least one of the two" — is `decodePost`'s, because `required()` has no one-of form
-  and `Rule.custom` is unobservable in a test. Listing the post in the other locale with a
-  „na hrvatskom" badge was the alternative and is argued down in `src/lib/blog.ts`: it
-  drops an English reader into a Croatian page whose switcher is correctly hidden.
-
-  **`src/lib/portable-text.ts` is the site's first and only Portable Text renderer**, and
-  `@portabletext/to-html` was declined with a measurement rather than on taste. It is in
-  the lockfile only as a transitive dependency of a devDependency, so taking it means a new
-  `dependencies` entry; and **four of its five unknown-construct defaults are silent** —
-  an unmapped block *style* renders as `<p>`, an unmapped list as `<ul>`, an unmapped mark
-  as a `<span>` — so getting a failure out of it means remembering five override slots,
-  which is the shape of defence this repository has watched fail three times. Here the
-  refusal is the default: every branch is exhaustive, the fall-through **throws naming the
-  construct, the block `_key`, the document and the three files a new rule goes in**, and
-  `PROSE_ELEMENTS` is derived from the same maps so `test/blog.test.ts` can require
-  `PostPage.astro` to style every element the renderer can emit. Two things in it that
-  look arbitrary and are not: the schema's `h3` style renders as **`<h2>`**, because a
-  post's `<h1>` is its title and `heading-order` is live in `npm run a11y` since MUSE-75;
-  and **validation happens before the empty-block skip**, because the other order silently
-  dropped an unmapped construct inside a block with no readable text — found by a test
-  asserting the refusal, not by one asserting the rendering.
-
-  That renderer is also the answer to „a stray image or a wide code block". Neither can
-  reach a page: the schema offers neither and the renderer stops the build on either,
-  which is stronger than a CSS rule about something nobody has seen. What CSS still has to
-  handle is a long unbroken token — a pasted URL as link text — and that is
-  `overflow-wrap: anywhere` inside a 68ch measure, measured at 390px with a 200-character
-  token in the fixture.
-
-  **The byline always says somebody.** A named `author` is the instructor; an empty one is
-  the **studio's own name**, off the same `getSiteSettings()` the footer and the JSON-LD
-  read, because „Ostavi prazno i objava je potpisana studijem" is the field's documented
-  default; a *deleted* one is a build failure naming the `_ref` (MUSE-49, and this is the
-  field that ticket is named after). So there is no „no byline" branch, and the `author`
-  /`authorRef` pair must stay a pair.
-
-  **A scheduled post appears at the next build, not at its publish instant**, and the
-  worst case is `MAX_WAIT_HOURS` — cited by name and never written as a number, which
-  `test/blog.test.ts` asserts. Note the asymmetry with `/events` and do not copy its shape:
-  an event must keep its page *after* it happens, so `ALL_EVENTS_QUERY` is clockless; a
-  post must not have one *before* it does, so `POSTS_QUERY` is the only query over `post`
-  and `getStaticPaths` uses it. No URL is lost by that — the filter only ever drops the
-  future.
-
-  Two smaller things. `post.coverImage` is **optional** (the `instructor.portrait`
-  decision: no photography of this studio exists, and a required cover can only be
-  satisfied with a stock photograph), and `/blog/<slug>/` has **no `page` document** — its
-  `<title>` is derived, so `test/routes.test.ts` and `test/seo.test.ts` carry
-  `/blog/[slug]` as a *template* rather than a page. `article` structured data is the
-  `BlogPosting` node `src/lib/structured-data.ts` adds to the one `@graph`
-  `BaseLayout.astro` emits; there is still exactly one `<script type="application/ld+json">`
-  on the site (MUSE-31), and a post hands its facts *up* rather than emitting a second.
-
-  **One thing this ticket could not fix and did not hide**: `EN_LATIN_EXT` in
-  `src/lib/fonts.ts` is keyed by route, and `/blog/<slug>` is the first route whose key is
-  *content*. So an English post containing a Croatian proper noun — „Ožegovića", an
-  instructor's name — wants `inter-400-600-latin-ext` and cannot be listed for it, and
-  `test/fonts.test.ts` cannot see it either, because no post is in the seed it measures.
-  Preloading the three subsets on every English post page was considered and rejected: the
-  rule there forbids **any** unused preload on an English page, and an entry measurement
-  does not support is exactly what that rule is about. It is MUSE-74's own stated residual
-  risk, now reachable from the CMS rather than only in principle, and it wants its own
-  ticket.
-- **The site makes no claim about what a first class costs** (MUSE-71). „Besplatni probni
-  sat" / "Free trial class" was the header CTA on all fourteen pages in both locales, and
-  the promise was repeated in the homepage `#trial` band, `/contact`'s eyebrow,
-  `/schedule`'s CTA band and both `page` descriptions — so in the two
-  `<meta name="description">` tags Google shows and in `llms.txt`. The studio offers no
-  such thing: its own 2026/2027 enrolment form lists 55 € regular, 40 € student and 20 €
-  drop-in and no trial rate, and the claim came from MUSE-36's commit. It is gone and
-  **nothing replaced it** — naming the drop-in rate would cover one invented offer with a
-  second, since nobody has said that is what a trial costs. Retiring an unsupported
-  commercial promise needs no decision from the studio; **adding one does.**
-
-  The guard is one rule in `test/helpers/offer-claims.ts` applied at two levels, and both
-  are load-bearing. **It holds two retired claims, not one** — MUSE-80 added the response
-  time below — so each needle carries its own `ticket` and `untrue`, and the failure
-  states the one that fired. A third belongs here too rather than in a second mechanism.
-  `test/offerclaims.test.ts` reads `src/`, `sanity/` and the seed as plain text, so a
-  failure names a `file:line`; `test/content.test.ts` applies the same
-  needles to `dist`, because a claim *composed* at render time appears in no source file
-  and on every page (MUSE-50) — demonstrated, and caught only there. It uses the build
-  that suite already performs: the heavyweight budget has zero headroom. The needles test
-  **adjacency**, not the word "free", since seven lines under `src/` use it about Actions
-  minutes, a URL fragment and a layout; `INNOCENT` pins each and asserts it still exists.
-  There is **no exemption list**, so a comment explaining the removal names the ticket
-  instead of quoting the claim — MUSE-42's ruling, as `test/contentdrift.test.ts` applies
-  it.
-
-  Two things this cannot do, stated so nobody assumes otherwise. `contentdrift`'s registry
-  classifies a field as CMS-owned or in-code and **cannot ask whether a human said it** —
-  `page.description` was correctly classified and correctly in the CMS, which is the hole
-  this came through, and no test closes it. And the CTA label is still a code literal:
-  moving it into `siteSettings` is a schema change and its own ticket.
-- **The site promises no response time** (MUSE-80). „Javljamo se u roku od jednog radnog
-  dana…" / "We reply within one working day…" was in `src/lib/forms.ts` twice per locale —
-  the sent-confirmation body and the `<noscript>` ask — and in `page-contact.description`,
-  so also in `/contact`'s `<meta name="description">` and its two `llms.txt` lines. It
-  traces to `92f3554`, MUSE-7's implementation commit, whose description never mentions
-  one. A **service level** is stronger than marketing copy and enforceable against the
-  studio, and it was published beside a form that has **never delivered a message**
-  (`PUBLIC_FORM_ENDPOINT` is unset, MUSE-12) — so the clock was promised to start on a
-  submission that was never transmitted. Gone, and **nothing replaced it**: "within a few
-  days" and "as soon as we can" are the same defect with a different value. If Mina sets
-  one it is hers to set and it belongs in the CMS, which is a needle removed from
-  `RETIRED_CLAIMS` with her name beside it.
-
-  **The needle's boundary is the unit, and it is not an exemption.** `/privacy` promises
-  an answer „u roku od mjesec dana" / "within one month" in both locales — a reply verb
-  and a stated period, which no adjacency can tell apart from the retired claim. That is
-  the GDPR's own deadline for a data-subject request (Art. 12(3)): law rather than a
-  promise, true, and it stays. So the needles match a period in **hours, days or weeks and
-  never in months** — note that Croatian spells a month as „mjesec dana", so the unit
-  alone cannot carry the distinction and the pattern refuses „mjesec" at the one position
-  it can appear. Both `/privacy` lines are pinned in `INNOCENT` and asserted *not* to
-  match, so the boundary is tested from both sides. A bare period is not a needle either:
-  „working day" is in `src/lib/rebuild.ts` about the cron spacing and "within six hours"
-  twice about the rebuild cadence, which is why a reply verb is required beside it.
-  `INNOCENT` spans `src/` **and** `sanity/` for that reason — MUSE-71 read only `src/` and
-  the nearest miss lives in `sanity/badges.ts`.
-- **`/contact` tells the visitor to do what this build can actually do** (MUSE-84). The
-  hero said „Ispuni obrazac i javljamo se s terminom…" / "Fill in the form and we will
-  come back with a time…" while `PUBLIC_FORM_ENDPOINT` is unset, so the instruction was
-  false at the moment it was followed and `/privacy` — corrected in MUSE-72 — said the
-  opposite about the same form on the same deploy. `Contact.astro`'s lede reads
-  `FORM_HAS_PROCESSOR` now, the same expression the notice and the form's own script
-  read: with an endpoint the instruction is restored, without one it names the inbox and
-  the address follows it as a link, which is `FormCopy['noscript']`'s convention. **No
-  third state and no response time** (MUSE-80).
-
-  **The `page` description is the half that cannot be gated, and that is the general
-  lesson.** `page-contact.description` is a `page` document — Sanity owns a page's words
-  — so it has no branch to sit in and no configuration to read, and a CMS string beside a
-  conditional mechanism has exactly one honest shape: **true in both states**, which here
-  means naming no mechanism at all. It is „Javi nam se i dogovaramo termin…" / "Get in
-  touch and we will find a time…", and the guard runs the same claim against *both*
-  builds rather than two opposite ones. Gating it would mean a second description source
-  in code, which is what `getPage(route)` exists to prevent. `test/trialform.test.ts`
-  carries all of it — the same two builds MUSE-72 added, so the heavyweight count did not
-  move — and `llms.txt` is asserted there too, because it publishes the same strings.
-
-  **MUSE-72 is two halves and the first draft of this copied only one.** `RECIPIENT` is
-  *branch identity* — short phrases, both directions, both locales, asserting which
-  paragraph rendered — and `NEVER` is a **class** of forbidden claim, asserted against
-  both states whatever branch ran, which is why that guard would catch a notice naming a
-  *different* processor that does not exist. The first version of this ticket's guard was
-  `RECIPIENT` twice: every needle was the sentence being deleted, so it asserted „the old
-  words are gone and the new words are here" and nothing about the claim. Measured on the
-  branch: a description reading „…pošalji obrazac na ovoj stranici." left 207 tests green
-  and published into both `<meta name="description">` tags and both `llms.txt` lines, and
-  a second sentence beside the honest hero („Prijavu možeš poslati i kroz obrazac
-  ispod.") left 202 green with the page contradicting itself. That is the third ticket in
-  a row — MUSE-71, MUSE-80, this — to conclude that **a retired claim needs a needle for
-  the class and not for the sentence.**
-
-  So `SUBMIT` is a verb-and-object adjacency („ispuni/pošalji/predaj … obrazac",
-  "fill/send/submit … the form") in **both word orders**, because Croatian fronts the
-  object as readily as the verb and a verb-first needle misses „Obrazac ispuni i javljamo
-  se." It is **not** in `test/helpers/offer-claims.ts` and cannot be: the claim is
-  *conditional* — with an endpoint the instruction is legitimate and must be present —
-  and `RETIRED_CLAIMS` is a list of things that may appear nowhere, ever.
-
-  **Negation is the boundary, and it is a distinction rather than an exemption.** An
-  instruction and a statement that the thing cannot be done are the same verb and the
-  same object with „ne" between them: „Bez JavaScripta ovaj se obrazac **ne može** poslati"
-  (`FormCopy['noscript']`) is true in every state, and the honest hero and `/privacy` both
-  name the form in order to say it cannot be received. So a negation may be neither the
-  word in the gap nor the word before the verb. The needle read that `<noscript>` line as
-  an instruction until it was — measured, not imagined, which is why `INNOCENT_FORM_PROSE`
-  pins six real strings, asserts each one *still published*, and tests the boundary from
-  both sides the way `INNOCENT` does.
-
-  „bez obveze" / "no commitment" went with the sentence and nothing replaced it: it is a
-  *term of an offer* nobody has specified, where „bez partnera, bez iskustva" are facts
-  about how a class runs. `test/pricing.test.ts` already refuses "no commitment" in the
-  period names, which is the same claim one layer down.
-- **„Dvoja vrata, ne šest." is `Home.astro`'s own line, not the design brief's** (MUSE-80).
-  Four comments — two in `src/components/Home.astro`, two in `test/home.test.ts` — cited
-  the brief for it. The brief contains no „vrata", no "door" and no "not six"; its only
-  six is the six signature devices in §6. The words stayed, because they claim nothing
-  about the studio and they are in the register §1 asks for; the attribution went. **A
-  fabricated citation is worse than fabricated copy**, because the next author trusts it
-  rather than opening the file — which is exactly what happened here, three times after
-  the first.
-- **An optional field is a decision, not laziness.** `instructor.portrait`,
-  `instructor.instagram`, `instructor.bio`, `class.description`, `class.image`,
-  `siteSettings.phone` and `openingHours` are optional because no real value exists for
-  any of them, and a `required()` field with no value can only be filled with fiction —
-  which is how MUSE-36 happened. The last three came off the required list *in* MUSE-36:
-  seeding two real instructors meant a required bio could only be satisfied by writing a
-  paragraph about a real person to get past a validator, and the homepage style cards were
-  the only consumer `class.description` and `class.image` ever had.
-
-  The cost is paid in the page: the 3:4 placeholder frame in `AboutUs.astro` reserves
-  exactly the box a photograph will take, and a bio that has not been written is a card
-  that is a name and a role rather than a gap. Making one required later is a schema
-  change plus a
-  line moved back onto the `Guaranteed` list in `src/lib/sanity/shape.ts` — and note the
-  `OptionalIn<>` assertions beside it, which exist because a field with no assertion at all
-  is a field nothing watches: delete `instagram` from the projection and the generated type
-  simply stops having the key.
-- **The schedule is in Sanity, and `src/data/schedule.ts` is gone** (MUSE-36). It held
-  thirteen invented classes across five days naming two instructors who do not exist, and
-  it was live. What is published now came from Mina: four classes, two evenings, 90
-  minutes each, Mina **and** Antonio on every one.
-
-  ```
-  PONEDJELJAK   Beginner      19:30–21:00
-                Intermediate  21:00–22:30
-  ČETVRTAK      Improver      19:30–21:00
-                Advanced      21:00–22:30
-  ```
-
-  Four things follow from it that are easy to undo by accident:
-
-  - **`LEVELS` has four entries, in dancer order** — `beginner → improver → intermediate
-    → advanced`. The order drives the grid, the Studio dropdown and the homepage doors, so
-    a new level is *inserted*, never appended. **All four of `LEVEL_PREREQUISITE`'s entry
-    thresholds are unconfirmed** — this bullet said `improver` was the only one until
-    MUSE-85 checked, and the sentence licensing the other three came from the same commit
-    that authored `improver`, two days after the rest, about work MUSE-6 had specified for
-    three levels. The record is `LEVEL_PREREQUISITE_CONFIRMATION` in `src/lib/schedule.ts`,
-    a typed map that cannot say „confirmed" without naming a person and a date, and
-    `test/schedule.test.ts` pins it empty and freezes the four published strings.
-    **The pages still publish all four**, which is the owner's decision over removing the
-    two that carry a number (a year, two years); MUSE-85's second criterion stays open
-    until Mina is asked. Do not soften one into vagueness instead — same claim, less
-    information.
-  - **There is no `STYLES`.** The three style names were invented with the rows and had
-    shaped a filter, three homepage cards and a required `class.style` field. The guard is
-    **the values, not the name** (MUSE-76): it used to match the English identifier
-    `style`, so renaming the field to `vrsta` — same type, same radio layout, same three
-    invented values — kept all 1177 tests green, and nothing else saw it either, because
-    `READ_CONTRACT` constrains which fields must *exist* per type and never the reverse.
-    `test/sanity.test.ts` now reads **`WITHDRAWN_OPTION_SETS`** in
-    `sanity/schemaTypes/enums.ts` — the one place in the *schema source* that is allowed
-    to hold the three strings, which is why the note in `src/lib/schedule.ts` points at it
-    rather than listing them — and fails on three things: a field whose *name* contains `style` or
-    `stil` (kept, because it gives the obvious case the clearest message), any fixed
-    `options.list` anywhere in the schema offering any of the *values* under any field
-    name on any type, and any mention of a value in the schema source at all — the last
-    one a text scan over the files the schema fingerprint already covers, because
-    `Rule.valid()` declares a closed set that no walk of `options` can see. So it cannot
-    come back silently; it can only come back with somebody deleting a registry entry and
-    saying who confirmed it. **That conversation is still owed**: the design brief
-    (`muse-design-system.md:24`, with „Tri stila. Jedan ritam." in its voice table) says
-    the studio *does* teach by those three styles, so MUSE-36 and the human-authored brand
-    spec disagree about the same fact. The site claims neither, which is the safe state,
-    but one of the two documents is misleading the next author. Ask Mina; do not quietly
-    correct either one.
-  - **`instructors` is an array** on `class` and on `scheduleSlot`, and the override
-    *replaces* rather than adds. Not for today's data — for lady styling, a confirmed
-    coming class that Mina teaches alone. `formatNames` in `src/lib/schedule.ts` joins
-    them („Mina i Antonio" / "Mina and Antonio"); a comma-joined list reads as a label.
-  - **Both pages take the rows as a prop with no default.** `/schedule` and `/` pass
-    `await getSchedule()`. The old default was what made it possible to render the page
-    before anyone had asked the studio what it teaches.
-
-  And one behaviour changed with it: **a homepage door whose level has no class is
-  dropped, not a build failure.** MUSE-11 threw, correctly, while the rows were a file in
-  this repository. `scheduleSlot.active` is the field Mina uses for a summer pause, so the
-  same rule would now mean an ordinary Studio edit stops the site building. The section
-  going *empty* is still a build failure — see the note in `Home.astro`.
+  then merge** (MUSE-78). An *edit* to an existing document publishes the old value
+  successfully with no signal. Importing after the merge needs a forced rebuild — that is
+  the forgettable step. `npm run sanity:seed:release` is the blocking gate;
+  `sanity:seed:check` beside it must **not** block. → `content-model.md`
+- **Routing a page is two pull-request-shaped halves, and the dataset goes first**
+  (MUSE-59, MUSE-60). The branch prepares the seed *and* the route, says in the PR body it
+  must not be merged yet, and somebody runs the import between review and merge.
+  **An agent does not run that command.** → `content-model.md`
+- **A dev server re-reads content per request; a build reads once per reader** (MUSE-47).
+  Both caches are per-build. The gate is the literal `import.meta.hot` (`src/lib/sanity/
+  dev.ts`) — write it exactly that way, and never use `NODE_ENV` or `process.argv`, which
+  whoever starts the build can set. → `content-model.md`
+- **Offline dev is `MUSE_CONTENT_FIXTURE=content/seed.ndjson npm run dev`**, and MUSE-47
+  deliberately built no mechanism for it: no fallback, no `dev:offline` script, no second
+  gated boolean. → `content-model.md`
+- **What the site published before the migration is frozen in `test/content.test.ts`.**
+  When Mina legitimately rewords something, delete the entry with a sentence saying so; do
+  not quietly update it to match. → `content-model.md`
+- **`siteSettings.address` is one field, rendered on five surfaces.** A CMS field nothing
+  renders is worse than no field — it looks like it works. `test/contentdrift.test.ts`
+  holds a registry of every string field in the seed, each classified as CMS-owned or
+  legitimately-in-code with the reason beside it. → `content-model.md`
+- **An optional field is a decision, not laziness.** `instructor.portrait`, `bio`,
+  `instagram`, `class.description`, `class.image`, `siteSettings.phone` and `openingHours`
+  are optional because no real value exists, and a `required()` field with no value can
+  only be filled with fiction — which is how MUSE-36 happened. → `content-model.md`
 - **A page imports `src/lib/sanity` and nothing deeper.** The index is what decodes; a
   module from inside the read path hands back raw rows with silent nulls. Both halves are
-  tests, not conventions: `test/sanity.test.ts` fails on an import specifier containing
-  `lib/sanity/` from outside the directory, and — splitting each `.astro` file at its
-  frontmatter fence — on `lib/sanity` appearing in the *markup* half, where a `<script>`
-  would ship it to the browser.
-- **Content is fetched at build time and no Sanity code ships to the visitor.** The built
-  output contains **zero `.js` files**; `test/nojs.test.ts` asserts that against `dist`
-  along with an allow-list of output extensions. Inline `<script>` blocks are fine and
-  expected — a *file* is not. The client reads its config off `process.env`, never
-  `import.meta.env`, because Vite inlines the latter into client bundles and leaves the
-  former alone.
-- **One read module.** All GROQ lives in `src/lib/sanity/queries.ts` and every page
-  imports `src/lib/sanity/` and nothing else. `test/sanity.test.ts` fails if a query
-  string or `@sanity/client` appears anywhere else under `src/`.
+  tests. → `content-model.md`
+- **One read module.** All GROQ lives in `src/lib/sanity/queries.ts`. A query string or
+  `@sanity/client` anywhere else under `src/` is a red test. → `content-model.md`
+- **Content is fetched at build time and no Sanity code ships to the visitor.** The output
+  contains **zero `.js` files**. The client reads config off `process.env`, never
+  `import.meta.env`. → `content-model.md`
 - **Every query is executed against a row, and `test/projections.test.ts` is the only
-  thing that does it** (MUSE-44). Nine of the eleven queries were run by nothing, so no
-  projection in them had ever been checked — `class->nam` type-checked, built, exited 0
-  and would have shipped a schedule of blanks. Three layers look like they cover this and
-  none does: `npm run sanity:read` runs all eleven live, but against a dataset with no
-  classes or images, so all nine report `EMPTY` — correct for an empty dataset and
-  indistinguishable from a wrong projection; `test/sanity.test.ts` decodes rows that are
-  already **post**-projection, so the test and the query cannot disagree; and `sanity
-  typegen` derives result types from the query *text*, so a typo yields a *consistent*
-  wrong type. So that suite calls the real readers against structural fixtures in
-  `test/helpers/structural-content.ts` — **not** `content/seed.ndjson`, which
-  `npm run sanity:seed` imports into the live dataset. A new query needs a case there, and
-  the bar is the ticket's: rename one projected field and the suite must go red. Watch out
-  for the fields with a silent fallback — `featured` decodes to `false`, `lineup` to `[]`,
-  `author`/`endsAt`/`hotspot` to `undefined` — which is why the fixture fills every
-  optional field the seed leaves empty. The fixture also carries `drafts.`-prefixed
-  documents, so all forty-odd assertions run against a dataset holding drafts: MUSE-20
-  proves the filter works for `page`, which is one of the two queries that *were* already
-  executed, and a leaked draft `scheduleSlot` or `pricingTier` is a class or a price on the
-  public site that nobody published.
+  thing that does it** (MUSE-44). GROQ returns `null` for a field that does not exist, so
+  `class->nam` type-checks, builds and ships blanks. Rename one projected field and that
+  suite must go red. → `content-model.md`
+- **A query may not run without the parameters it references** (MUSE-51).
+  `requireQueryParameters` runs in front of *both* read paths. The count check cannot be
+  the instrument — it fires on a legitimate zero result. → `content-model.md`
+- **A missing or malformed document fails the build naming itself** — `_id`, type and field
+  path — through `src/lib/sanity/decode.ts`. "Unreachable", "empty" and "malformed" are
+  three different error types on purpose. → `content-model.md`
+- **Every dereference in `queries.ts` is projected beside its `_ref`** (MUSE-49). For an
+  optional reference, a deleted target and an empty field arrive identically, so the `_ref`
+  is the missing evidence. **The pair must stay a pair**, arrays are read positionally, and
+  `instructors` being an array is load-bearing. → `content-model.md`
 - **Bilingual values are two named fields**, `hr` and `en`, inside a `localeString` /
-  `localeText` object — not a field-level i18n plugin and not one
-  document per locale. HR and EN share slugs and one document renders both, so the shape
-  is `Record<Locale, string>`, both locales are separately `required()`, and a half
-  translated string is a missing field an error can name. See the long note in
-  `sanity/schemaTypes/objects/locale.ts` before changing this: it is hard to reverse once
-  content exists.
-
-  **There was a third, `localeRichText`, and MUSE-26 deleted it** — see the `/blog` bullet
-  for the argument. The deletion makes the rule above *stronger* rather than narrower:
-  every bilingual value still requires both locales, with no carve-out, and the one type
-  that may be monolingual (`postTranslation`) is not a bilingual value at all. It is one
-  object per language, which is the inverse grouping, and it is the one place on this site
-  where the inverse is right.
+  `localeText` object — not a field-level i18n plugin and not one document per locale. Both
+  locales separately `required()`. `postTranslation` is the one place the inverse grouping
+  is right. → `content-model.md`
 - **Enums are structure and stay in code.** `LEVELS`, `WEEKDAYS` and the route list are
-  imported *into* the schema from `src/lib/schedule.ts` and `src/lib/pages.ts`
-  (`sanity/schemaTypes/enums.ts`), so the Studio offers a fixed list and Mina cannot type
-  a level. `STYLES` was a fourth and MUSE-36 deleted it — a closed set belongs in code
-  because the site *branches* on it, not because it is short, and the three styles were
-  invented rather than taught. Prerequisites, form copy, and time/currency formatting are deliberately **not**
-  in Sanity — see that file for why each one would be a mistake.
-- **Every image field is built by `imageField()`**, which is the only way to get
-  `hotspot: true` and a required bilingual `alt`. The design system crops one upload to
-  16:9, 4:5, 3:4 and 1:1 (§9), so a hotspot is not a nicety. The shoot direction lives in
-  the field *description*, because that is the only instruction Mina actually sees.
-- **A schema change must be regenerated and committed.** `npm run build` runs
-  `scripts/check-sanity.mjs` first, which hashes **every file under `sanity/`** — no
-  extension filter, because an extension allow-list is what made `fields.tsx` invisible —
-  plus `sanity.config.ts`, `sanity.cli.ts`, `src/lib/schedule.ts`, `src/lib/pages.ts` and
-  `src/lib/sanity/queries.ts`. It fails if `sanity/schema.json`,
-  `src/lib/sanity/sanity.types.ts` or `sanity/schema.stamp.json` is stale. This exists
-  because **GROQ returns `null` for a field that does not exist rather than erroring** —
-  so a renamed field with stale artefacts type-checks, builds, exits 0 and publishes pages
-  with the content silently gone. Four layers catch it: the build gate, the gate's
-  read-contract check, the compile-time assertions in `src/lib/sanity/shape.ts`, and
-  `test/sanity.test.ts`. `.github/workflows/studio.yml`'s `paths:` filter has to be the
-  same list, and `test/sanity.test.ts` asserts that rather than a comment asking nicely.
-
-  **The read-contract list is hand-written and is asserted complete** (MUSE-66), because it
-  used to be only the first: `studioStory` had never been a key, so the whole body of
-  `/aboutus` was outside layer two from MUSE-23 that built it to MUSE-60 that published it. It stays hand-written — what it
-  holds per type is the *projected subset* of that type's fields, which the schema cannot
-  supply without being asserted against itself — and is pinned from both sides instead. The
-  gate fails on a document type in `sanity/schema.json` that is neither covered nor named
-  in `NOT_READ` with the reason nothing reads it, so a new type forces the decision; each
-  exemption (Sanity's two asset types, and nothing else) is asserted to still name a type
-  that exists. `test/sanity.test.ts` holds the other side with `groq-js`: the contract is
-  exactly the types the queries select on, field for field. **A field that is only sorted
-  by belongs on the list too** — `order`, on five types. It is projected by nothing, so it
-  is absent from the generated types and `astro check` cannot see it move; renaming it
-  reorders a published page with no slot left blank and every other gate green.
-- **"Fails the build" means `npm run build`, which is three commands.**
-  `sanity:check` → `astro check` → `astro build`. `astro check` is *inside* the script,
-  not a step beside it in CI, because `deploy.yml` runs `npm run build` and nothing else
-  and does not depend on CI — and a field's *type* changing, or a typo in a GROQ
-  projection, is caught by `astro check` alone. README, "What 'a schema mismatch fails the
-  build' means", has the full table.
-- **CI bundles the Studio** (`npm run sanity:build`) on every pull request. `sanity schema
-  extract` and `sanity schema validate` evaluate the schema without bundling it, so both
-  stayed green while the Studio could not be built at all. `styled-components` is in
-  `devDependencies` for that reason — it is a peer dependency of `sanity` and so is
-  installed regardless, but `sanity build` preflights *declarations*, not resolution.
-- **A query may not run without the parameters it references** (MUSE-51), and the check is
-  in front of *both* read paths — `requireQueryParameters` in `src/lib/sanity/params.ts`,
-  called by `runQuery` before it chooses a source. Omit `$now` and the live API refuses the
-  request (HTTP 400 `queryParseError`) while `groq-js` answers `[]`, so one mistake used to
-  surface as two error classes — and offline it surfaced *only* because `minimum` defaults
-  to 1, which made `requireDocuments` report it as "an empty dataset, not a broken query".
-  With `minimum: 0`, which `getEvents` explicitly supports, it was silent and published a
-  blank page. **The count check cannot be the instrument here**: it fires on a legitimate
-  zero-document result and says nothing about a broken query, so the parameters are checked
-  before the query runs, which is the only point at which the two cases are distinguishable.
-  `queryParameters` scans the query text rather than parsing it, because `groq-js` is a
-  devDependency the live path must not need — and `test/projections.test.ts` pins the scanner
-  to the real parser, query by query, so a parameter shape it cannot see is a red test.
-  **The register of known `groq-js`-vs-live divergences is the header of
-  `src/lib/sanity/fixture.ts`**; there are two, both found by someone deliberately looking.
-  Add the third there.
-- **A missing or malformed document fails the build naming itself** — `_id`, type and
-  field path — through `src/lib/sanity/decode.ts`. "Unreachable", "empty" and "malformed"
-  are three different error types on purpose: much of the dataset is still empty, so
-  "nothing on the page" has to be readable as which of the three it was.
-  `referencedTextList` is the one to know about for the schedule: `instructors[]->name`
-  answers `null` for an absent field, `[]` for an empty array and `[null, 'Mina']` for a
-  deleted reference, and a page joining the names would publish „ i Mina" for the third —
-  so the error names the index.
-- **Every dereference in `queries.ts` is projected beside its `_ref`** — `author->name`
-  next to `"authorRef": author._ref` — and that pair is the whole of MUSE-49. Sanity does
-  not clear a reference when its target is deleted, and GROQ answers a broken one with
-  `null`, so for an **optional** reference a deleted target and a field nobody filled in
-  arrive as the same `undefined` — and an optional field is *allowed* to be empty. A
-  deleted author therefore published the post **unsigned**, with nothing said. The `_ref`
-  is the missing evidence: **present with a `null` value is dangling, both absent is an
-  empty optional field.** A dangling one fails the build naming the document, the field
-  path and the deleted `_ref`; see the paragraph on `failDangling` in `decode.ts` for why
-  it is fatal rather than a warning, and note that the message says *clearing the field* is
-  a valid fix, because for an optional reference it is.
-
-  Three things not to undo. **The pair must stay a pair** — delete a `*Ref` line and
-  `decode.ts` fails every row saying the query is broken, while `RefProjected` in
-  `shape.ts` stops compiling; either half alone has stopped saying which case it is.
-  **Arrays are read positionally and the two lengths are compared**, because a *compacted*
-  list is the one failure here with nothing blank to notice: dropping a deleted teacher
-  rather than blanking her publishes „Mina" for a class she and Antonio teach — true,
-  incomplete, and indistinguishable from a class she teaches alone. And **`instructors`
-  being an array is load-bearing beyond two teachers**: `instructors[]->name` over a
-  deleted reference is `[null]`, a *non-null* array, so the slot's `coalesce` keeps the
-  override instead of falling through to the class's regular teachers. Revert the field to
-  a single reference and `/schedule` is back to publishing a real name that is the wrong
-  name — which is what `AssertScheduleInstructorsAreAList` guards.
+  imported *into* the schema. Prerequisites, form copy, and time and currency formatting
+  are deliberately **not** in Sanity. → `content-model.md`
+- **Every image field is built by `imageField()`**, the only way to get `hotspot: true` and
+  a required bilingual `alt`. The shoot direction lives in the field *description*, because
+  that is the only instruction Mina sees. → `content-model.md`
+- **A schema change must be regenerated and committed.** `npm run build` hashes every file
+  under `sanity/` and fails if the generated artefacts are stale. Four layers catch it, and
+  `studio.yml`'s `paths:` must be the same list — which is asserted, not asked for.
+  The read-contract list is hand-written and **asserted complete** (MUSE-66); a field that
+  is only sorted by belongs on it. → `content-model.md`
+- **"Fails the build" means `npm run build`, which is three commands:** `sanity:check` →
+  `astro check` → `astro build`. `astro check` is *inside* the script, not a CI step beside
+  it. → `content-model.md`
+- **CI bundles the Studio** (`npm run sanity:build`) on every pull request, because
+  `schema extract` and `schema validate` both stay green while the Studio cannot be built.
+  → `content-model.md`
 - **The Studio is hosted by Sanity**, at `musebymina.sanity.studio`, never mounted at
-  `/studio` here. `.github/workflows/studio.yml` redeploys it when a schema file lands on
-  `main`. `SANITY_PROJECT_ID` and `SANITY_DATASET` are repository *variables*; there is
-  **no read token anywhere** and none should be added — the dataset is publicly readable
-  and writes are rejected unauthenticated.
+  `/studio`. `SANITY_PROJECT_ID` and `SANITY_DATASET` are repository *variables*; there is
+  **no read token anywhere** and none should be added. → `content-model.md`
+
+## What the pages say
+
+Every rule in this section exists because the site published something nobody had said.
+Read `docs/decisions/pages.md` before changing page copy — it records, per page, what was
+retired and what must not come back.
+
+- **The schedule is in Sanity, and `src/data/schedule.ts` is gone** (MUSE-36). What is
+  published came from Mina: four classes, two evenings, 90 minutes, Mina **and** Antonio on
+  every one. **`LEVELS` has four entries in dancer order** — a new level is *inserted*.
+  **There is no `STYLES`**, and the guard is the values rather than the name (MUSE-76).
+  **No prerequisite is confirmed** (MUSE-85); the record is a type, and it cannot compile
+  without a name and a date. → `pages.md`
+- **The site makes no claim about what a first class costs** (MUSE-71) and **promises no
+  response time** (MUSE-80). Both were published for the life of the project and neither
+  was ever offered. **Nothing replaced either** — retiring an unsupported commercial
+  promise needs no decision from the studio; adding one does. The guard is
+  `test/helpers/offer-claims.ts`, applied to source **and** to `dist`, because a claim
+  composed at render time appears in no source file. → `pages.md`
+- **`/contact` tells the visitor to do what this build can actually do**, gated on
+  `FORM_HAS_PROCESSOR` — the same expression `TrialForm.astro` tests before it will
+  `fetch`. → `pages.md`
+- **`/privacy/` is a statutory document, so it stays in code** (MUSE-72), and the one fact
+  that varies is read off the form's own configuration. Art. 13(1)(e) takes *categories* of
+  recipient, so the live paragraph names no provider. **Retention and whether student
+  records exist are Mina's decisions and still outstanding.** → `pages.md`
+- **`/events`, `/blog` and `/gallery` ship empty, and being honest about that is the page**
+  (MUSE-24, MUSE-26, MUSE-25). The empty copy is in **code, not the CMS** — "there are no
+  posts" is a statement about the dataset, and Mina cannot keep a field describing the
+  dataset true. **Do not seed a post, an event or a photograph to furnish a page.**
+  → `pages.md`
+- **`/pricing` publishes the studio's three rates, and that is the whole rate card**
+  (MUSE-73) — 55 € regular monthly, 40 € student monthly, 20 € drop-in, confirmed by the
+  owner on 2026-10-09. A fourth document in the seed is a red test. **Retiring a rate is a
+  seed deletion, which this repository cannot finish**: delete first, then import, and an
+  agent runs neither. → `pages.md`
+- **`/whatisbachata` says what the dance is, and nothing about the curriculum** (MUSE-65).
+  The styles are allowed as a sentence and forbidden as structure. → `pages.md`
+- **`/aboutus` ships placeholder prose, and it is placeholder where a human can see it**
+  (MUSE-60) — in the seed, asserting nothing checkable, and labelled `PRIVREMENI TEKST` in
+  the Studio. **Silent** placeholder text is what MUSE-36 is about; placeholder text is
+  allowed. **No bio is written for Mina or Antonio and none should be.** → `pages.md`
+- **„Dvoja vrata, ne šest." is `Home.astro`'s own line, not the design brief's** (MUSE-80).
+  Four comments cited a brief that contains no such phrase. **A fabricated citation is
+  worse than fabricated copy**, because the next author trusts it rather than opening the
+  file. → `pages.md`
 
 ## Rebuilding when Mina publishes (MUSE-21)
 
-- **A schedule, not a webhook, and no GitHub token anywhere.** `deploy.yml` carries a
-  `schedule:` trigger alongside `push`. The webhook route (Sanity → `repository_dispatch`)
-  works and is what most projects do, but it needs a GitHub PAT living inside a third
-  party, which is the one property this project's architecture was arranged to keep. Do
-  not add one. The cost is latency, and latency is the thing the Studio can be honest
-  about.
-- **`src/lib/rebuild.ts` is the only place the cadence is written.** The cron in
-  `deploy.yml` and the sentence Mina reads in the Studio are both derived from
-  `REBUILD_HOURS_UTC`; `test/rebuild.test.ts` parses the workflow and fails if they
-  disagree, and re-derives "when does this cron next fire" independently over a year of
-  instants rather than comparing strings. Because the Studio quotes it, that file is in
-  `studio.yml`'s `paths:` — as a *studio-only* path, since it defines no field and is
-  deliberately not in the schema fingerprint.
+- **A schedule, not a webhook, and no GitHub token anywhere.** The webhook route needs a
+  PAT living inside a third party, which is the one property this architecture was arranged
+  to keep. Do not add one. → `build-and-deploy.md`
+- **`src/lib/rebuild.ts` is the only place the cadence is written.** The cron and the
+  sentence Mina reads in the Studio are both derived from it, and `test/rebuild.test.ts`
+  fails if they disagree. → `build-and-deploy.md`
 - **What Mina is promised is a duration, never a clock time.** Cron is UTC and does not
-  shift with daylight saving, so a sentence naming 15:20 is wrong for half the year in a
-  way nobody notices until she does. The badge in `sanity/badges.ts` *offers* a local time
-  — computed in her browser, which is the only way it can be right in both halves of the
-  year — but the commitment is `MAX_WAIT_HOURS`, which is computed from the gaps between
-  runs so that bunching them into the working day widens the promise instead of breaking
-  it. Keep the spacing uniform or the ceiling grows to the overnight gap.
-- **Five edits do not cause five builds, because edits do not cause builds.** The
-  debouncing problem the ticket describes does not exist under a schedule; there is nothing
-  to add a concurrency group for beyond the `pages` group that was already there.
+  shift with daylight saving. Keep the spacing uniform or the ceiling grows to the
+  overnight gap. → `build-and-deploy.md`
 - **A failed deploy opens an issue assigned to the owner. Do not replace that with
-  GitHub's own notification.** For a scheduled workflow GitHub notifies whoever created it,
-  moving to whoever last edited the cron and again to whoever re-enabled it, and only if a
-  per-account Actions preference is on — a preference with no REST API, so nothing here can
-  assert it. Measured while building this: `subscribers_count` on this repository is 0 and
-  `GET /subscription` 404s. An assignment notification is "Participating", on by default,
-  and independent of both.
-- **`npm run build` fetches live and hard-fails on an outage, so the scheduled build
-  retries — for that one failure and nothing else.** It greps the failed build for
-  `TRANSIENT_BUILD_FAILURE`, which couples a shell script to the wording of an error in
-  `src/lib/sanity/client.ts`; `test/content.test.ts` asserts that constant against the
-  output of a **real build against an unreachable project**, so rewording the error fails
-  a test rather than silently turning the retry off. A content or code failure is not
-  retried: it will not pass on the third attempt.
-- **GitHub disables a scheduled workflow after 60 days of repository inactivity and
-  promises no notification when it does.** A disabled workflow does not fail, so the alert
-  above is structurally blind to it, and the disable takes push-triggered deploys with it.
-  Synthetic activity to keep the clock alive was rejected — a bot commit or a Dependabot
-  schedule rests on an undocumented reading of "repository activity" and would be a guard
-  that cannot be tested. Instead `ci.yml`'s `rebuildloop` job reads the documented `state`
-  field and fails if it is not `active`. `ci.yml` is the host because it is the only
-  workflow here that is not scheduled and so cannot be disabled itself.
+  GitHub's own notification**, which moves with whoever last edited the cron and depends on
+  a per-account preference with no REST API. → `build-and-deploy.md`
+- **`npm run build` hard-fails on an outage, so the scheduled build retries — for that one
+  failure and nothing else.** It greps for `TRANSIENT_BUILD_FAILURE`, so rewording that
+  error fails a test rather than silently turning the retry off. → `build-and-deploy.md`
+- **GitHub disables a scheduled workflow after 60 days of repository inactivity** and
+  promises no notification. `ci.yml`'s `rebuildloop` job reads the documented `state` field
+  and fails if it is not `active`. → `build-and-deploy.md`
