@@ -10,10 +10,11 @@ import { claimOutDir } from './scratch';
  *
  * MUSE-44 needs a dataset that holds one of everything — a class, three instructors, a
  * slot with an instructor override and one without, images with hotspots and crops, a
- * past event and a future one — because nine of the eleven queries in
- * `src/lib/sanity/queries.ts` have never been executed against a row at all, and an
+ * past event and a future one — because nine of the eleven queries `src/lib/sanity/
+ * queries.ts` held at the time had never been executed against a row at all, and an
  * empty dataset answers all of them with `[]`. "Empty" and "the projection is wrong" are
- * the same symptom there.
+ * the same symptom there. Every query the file exports is executed now, and MUSE-120 is
+ * what asserts that rather than leaving it to whoever adds the next one.
  *
  * Two rules govern what is in here, and both have a ticket behind them.
  *

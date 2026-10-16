@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
   CLASS_DANGLING_INSTRUCTOR,
@@ -83,19 +83,57 @@ import { decodeEvent, requireDocuments } from '../src/lib/sanity/decode';
 import { queryParameters } from '../src/lib/sanity/params';
 
 /**
+ * Every query text the read path evaluated during this run, in the order it ran them —
+ * the evidence the MUSE-120 block at the bottom of this file reads.
+ *
+ * It is written by a wrapper around `runFixtureQuery`, which is the one function every
+ * reader in `src/lib/sanity/index.ts` reaches through `runQuery`, so a reader cannot
+ * answer from a fixture without being recorded. `vi.hoisted` is what makes the set exist
+ * before the hoisted `vi.mock` factory below runs; a module-level `const` would not.
+ */
+const { EXECUTED } = vi.hoisted(() => ({ EXECUTED: new Set<string>() }));
+
+vi.mock('../src/lib/sanity/fixture', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/lib/sanity/fixture')>();
+  return {
+    ...actual,
+    runFixtureQuery: <T>(
+      query: string,
+      params: Record<string, unknown>,
+      path: string,
+    ): Promise<T> => {
+      EXECUTED.add(query);
+      return actual.runFixtureQuery<T>(query, params, path);
+    },
+  };
+});
+
+/**
+ * Every exported query constant, by name, read off the module rather than listed.
+ *
+ * Module-level because two blocks at the bottom of this file need it — the parameter
+ * cross-check and MUSE-120's two completeness assertions — and a second derivation of
+ * the same thing is the shape both of those exist to remove.
+ */
+const EXPORTED_QUERIES: [string, string][] = Object.entries(QUERIES).flatMap(
+  ([name, value]) => (typeof value === 'string' ? [[name, value] satisfies [string, string]] : []),
+);
+
+/**
  * MUSE-44 — the nine GROQ queries nothing ever ran.
  *
- * `src/lib/sanity/queries.ts` holds eleven queries. Before this file, exactly two of
- * them — `SITE_SETTINGS_QUERY` and `PAGES_QUERY` — were executed by anything, so no
- * projection in the other nine had ever been checked against a row. `class->nam`
- * type-checked, built, exited 0 and would have shipped a schedule of blanks.
+ * `src/lib/sanity/queries.ts` held eleven queries when this file was written and has
+ * grown since; the count is derived wherever it is asserted and written down nowhere.
+ * Before this file, exactly two of them — `SITE_SETTINGS_QUERY` and `PAGES_QUERY` — were
+ * executed by anything, so no projection in the other nine had ever been checked.
+ * `class->nam` type-checked, built, exited 0 and would have shipped a schedule of blanks.
  *
  * **Three layers look like they cover this and none of them does**, and each one is a
  * trap worth not re-creating:
  *
- *   - `scripts/sanity-read-check.mjs` runs all eleven against the live dataset. The
- *     dataset holds no classes, instructors, events or images, so all nine report
- *     `EMPTY` — which is the correct answer from an empty dataset and indistinguishable
+ *   - `scripts/sanity-read-check.mjs` runs every query in the file against the live
+ *     dataset. The dataset holds no classes, instructors, events or images, so the nine
+ *     reported `EMPTY` — the correct answer from an empty dataset and indistinguishable
  *     from a wrong projection. It proves each query parses and is answered. Nothing more.
  *   - `test/sanity.test.ts` decodes hand-written rows that are already in the
  *     **post-projection** shape. The projection never runs there, so the test and the
@@ -1293,6 +1331,11 @@ describe('a dangling optional reference is a failure, not a blank', () => {
     await expect(run).rejects.toThrow(/post-dangling-author/);
     await expect(run).rejects.toThrow(/author/);
     await expect(run).rejects.toThrow(new RegExp(DELETED_INSTRUCTOR_ID));
+    // MUSE-120, the diagnosis rather than the outcome: all the decoder saw is that the
+    // dereference answered nothing, and an instructor who exists with no `name` would
+    // reach exactly this line. The message used to report "it has been deleted" as the
+    // finding; it now reports what was checked and says which reading is the likelier.
+    await expect(run).rejects.toThrow(/dereferencing it yielded nothing/);
   });
 
   it('calls that content, not an unreachable API', async () => {
@@ -1688,18 +1731,16 @@ describe('the parameter scanner agrees with `groq-js`, query by query', () => {
     return [...names].sort();
   }
 
-  /** Every exported query constant, by name, read off the module rather than listed. */
-  const all: [string, string][] = Object.entries(QUERIES).flatMap(([name, value]) =>
-    typeof value === 'string' ? [[name, value] satisfies [string, string]] : [],
-  );
+  const all = EXPORTED_QUERIES;
 
   it('reads every query in `queries.ts`, so this is not a sample', () => {
     /**
      * The count is read off the module's own source rather than written down, so a query
      * added tomorrow joins the cross-check by existing. A literal here would be the thing
-     * this whole file exists to stop: MUSE-44's census said eleven and the file holds
-     * twelve, because MUSE-49 added one — and a number in a test is exactly as current as
-     * the last person who remembered to change it.
+     * this whole file exists to stop: MUSE-44's census said eleven, MUSE-49 added one and
+     * the file has grown again since — a number in a test is exactly as current as the
+     * last person who remembered to change it, and MUSE-120 found MUSE-44's own ticket
+     * quoting a count four queries out of date.
      */
     const source = readFileSync(
       new URL('../src/lib/sanity/queries.ts', import.meta.url),
@@ -1817,5 +1858,201 @@ describe('an unpublished draft is invisible to every query, not just the two', (
     expect(counts.instructor, 'three published instructors, not four').toBe(3);
     expect(counts.pricingTier, 'two published tiers, not three').toBe(2);
     expect(counts.scheduleSlot, 'three published slots, not four').toBe(3);
+  });
+});
+
+/* ------------------- the two lists nothing was keeping in step (MUSE-120) */
+
+/**
+ * MUSE-120 — the residuals of MUSE-44 and MUSE-49, filed together because they are one
+ * habit applied in one file.
+ *
+ * Neither is a defect in what those tickets built: QA ran 27 query-text mutations across
+ * every exported query and got 27 red, and 3 of 3 deletions of the MUSE-49 fix red. What
+ * was missing in both cases is the assertion that a hand-written **list** is complete,
+ * which is what MUSE-66 established for `READ_CONTRACT` and neither of these got:
+ *
+ *   - the per-query execution cases above are a *set of `describe` blocks*, and nothing
+ *     said the set is the module's exports. QA appended a sixteenth query to `queries.ts`
+ *     and this file went green: the newcomer joined the parameter cross-check, which it
+ *     satisfied, and nothing required its projection ever to run;
+ *   - `SCHEMA_ASSERTIONS.postAuthorRef`/`slotClassRef`/`slotInstructorRefs`/
+ *     `classInstructorRefs` name today's dereference sites one at a time, so a *new*
+ *     `venue->name` with no `"venueRef": venue._ref` beside it was objected to by nothing.
+ *
+ * `queries.ts` exports its queries and `queries.ts` contains its dereferences, so in both
+ * cases the list can be derived from the thing it is a list of. These two blocks do that,
+ * and there is no exemption table because today nothing needs one: a query is executed or
+ * the first block names it, and a `->` is paired or the second one names it. The shape
+ * that would deserve an exemption is a dereference inside a *filter* rather than a
+ * projection, where there is no projected value for a `_ref` to sit beside — if one ever
+ * arrives, that is a decision to take in a diff here rather than a scan to loosen.
+ */
+
+describe('every query `queries.ts` exports is executed against a row (MUSE-120)', () => {
+  /**
+   * **Execution, not a title.** The assertion is against `EXECUTED`, which the read path
+   * writes as it evaluates, so a `describe` block that names a query without running it
+   * does not satisfy this and a reader that stops issuing one fails it. A scan of this
+   * file's own `describe` strings would have been the cheaper instrument and it would have
+   * accepted a block with a vacuous body, which is MUSE-44's defect with a heading on it.
+   *
+   * It therefore depends on the blocks above having run. That is why this is the last
+   * block in the file, and why an empty record is its own failure below rather than
+   * fifteen separately missing queries: in a filtered run — `vitest -t` naming only this
+   * block — the record is empty because nothing else ran, and that has to read as "you
+   * filtered the run", not as "the readers are broken".
+   */
+  it('records the queries the read path ran, so the assertion below is not vacuous', () => {
+    expect(
+      EXECUTED.size,
+      'nothing was recorded. Either the `vi.mock` wrapper at the top of this file is gone, ' +
+        'or this is a filtered run in which the blocks above did not execute — this block ' +
+        'reads what they ran and is only meaningful over the whole file.',
+    ).toBeGreaterThan(0);
+    // One query every reader of the schedule must issue, named so that a record full of
+    // nothing but the MUSE-51 block's throwaway query texts cannot pass for a real one.
+    expect(EXECUTED.has(QUERIES.SCHEDULE_QUERY)).toBe(true);
+  });
+
+  it('leaves no exported query unexecuted, naming the ones it finds', () => {
+    /**
+     * The sixteenth query, as a test. GROQ answers `null` for a field that does not exist,
+     * so an unexecuted projection type-checks, builds, exits 0 and ships blanks — the
+     * whole of MUSE-44 — and `sanity typegen` derives its result type from the query text,
+     * so the blanks are *typed*. A query this names needs a case above that calls the
+     * reader which issues it and asserts the decoded fields, not a mention.
+     */
+    const unexecuted = EXPORTED_QUERIES.filter(([, query]) => !EXECUTED.has(query)).map(
+      ([name]) => name,
+    );
+
+    expect(
+      unexecuted,
+      'exported by `src/lib/sanity/queries.ts` and executed by nothing in this file. ' +
+        'Add a `describe` block above that reads it through `src/lib/sanity` against a ' +
+        'fixture and asserts every projected field (MUSE-44), or delete the query.',
+    ).toEqual([]);
+    // And the set is not empty, so the equality above is a statement about this file.
+    expect(EXPORTED_QUERIES.length).toBeGreaterThan(1);
+  });
+});
+
+describe('every dereference in `queries.ts` is projected beside its `_ref` (MUSE-120)', () => {
+  /**
+   * MUSE-49's rule, stated **against the query text**.
+   *
+   * That is the whole point of putting it here rather than leaning on the decoder. Delete
+   * `"authorRef": author._ref` today and ten tests in this file go red — all of them
+   * through `failUnpairedReference`, because a fixture row happens to carry an author. A
+   * *new* `venue->name` with no `"venueRef": venue._ref` has no decoder watching it and no
+   * fixture row to trip over: it reads as `optionalText`, a deleted venue publishes a
+   * blank, and MUSE-49 is reproduced one field over. So the pair is asserted where it
+   * actually lives — in the text — and this block stays red for a missing `_ref` whether
+   * or not any row exercises it.
+   */
+
+  /** One `->` in a query: the path it dereferences from, and the field it reads. */
+  interface Site {
+    base: string | null;
+    field: string;
+  }
+
+  /**
+   * A path as GROQ writes one: identifiers, `.` and `[]`, and `->` itself, because
+   * `class->instructors[]->name` dereferences from `class->instructors[]` and that is the
+   * path whose `_ref` has to be projected.
+   */
+  const PATH = String.raw`(?:[A-Za-z_]\w*(?:\[\])?)(?:(?:->|\.)[A-Za-z_]\w*(?:\[\])?)*`;
+
+  /**
+   * Every `->` in a query, scanned rather than parsed — then checked against the parser
+   * below, which is the MUSE-51 arrangement and for the same reason: one implementation,
+   * pinned to `groq-js`, so a dereference shape the scan cannot see is a red test rather
+   * than a guard that has quietly stopped guarding.
+   */
+  function sites(query: string): Site[] {
+    const found: Site[] = [];
+    for (let at = query.indexOf('->'); at !== -1; at = query.indexOf('->', at + 2)) {
+      const base = query.slice(0, at).match(new RegExp(`(${PATH})$`));
+      const field = query.slice(at).match(/^->([A-Za-z_]\w*)/);
+      found.push({ base: base === null ? null : base[1], field: field?.[1] ?? '*' });
+    }
+    return found;
+  }
+
+  /** The `Deref` nodes in the real parse tree, which is what `sites` is measured against. */
+  async function derefNodes(query: string): Promise<number> {
+    const { parse } = await import('groq-js');
+    let count = 0;
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        for (const member of node) walk(member);
+        return;
+      }
+      if (typeof node !== 'object' || node === null) return;
+      const record = node as Record<string, unknown>;
+      if (record.type === 'Deref') count += 1;
+      for (const value of Object.values(record)) walk(value);
+    };
+    walk(parse(query));
+    return count;
+  }
+
+  it('finds a `_ref` beside every `->`, naming the query and the field if not', () => {
+    const problems = EXPORTED_QUERIES.flatMap(([name, query]) =>
+      sites(query).flatMap(({ base, field }) => {
+        if (base === null) {
+          return [
+            `\`${name}\` dereferences \`->${field}\` from an expression this scan cannot ` +
+              `read as a path, so it cannot say whether the \`_ref\` is there. Teach ` +
+              `\`sites()\` the shape.`,
+          ];
+        }
+        return query.includes(`${base}._ref`)
+          ? []
+          : [
+              `\`${name}\` projects \`${base}->${field}\` with no \`${base}._ref\` beside ` +
+                `it. For an optional reference a deleted target and an unfilled field both ` +
+                `arrive as \`undefined\`, and the \`_ref\` is the only thing that tells ` +
+                `them apart (MUSE-49).`,
+            ];
+      }),
+    );
+
+    expect(problems).toEqual([]);
+  });
+
+  it('sees the same dereferences the parser does, query by query', async () => {
+    for (const [name, query] of EXPORTED_QUERIES) {
+      expect(sites(query).length, name).toBe(await derefNodes(query));
+    }
+  });
+
+  it('is reading query text that dereferences, so the two above are not vacuous', () => {
+    /**
+     * The guard on the guard. A scan that found nothing would satisfy both assertions
+     * above, and this is the one place a count is written down on purpose — pinned to the
+     * dereferencing queries by name, so adding a sixteenth query that dereferences is a
+     * red test here and a decision somebody takes rather than a line that drifts.
+     */
+    const dereferencing = EXPORTED_QUERIES.filter(([, query]) => sites(query).length > 0);
+    expect(dereferencing.map(([name]) => name).sort()).toEqual([
+      'CLASSES_QUERY',
+      'POSTS_QUERY',
+      'SCHEDULE_QUERY',
+    ]);
+
+    // The bases, which is what the rule is actually about: the slot's override list, the
+    // class's own list, the class behind a slot, and the author of a post.
+    const bases = new Set(
+      EXPORTED_QUERIES.flatMap(([, query]) => sites(query).map(({ base }) => base)),
+    );
+    expect([...bases].sort()).toEqual([
+      'author',
+      'class',
+      'class->instructors[]',
+      'instructors[]',
+    ]);
   });
 });

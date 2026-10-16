@@ -501,17 +501,29 @@ ticket (MUSE-114 is the open instance).
   thing that does it** (MUSE-44). Nine of the eleven queries were run by nothing, so no
   projection in them had ever been checked — `class->nam` type-checked, built, exited 0
   and would have shipped a schedule of blanks. Three layers look like they cover this and
-  none does: `npm run sanity:read` runs all eleven live, but against a dataset with no
-  classes or images, so all nine report `EMPTY` — correct for an empty dataset and
+  none does: `npm run sanity:read` runs every one of them live, but against a dataset with
+  no classes or images, so the nine reported `EMPTY` — correct for an empty dataset and
   indistinguishable from a wrong projection; `test/sanity.test.ts` decodes rows that are
   already **post**-projection, so the test and the query cannot disagree; and `sanity
   typegen` derives result types from the query *text*, so a typo yields a *consistent*
   wrong type. So that suite calls the real readers against structural fixtures in
   `test/helpers/structural-content.ts` — **not** `content/seed.ndjson`, which
   `npm run sanity:seed` imports into the live dataset. A new query needs a case there, and
-  the bar is the ticket's: rename one projected field and the suite must go red. Watch out
-  for the fields with a silent fallback — `featured` decodes to `false`, `lineup` to `[]`,
-  `author`/`endsAt`/`hotspot` to `undefined` — which is why the fixture fills every
+  the bar is the ticket's: rename one projected field and the suite must go red.
+
+  **That a new query has a case at all is asserted, not asked for** (MUSE-120). The
+  execution cases are a set of `describe` blocks and nothing used to say the set is the
+  module's exports, so a sixteenth query joined the parameter cross-check, satisfied it,
+  and went green with its projection never run — MUSE-44's defect reachable again, for the
+  same reason MUSE-66's `studioStory` was: a hand-written list beside a thing that
+  enumerates itself. The suite now records every query text the read path evaluates, by
+  wrapping `runFixtureQuery`, and fails naming any exported query nothing ran. It asserts
+  *execution* rather than a `describe` title on purpose — a title would accept a block with
+  a vacuous body, which is the defect with a heading on it — so the check is the last block
+  in the file and an empty record reads as "you filtered the run".
+
+  Watch out for the fields with a silent fallback — `featured` decodes to `false`, `lineup`
+  to `[]`, `author`/`endsAt`/`hotspot` to `undefined` — which is why the fixture fills every
   optional field the seed leaves empty. The fixture also carries `drafts.`-prefixed
   documents, so all forty-odd assertions run against a dataset holding drafts: MUSE-20
   proves the filter works for `page`, which is one of the two queries that *were* already
@@ -612,6 +624,13 @@ ticket (MUSE-114 is the open instance).
   deleted reference, and a page joining the names would publish „ i Mina" for the third —
   so the error names the index.
 
+  **A message states what was checked, not what it was inferred from** (MUSE-120).
+  `failDangling` sees one thing — a `_ref` whose dereference answered nothing — and that is
+  two cases: the target is gone, or the target is there and lacks the field the projection
+  reads. The first is much the likelier (`instructor.name` is `required()`, so the second
+  needs a schema change to reach) and it used to be reported as the finding, which sends
+  whoever reads the log looking for a document that is sitting right there.
+
 - **Every dereference in `queries.ts` is projected beside its `_ref`** — `author->name`
   next to `"authorRef": author._ref` — and that pair is the whole of MUSE-49. Sanity does
   not clear a reference when its target is deleted, and GROQ answers a broken one with
@@ -623,6 +642,22 @@ ticket (MUSE-114 is the open instance).
   path and the deleted `_ref`; see the paragraph on `failDangling` in `decode.ts` for why
   it is fatal rather than a warning, and note that the message says *clearing the field* is
   a valid fix, because for an optional reference it is.
+
+  **That every `->` has one is a scan over the query text, not a list of today's three**
+  (MUSE-120). `SCHEMA_ASSERTIONS.postAuthorRef`/`slotClassRef`/`slotInstructorRefs`/
+  `classInstructorRefs` name the sites that exist, so a *new* `venue->name` with no
+  `"venueRef": venue._ref` beside it was objected to by nothing: it decodes with
+  `optionalText`, a deleted venue publishes a blank, and MUSE-49 is reproduced one field
+  over. `test/projections.test.ts` now scans every exported query for `->`, requires
+  `<base>._ref` in the same text, and names the query and the field when it is absent. It is
+  stated **against the query text and not the decode result** deliberately: deleting
+  `"authorRef"` today is already ten red tests through `failUnpairedReference`, but only
+  because a fixture row happens to carry an author — a dereference no row exercises has no
+  decoder watching it. The scan is pinned to `groq-js`'s `Deref` nodes query by query, which
+  is the MUSE-51 arrangement and for the same reason: a dereference shape the scan cannot
+  read is a red test rather than a guard that has quietly stopped guarding. There are no
+  exemptions; the shape that would deserve one is a dereference inside a *filter*, where
+  there is no projected value for a `_ref` to sit beside.
 
   Three things not to undo. **The pair must stay a pair** — delete a `*Ref` line and
   `decode.ts` fails every row saying the query is broken, while `RefProjected` in

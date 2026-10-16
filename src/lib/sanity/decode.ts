@@ -124,6 +124,13 @@ export function optionalText(doc: unknown, path: string, where: Where): string |
  *   - **the target** — the `_ref` itself. Without it the message is indistinguishable from
  *     "this instructor's name is blank", which is a different document and a different fix.
  *
+ * **What it must not do is state a cause it has not checked** (MUSE-120). All the decoder
+ * sees is a `_ref` whose dereference answered nothing, and that is two cases, not one: the
+ * target is gone, or the target exists and the field this projection reads is absent from
+ * it. The first is much the likelier — `instructor.name` is `required()`, so the second
+ * needs a schema change to reach — but the message used to report the inference as the
+ * finding, which sends whoever reads it looking for a document that is sitting right there.
+ *
  * `optional` only changes the advice, never the outcome: where the field may legitimately
  * be empty, *clearing* it is a valid fix and the message says so, which turns a build
  * failure into a ten-second Studio edit rather than an emergency.
@@ -132,8 +139,11 @@ function failDangling(where: Where, ref: string, optional: boolean): never {
   throw new SanityContentError(
     `Sanity document "${where.id}" (type \`${where.type}\`) is unusable: field ` +
       `\`${where.path}\` dereferences a reference that points at nothing. The reference ` +
-      `names \`${ref}\`, and there is no such document in the dataset — so it has been ` +
-      `deleted, or was never published. Sanity does not clear a reference when its target ` +
+      `names \`${ref}\`, and dereferencing it yielded nothing — so either the dataset has ` +
+      `no published document with that \`_id\` (deleted, or never published), or the one ` +
+      `it names is missing the field this projection reads. The first is much the likelier, ` +
+      `and the answer does not tell them apart. Sanity does not clear a reference when its ` +
+      `target ` +
       `goes, and GROQ answers a broken one with \`null\` rather than an error, which is ` +
       `why this is a build failure and not a blank on the page. ` +
       (optional
