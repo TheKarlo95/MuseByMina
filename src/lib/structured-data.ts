@@ -64,11 +64,17 @@ import { addressLines, socialUrl, type SiteSettings } from './sanity';
  * scope in the ticket itself.
  *
  * `Article` arrived with `/blog` (MUSE-26) and is below as `BlogPosting`. It is here
- * rather than in `PostPage.astro` because `test/structured-data.test.ts` fails if a second
- * `.astro` file writes an `application/ld+json` tag at all: two emission sites are two
- * answers to „does the markup agree with the page", which is the failure this whole module
- * is shaped around. So a post hands its facts *up* through `BaseLayout`'s `article` prop
- * and the one `<script>` carries three nodes instead of two.
+ * rather than in `PostPage.astro` because `test/structured-data.test.ts` fails if any
+ * second file under `src/` writes an `application/ld+json` tag, and fails again if any
+ * page in the built output carries two: two emission sites are two answers to „does the
+ * markup agree with the page", which is the failure this whole module is shaped around.
+ * So a post hands its facts *up* through `BaseLayout`'s `article` prop and the one
+ * `<script>` carries three nodes instead of two.
+ *
+ * The scan used to read `.astro` files only, on the stated grounds that a `.ts` module
+ * cannot emit a tag. It can — export the tag as a string and a component writes
+ * `set:html` around it — so it reads every file that can execute now, and the count over
+ * the output is the check that no spelling can get past (MUSE-100).
  */
 
 /** The vocabulary every block is written in. */
