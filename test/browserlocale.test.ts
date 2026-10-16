@@ -15,7 +15,7 @@ import {
   DEFAULT_CHECK_LOCALE,
 } from '../scripts/browser-checks.mjs';
 import { DEFAULT_LOCALE, LOCALES } from '../src/lib/i18n';
-import { LANG_STORAGE_KEY } from '../src/lib/lang';
+import { LANG_PARAM, LANG_STORAGE_KEY } from '../src/lib/lang';
 import {
   scriptFiles,
   scriptsPackageJsonRuns,
@@ -24,6 +24,14 @@ import {
   vitestFileGlobs,
 } from './helpers/discovery';
 import { PREVIEW_BASE, startPreview, type Preview } from './helpers/preview';
+import {
+  BROWSER_DOOR,
+  browserOwnership,
+  callsOf,
+  drivesBrowser,
+  importsOf,
+  listed,
+} from './helpers/source-guard';
 
 /**
  * MUSE-48 — a browser check measures the page it names, or says so.
@@ -348,6 +356,38 @@ describe('the locale it pins is the site’s own', () => {
     }
   });
 
+  it('refuses a landing whose ?lang= is not the one it asked for', async () => {
+    // MUSE-107. The comparison was the pathname alone, so a redirect that changed only the
+    // query resolved — and `?lang=` is not just any query: it is what `src/lib/lang.ts`
+    // routes language on, so the page was measured under a language instruction the check
+    // never gave. The path really can be unchanged while it happens, which is why the
+    // pathname comparison could not see it: `?lang=hr` on the Croatian page redirects
+    // nowhere, it is simply obeyed.
+    const redirectWithLanguage = {
+      prepare: async (page: import('playwright').Page, url: string) => {
+        await page.route(url, async (hit) => {
+          await hit.fulfill({
+            status: 302,
+            headers: { location: `${url}?${LANG_PARAM}=hr` },
+          });
+        });
+      },
+    };
+
+    const problem = await openCheckPage(browser, preview, '/schedule', redirectWithLanguage)
+      .then((open) => open.close().then(() => null))
+      .catch((error: Error) => error);
+
+    expect(
+      problem,
+      'a 302 adding ?lang= to the same path was accepted — the page was measured under a ' +
+        'language nobody asked for (MUSE-107)',
+    ).not.toBeNull();
+    // Both sides named, the way every other refusal in this tree names them.
+    expect(problem?.message).toContain(`requested  /MuseByMina/schedule/  ?${LANG_PARAM}=(none)`);
+    expect(problem?.message).toContain(`measured   /MuseByMina/schedule/  ?${LANG_PARAM}=hr`);
+  });
+
   it('refuses a locale it has no browser language for', async () => {
     await expect(openCheckPage(browser, preview, '/', { locale: 'de' })).rejects.toThrow(
       /NAVIGATOR_LOCALE/,
@@ -370,22 +410,6 @@ describe('the locale it pins is the site’s own', () => {
  */
 describe('nothing can open a browser context of its own', () => {
   /**
-   * Strings the guards search for, assembled rather than written out.
-   *
-   * This file is itself a browser-driving file and is checked by the loops below, so a
-   * forbidden token spelled literally in an assertion would be found in this file's own
-   * source and fail its own guard. Same trick, for the same reason, as
-   * `test/origin.test.ts`'s `process.env.${'ORIGIN'}`.
-   */
-  const FORBIDDEN = {
-    newContext: `new${'Context('}`,
-    newPage: `new${'Page('}`,
-    initScript: `add${'InitScript('}`,
-    setItem: `set${'Item('}`,
-    launch: `chro${'mium'}`,
-  };
-
-  /**
    * Which of `candidates` drive a browser, read off the tree rather than listed.
    *
    * A file qualifies by **importing** Playwright or this module, which between them are
@@ -404,40 +428,24 @@ describe('nothing can open a browser context of its own', () => {
    * it defeated MUSE-48's pin and MUSE-68's census at once. The lists are now recursive
    * and the shape of each one is asserted against the tool that loads it, below.
    *
-   * (And note this comment names none of the forbidden tokens: the file is checked by its
-   * own loops, so prose that spells one reddens the run. Measured, twice.)
+   * **And the question is asked of a parser, which is the fix MUSE-107 is** (`drivesBrowser`
+   * in `test/helpers/source-guard.ts`). The predicate here was
+   * `/from ['"](playwright|[^'"]*browser-checks\.mjs)['"]/` — a model of an *import
+   * statement*, which `await import('play' + 'wright')` is not: a probe written that way
+   * opened a context with a locale on it, measured `/en/` while reporting `/`, and no rule
+   * in this file applied to the file at all, because discovery never reached it. Demonstrated
+   * end to end before it was fixed.
    */
   function browserFiles(candidates: readonly string[]): string[] {
-    const imports = /from ['"](playwright|[^'"]*browser-checks\.mjs)['"]/;
     return candidates
-      .filter((file) => file !== 'scripts/browser-checks.mjs')
-      .filter((file) => imports.test(readFileSync(join(ROOT, file), 'utf8')))
+      .filter((file) => file !== BROWSER_DOOR)
+      .filter((file) => drivesBrowser(file))
       .sort();
   }
 
   const scripts = (): string[] => browserFiles(scriptFiles());
   const suites = (): string[] => browserFiles(testTreeFiles());
   const source = (file: string): string => readFileSync(join(ROOT, file), 'utf8');
-
-  /**
-   * Where `needle` appears in `file`, as `file:line`, or `[]`.
-   *
-   * `expect(source(file)).not.toContain(needle)` is the same rule and prints the **whole
-   * file** as its diff — 150 lines of `scripts/a11y.mjs`, inside which the planted
-   * context call is one line nothing points at, with a stray comment landing at the top of
-   * the excerpt as the only visible context (MUSE-77). The needle and the file name were in
-   * the message; the offending line was not. Every other guard in this repository names
-   * `file:line`, so this one does too.
-   *
-   * And note why the sentence above does not quote the token: this file is itself checked
-   * by the loops below, so a forbidden string spelled literally in prose here fails its own
-   * guard. Measured — that is how the first draft of this comment reddened the run.
-   */
-  function occurrences(file: string, needle: string): string[] {
-    return source(file)
-      .split('\n')
-      .flatMap((line, index) => (line.includes(needle) ? [`${file}:${index + 1}`] : []));
-  }
 
   it('finds every browser check and browser suite there is', () => {
     // The loops below are `for` loops over these lists. A discovery that silently stops
@@ -510,26 +518,96 @@ describe('nothing can open a browser context of its own', () => {
     expect(runnable).toEqual(expect.arrayContaining(run));
   });
 
-  it('lets none of them build a context, a page or an init script', () => {
-    for (const file of [...scripts(), ...suites()]) {
-      // Opening a context is where the locale is decided, and deciding it by omission is
-      // the bug. One module opens them.
-      expect(occurrences(file, FORBIDDEN.newContext), file).toEqual([]);
-      expect(occurrences(file, FORBIDDEN.newPage), file).toEqual([]);
-      // Seeding storage by hand is how the two defended scripts defended themselves —
-      // a line each, that nothing made the third script copy. Both ways in are closed:
-      // an init script, and a `setItem` from the page once it is open. Reading the key is
-      // fine and several suites do it — what the module owns is the write, because a
-      // write is a decision about which language the page is being measured as.
-      expect(occurrences(file, FORBIDDEN.initScript), file).toEqual([]);
-      expect(occurrences(file, FORBIDDEN.setItem), file).toEqual([]);
+  /**
+   * **One assertion over every file, and it names every call it found** (MUSE-107).
+   *
+   * This was four `expect`s per rule inside a `for` loop over two lists, and `expect`
+   * short-circuits: a file with all five tokens planted in it reported the first two and
+   * named neither of them — the message was the needle and the file, and the needle was
+   * assembled from fragments so the guard would not report its own prose. Reporting every
+   * offence is not tidiness: the first two told the author their fix was complete.
+   *
+   * `browserOwnership` states the rule against the **callee**, so a comment that names one
+   * of these calls is not one, a computed member is folded to the name it computes, and the
+   * reason each name is owned travels with the failure.
+   */
+  it('lets none of them open a browser, a context, a page or an init script', () => {
+    // Opening a context is where the locale is decided, and deciding it by omission is the
+    // bug — one module opens them. Seeding storage by hand is how the two defended scripts
+    // defended themselves, a line each that nothing made the third script copy, so both
+    // ways in are closed: an init script, and a `setItem` from the page once it is open.
+    // Reading the key is fine and several suites do it; what the module owns is the write,
+    // because a write is a decision about which language the page is being measured as.
+    const offences = [...scripts(), ...suites()].flatMap((file) => browserOwnership(file));
+
+    expect(listed(offences)).toEqual([]);
+  });
+
+  /**
+   * The rules as rules, handed the two evasions MUSE-107 demonstrated.
+   *
+   * As strings rather than as fixtures on disk, which is how `test/isolation.test.ts` tests
+   * the rest of this parser: a file under `test/` that deliberately breaks the rules is a
+   * worse problem than the one it solves. And a string is why these probes can spell the
+   * forbidden names at all — a literal is not a call, which is the whole reason MUSE-34
+   * made these rules read syntax instead of text.
+   */
+  it('discovers a file that obtains Playwright by an assembled dynamic import', () => {
+    const probe = "const { chromium } = await import('play' + 'wright');";
+
+    expect(drivesBrowser('probe.ts', probe)).toBe(true);
+    // And the token rules therefore apply to it, which is the half that was lost: the
+    // bypass was not that the import was allowed, it was that no rule was ever reached.
+    expect(listed(browserOwnership('probe.ts', `${probe}\nawait chromium.launch();`))).toHaveLength(
+      1,
+    );
+  });
+
+  it('fires on a forbidden call written as a computed member', () => {
+    const probe = "const context = await browser['new' + 'Context']({ locale: 'en-US' });";
+    const [offence] = browserOwnership('probe.ts', probe);
+
+    expect(offence?.line).toBe(1);
+    expect(listed(browserOwnership('probe.ts', probe))[0]).toContain('newContext');
+  });
+
+  it('reports every forbidden call in one file, each naming the call it found', () => {
+    const probe = [
+      "const context = await browser.newContext({ locale: 'en-US' });",
+      'const page = await context.newPage();',
+      'await context.addInitScript(() => {});',
+      "await page.evaluate(() => localStorage.setItem('muse-lang', 'en'));",
+      'const second = await chromium.launch();',
+    ].join('\n');
+
+    const found = listed(browserOwnership('test/somewhere.test.ts', probe));
+
+    expect(found).toHaveLength(5);
+    for (const [index, call] of [
+      'newContext',
+      'newPage',
+      'addInitScript',
+      'setItem',
+      'launch',
+    ].entries()) {
+      expect(found[index], call).toContain(`test/somewhere.test.ts:${index + 1}`);
+      expect(found[index], call).toContain(call);
     }
   });
 
-  it('lets none of them launch a browser for itself', () => {
-    for (const file of [...scripts(), ...suites()]) {
-      expect(occurrences(file, FORBIDDEN.launch), file).toEqual([]);
-    }
+  it('does not fire on prose, on a string, or on reading the stored language', () => {
+    // The false positive that made the textual scan assemble its needles from fragments.
+    // This file, `scripts/browser-checks.mjs` and `test/helpers/discovery.ts` all name
+    // these calls in prose because that is where the rule is explained, and a guard that
+    // failed on the explanation would get the explanation deleted.
+    const prose = [
+      '/** A check may not call newContext, newPage, addInitScript or setItem. */',
+      "const named = 'newContext';",
+      'const stored = localStorage.getItem(KEY);',
+      'const browser = await launchChecks();',
+    ].join('\n');
+
+    expect(browserOwnership('probe.ts', prose)).toEqual([]);
   });
 
   it('keeps Playwright itself out of the scripts', () => {
@@ -554,10 +632,87 @@ describe('nothing can open a browser context of its own', () => {
 
   it('keeps the unasserted door out of the checks entirely', () => {
     for (const file of scripts()) {
-      // `openRedirectProbe` makes no landing assertion, by design, for the two suites
-      // whose subject is the redirect. A check that measures a page has no business with
-      // it — and leaving it reachable would leave the bypass this whole file closes.
-      expect(source(file), file).not.toContain('openRedirectProbe');
+      // `openRedirectProbe` makes no landing assertion, by design, for the suites whose
+      // subject is the redirect. A check that measures a page has no business with it —
+      // and leaving it reachable would leave the bypass this whole file closes.
+      expect(source(file), file).not.toContain(PROBE);
+    }
+  });
+
+  /**
+   * **The door that asserts nothing is a named list of callers, with a reason each**
+   * (MUSE-107).
+   *
+   * `openRedirectProbe` is exported, correct, and makes no landing assertion by design —
+   * so it is the realistic version of every bypass this file is about, and it cannot be
+   * closed by a scan: there is no token to plant and no file to discover. A suite written
+   * next year imports the sanctioned module, opens `/`, lands on `/en/` and labels it `/`,
+   * and every guard above stays green. `scripts/` was forbidden it; nothing pinned the
+   * suites.
+   *
+   * So the instrument is a list, and a list in this repository gets the
+   * `test/contentdrift.test.ts` treatment: every entry carries the reason it is an entry,
+   * the set is asserted **complete** against what the tree actually does, and it is
+   * asserted **still live**, so an entry that stops being true is a failure rather than a
+   * sentence nobody re-reads. Adding a caller is then a deliberate act with a sentence
+   * attached, which is the whole of what this guard can honestly ask for.
+   */
+  const PROBE = 'openRedirectProbe';
+
+  const PROBE_CALLERS: Record<string, string> = {
+    'test/lang.test.ts':
+      'MUSE-10 and MUSE-33 — its subject is where the redirect takes a browser, so the ' +
+      'pin openCheckPage applies would pin the subject out of existence.',
+    'test/localeswitch.test.ts':
+      'MUSE-56 — the same subject from the switcher’s side: 18 browser-language × ' +
+      'stored-language combinations, each asserted to land in the pressed language.',
+    'test/browserlocale.test.ts':
+      'this file — it tests the door itself, including that it refuses a browser language ' +
+      'nobody named, which is the defect MUSE-48 is.',
+  };
+
+  /**
+   * Every file that reaches the unasserted door, by the name it imports or by the call.
+   *
+   * Two signals because one import spelling leaves no name behind: `const { openRedirectProbe }
+   * = await import('../scripts/browser-checks.mjs')` is an import of the module and of no
+   * name, and the call is what is left to see. Read from the parser for the reason the whole
+   * of MUSE-107 is: a concatenation defeats a regular expression and not a syntax tree.
+   *
+   * Over the **whole** of both trees rather than over `browserFiles()`, because a file that
+   * is handed the function as an argument imports neither Playwright nor this module.
+   */
+  function probeCallers(): string[] {
+    return [...scriptFiles(), ...testTreeFiles()]
+      .filter((file) => file !== BROWSER_DOOR)
+      .filter(
+        (file) =>
+          importsOf(file).some((entry) => entry.name === PROBE) ||
+          callsOf(file).some((call) => call.name === PROBE),
+      )
+      .sort();
+  }
+
+  it('pins the door that asserts nothing to a named set of callers', () => {
+    expect(
+      probeCallers(),
+      `${PROBE} makes no landing assertion (MUSE-48). Every file that opens it is named in ` +
+        `PROBE_CALLERS with the reason its subject needs an unpinned browser; a file here ` +
+        `and not there is a page measured with nothing checking which page it was.`,
+    ).toEqual(Object.keys(PROBE_CALLERS).sort());
+  });
+
+  it('keeps every reason on that list a reason, and every entry still live', () => {
+    // The half that rots. A list of exemptions written once is a list nobody re-reads, so
+    // the entries are checked against the tree and the reasons against being sentences.
+    for (const [file, why] of Object.entries(PROBE_CALLERS)) {
+      expect(probeCallers(), `${file} no longer uses ${PROBE} — delete its entry`).toContain(
+        file,
+      );
+      expect(why.length, `${file}: the reason is too short to be one`).toBeGreaterThan(60);
+      expect(why, `${file}: the reason names no ticket and no subject`).toMatch(
+        /MUSE-\d+|this file/,
+      );
     }
   });
 });

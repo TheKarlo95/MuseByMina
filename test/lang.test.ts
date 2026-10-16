@@ -6,6 +6,7 @@ import {
   openCheckPage,
   openRedirectProbe,
 } from '../scripts/browser-checks.mjs';
+import { auditTargets } from '../scripts/dist-origin.mjs';
 import { DEFAULT_LOCALE, LOCALES, type Locale } from '../src/lib/i18n';
 import { LANG_PARAM, LANG_STORAGE_KEY } from '../src/lib/lang';
 import { ROUTES } from '../src/lib/pages';
@@ -1051,11 +1052,32 @@ describe("the 404's exits land in the language that was pressed (MUSE-56)", () =
  * entry for the locale being read is not a link at all, MUSE-39) and two on the error page.
  */
 describe('a language affordance names its language (MUSE-33, MUSE-56)', () => {
-  /** Every page the build serves, plus a dead path, which is how the 404 is reached. */
-  const SWEPT: string[] = [
-    ...ROUTES.flatMap(({ route }) => [route, `/en${route === '/' ? '' : route}`]),
+  /**
+   * Every page the build serves, plus a dead path, which is how the 404 is reached.
+   *
+   * **Read off the output, not off `ROUTES`** (MUSE-107). `ROUTES` is the list of routes
+   * the site serves *statically*; `/events/<slug>/` and `/blog/<slug>/` come from
+   * `getStaticPaths` and appear in no list in `src/lib/`, so a sweep spelled
+   * `ROUTES × LOCALES` passed over every detail page the dataset will ever publish — and a
+   * detail-page template is exactly the kind of page that gets a bare `/` href wrong, which
+   * is the defect this describe block exists for. The dataset publishes no post and no event
+   * today, so the two spellings name the same pages and this is a change with no visible
+   * effect; it becomes the whole of the guard with the first post.
+   *
+   * `auditTargets` is `scripts/a11y.mjs`'s walk of the built tree (MUSE-55) — the same
+   * answer to the same question, which is why there is no second walk here. The error page
+   * is dropped from it and reached as `/nope` instead: it is served as a *body* on a 404
+   * (MUSE-38), and asking for `/404/` is asking for a URL the host does not answer.
+   */
+  const swept = (): string[] => [
+    ...auditTargets(preview.outDir, `${PREVIEW_BASE}/`)
+      .filter((target) => target.file !== ERROR_PAGE_FILE)
+      .map((target) => target.route),
     '/nope',
   ];
+
+  /** The built error page, which this sweep reaches through a path nothing answers. */
+  const ERROR_PAGE_FILE = '404.html';
 
   /** How many marked links each swept page is expected to carry. */
   const expected = (route: string): number => (route === '/nope' ? 2 : 1);
@@ -1119,6 +1141,17 @@ describe('a language affordance names its language (MUSE-33, MUSE-56)', () => {
   }
 
   it('holds for every marked link on every page the site serves', async () => {
+    const SWEPT = swept();
+    // The walk is a model of „every page this build serves", so it is pinned to the one
+    // list that does name the static routes: every one of them, in both locales, must be
+    // in it. A walk that silently stopped matching would otherwise make this sweep pass
+    // over nothing, which is the shape of defect MUSE-107 is a collection of.
+    expect(SWEPT).toEqual(
+      expect.arrayContaining(
+        ROUTES.flatMap(({ route }) => [route, `/en${route === '/' ? '' : route}`]),
+      ),
+    );
+
     for (const route of SWEPT) {
       // `openCheckPage` here, not the probe: this sweep *measures* pages, so it must come
       // through the door that asserts it measured the page it asked for (MUSE-48). Asking

@@ -43,9 +43,9 @@ ticket (MUSE-114 is the open instance).
   and the `/` required after `\d+` in `DEV_ORIGIN` is load-bearing, since stdout is a pipe
   and a chunk can split between two digits of a port number.
 
-  Note what MUSE-48's landing assertion cannot do for you here: it compares the pathname
-  it *asked for* against the one it landed on, so it catches a redirect and not a URL that
-  was wrong before it was requested. `astro dev` serves `404.astro` at the bad path with no
+  Note what MUSE-48's landing assertion cannot do for you here: it compares the path and
+  the `?lang=` it *asked for* against the ones it landed on, so it catches a redirect and
+  not a URL that was wrong before it was requested. `astro dev` serves `404.astro` at the bad path with no
   redirect, and that page carries the same six faces and two preloads — so
   `test/fonts.test.ts` measured the error page in all three environments and stayed green.
   A check needs something from the page's own markup saying which page it is, and that is
@@ -109,6 +109,57 @@ ticket (MUSE-114 is the open instance).
   deliberate opt-out that asserts nothing, for `test/lang.test.ts` and
   `test/localeswitch.test.ts`, whose subject *is* the redirect — it must be handed a
   browser language rather than defaulted one, and `scripts/` may not use it.
+
+  **The guard's own rules are read by a parser, and the landing assertion covers `?lang=`**
+  (MUSE-107). Post-merge QA of MUSE-48 found four more ways round it, every one of them
+  *around* the door rather than through it — the door itself was verified sound. Discovery
+  was `/from ['"](playwright|[^'"]*browser-checks\.mjs)['"]/`, a model of an import
+  statement, and `await import('play' + 'wright')` is an import it does not describe: a
+  probe written that way asked for `/`, reported `measured: /MuseByMina/en/`, and the guard
+  stayed green with **no rule applied to the file at all**. The census saw only its build,
+  because the census is written by `launchChecks`. The token check was a per-line substring
+  scan, so `browser['new' + 'Context']({ locale: 'en-US' })` planted in `scripts/a11y.mjs`
+  — a file discovery *had* reached — left it green too; and that scan had to assemble its
+  needles from fragments (`new${'Context('}`) so it would not report the prose explaining
+  itself, which is the symptom showing in the guard. Both rules now live in
+  `test/helpers/source-guard.ts` beside MUSE-34's and MUSE-54's: `drivesBrowser` asks the
+  parser which modules a file imports, and `browserOwnership` states the rule against a
+  **callee**, so a name assembled from pieces is folded to what it computes, a name in a
+  comment or a string is not a call, and the needle-splitting workaround is gone. Every
+  offence is reported and each names its call — the four `expect`s per file short-circuited,
+  so five planted tokens reported two and named neither, which told the author the fix was
+  complete.
+
+  Two more are about what the door does not assert, and only one of them is a scan's
+  business. `openCheckPage` compared the **pathname** alone, so a 302 to
+  `…/schedule/?lang=hr` resolved: identical path, and `?lang=` is what `src/lib/lang.ts`
+  routes language on, so the page was measured under an instruction the check never gave.
+  The comparison is now the path **and** `?lang=` — and nothing else in the query, because a
+  rule that fires on a parameter nobody routes on is a rule that gets turned off. Then
+  `openRedirectProbe`, which asserts nothing **by design** and correctly: no scan can close
+  that, because there is no token to plant and no file to discover. A suite written next
+  year imports the sanctioned module, opens `/`, lands on `/en/` and labels it `/`, with
+  every guard above green. So its callers are a **named list with the reason each one needs
+  an unpinned browser**, asserted complete against what the tree does and asserted still
+  live — the `test/contentdrift.test.ts` treatment, because the instrument for a door that
+  is right is a list, and a list rots.
+
+  And one sweep was narrower than the site: `SWEPT` in `test/lang.test.ts` was `ROUTES` ×
+  locales plus `/nope`, so `/events/<slug>/` and `/blog/<slug>/` — real pages, from
+  `getStaticPaths`, named by no list in `src/lib/` — were outside the rule that a link
+  marked with a language must name it (MUSE-56), which is exactly the rule a detail-page
+  template gets wrong. It reads `auditTargets` over the preview's own `dist` instead, the
+  same walk `npm run a11y` uses (MUSE-55), pinned by asserting every static route is still
+  in what it found. The dataset publishes no post and no event, so this changes no page
+  today and is the whole of the guard the day it does.
+
+  Two findings from the same audit are left standing, named rather than fixed. `fixedSleeps`
+  runs over `inspectedFiles()`, which is `test/` only, so the four browser checks in
+  `scripts/` are ungoverned by it — none contains a sleep today. And `browser-settle.ts`
+  checks its failure-path budget *inside* the `requestAnimationFrame` callback, so with
+  `rAF` stubbed never to fire the wait was still pending after 8 s and would have ended as
+  vitest's bare timeout, the failure MUSE-54 exists to abolish; Playwright disables renderer
+  backgrounding, which is what keeps it latent.
 
 - **A discovery scan is a model of another tool's behaviour, and a model is wrong the
   moment the tool changes** (MUSE-96). Three guards in this tree discovered their subjects
@@ -439,9 +490,16 @@ ticket (MUSE-114 is the open instance).
   long a *failure* takes to report and the message names the condition and the last thing
   observed. `fixedSleeps` in `test/helpers/source-guard.ts` keeps new sleeps out — as a
   rule about a *call*, so the sentence explaining why a sleep was removed can stay in the
-  file it was removed from. What that rule cannot reach is written out beside it and
-  asserted: a measurement that never waited at all, a fixed-interval poll spelled with
-  `setTimeout`, and a correct wait given too small a budget.
+  file it was removed from. What that rule cannot reach is written out beside it, and **two
+  of the three are asserted**: `test/isolation.test.ts` hands the rule a click followed by a
+  geometry read with nothing in between, and a correct wait given a 15-second budget, and
+  asserts it is silent on both. The third — a fixed-interval poll spelled with a Node
+  `setTimeout` — is **written out and not asserted**, because it is deliberately not
+  forbidden: `test/helpers/scratch.ts` uses two for a process-kill grace period, which is a
+  timer doing a timer's job, and a rule that fired on it would be turned off rather than
+  obeyed. MUSE-107 measured what that costs — `await new Promise((r) => setTimeout(r, 25))`
+  planted in `test/lang.test.ts`, and the guard green — so the gap is a known one and the
+  claim that it is covered is the thing that was wrong.
 
   **And the condition has to be about the document being measured** (MUSE-61). The
   middle-click test waited on three real conditions, every one of them satisfiable while

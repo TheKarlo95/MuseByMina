@@ -100,6 +100,16 @@ export function pagePath(route: string): string {
 export interface Preview {
   /** `http://127.0.0.1:<port>/MuseByMina`, no trailing slash. */
   origin: string;
+  /**
+   * The build this preview serves.
+   *
+   * Exposed so a suite can ask the **output** what pages exist rather than deriving them
+   * from `ROUTES` (MUSE-107): `/events/<slug>/` and `/blog/<slug>/` are real pages that no
+   * list in `src/lib/` names, and a sweep stated over `ROUTES` passes over them silently
+   * the day the dataset has one. It is the directory `scratch.ts` minted, so naming it
+   * here is not a suite choosing where it builds.
+   */
+  outDir: string;
   /** Absolute URL for a locale-prefixed route such as `/en/contact`, slash included. */
   url(route: string): string;
   /** Submissions the stub endpoint has received, oldest first. */
@@ -227,6 +237,7 @@ export async function startPreview(
 
   return {
     origin: `${host}${PREVIEW_BASE}`,
+    outDir,
     url: (route) => `${host}${pagePath(route)}`,
     requests,
     reply: (next) => {
