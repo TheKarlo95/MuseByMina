@@ -310,6 +310,59 @@ ticket (MUSE-114 is the open instance).
   and **never reproduced**: there is nothing to learn from deleting a second project, and
   the function is what `astro:config:setup` consults.
 
+  **The protected root is Astro's `config.root`, which is `process.cwd()` only when
+  nobody passed `--root`** (MUSE-108) — so MUSE-92's own defect survived its fix, one
+  level out, and post-merge QA found it. `stagingFault` took the root from the working
+  directory and the hook passed no root at all, while Astro resolves `outDir` **against
+  the root** (`resolveDirAsUrl(val, fileProtocolRoot)`,
+  `core/config/schemas/relative.js`; `resolveRoot` in `core/config/config.js` is where
+  the fallback lives). So `astro build --root a/b --outDir ../` yields `outDir = <cwd>/a`,
+  which contains the project root, starts with the working directory, and was allowed —
+  measured against the real exported predicate. Astro's `validateConfig` does not catch it
+  either: it throws only when `outDir` **equals** `root`. Latent, because nothing in
+  `package.json`, `ci.yml` or `deploy.yml` passes `--root` and the config declares no
+  `root:` — the same latency MUSE-92 accepted, with the same consequence.
+
+  **It is two comparisons now, one per directory Astro resolves against, and that is not
+  a check per symptom.** MUSE-92's objection to a check per symptom stands; this is one
+  question per directory, and the two coincide for every build in this repository:
+
+  - `outDir` must start with the **root**'s path and not be the root — the deletion.
+  - `outDir` must start with the **working directory** — the staging location, and it has
+    to be the working directory because `getOutDirWithinCwd` tests
+    `fileURLToPath(outDir).startsWith(process.cwd())` literally.
+
+  The second is the half the fix would otherwise have *opened*: `--root <elsewhere>` with
+  the default `outDir` passes the containment question — an ordinary `dist` inside its own
+  project — and still stages in the shared `<cwd>/.astro/.prerender`, which is MUSE-41's
+  `EXDEV` and its silent asset collision. Each clause is asserted with the other dropped,
+  so neither can be deleted quietly. The hook trims the trailing separator off both URLs,
+  which is load-bearing rather than tidy: `<cwd>/` fails the raw string prefix MUSE-92
+  deliberately allows, so an untrimmed root would refuse the sibling whose name extends
+  it — a safe build. And the hook is reached through the config's own `integrations` list
+  rather than through a second export, because the defect *was* the wiring: a correct
+  predicate handed the wrong directory.
+
+  **The over-claim guard is a generated class of wording now, not one banned literal**
+  (MUSE-108). It asserted `not.toContain('under the project root')`, and „must be within
+  the project directory" is the same over-claim reworded — the shape of MUSE-84's
+  first-pass needle, which pinned the two literals its author had already changed. There
+  is **no property in the strict sense and the file says so**: the over-claim is a claim
+  made in English about a predicate, and no assertion reads English. What is stated
+  instead is the pair that makes it checkable — the headline must name the test it
+  performs (a string prefix) and may not describe `outDir`'s relation to the root with the
+  vocabulary of a directory tree, which every rewording needs. `overclaims` is the cross
+  product of six containment prepositions and two subjects, generated rather than listed,
+  and it is asserted to fire on three wordings so a guard that finds nothing cannot pass.
+  It reads the **headline only**, because the body denies the claim in those very words
+  while naming the sibling it admits.
+
+  One hole is left deliberately and is written beside the function:
+  `stagingFault('<root>/..', '<root>')` returns `null` for an unnormalised path. It is
+  unreachable through the hook — `resolveDirAsUrl` calls `path.resolve` before the hook
+  sees `config.outDir` — and the same hole predates MUSE-92. It wants fixing if the
+  function ever gains a second caller.
+
 - **A browser suite waits for a condition, never for the clock** (MUSE-54), and
   `test/helpers/browser-settle.ts` is the only place it waits. Three suites flaked in one
   afternoon with no code in common and one defect in common: a measurement taken at a

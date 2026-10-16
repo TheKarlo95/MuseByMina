@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, extname, isAbsolute, join, relative } from 'node:path';
+import { dirname, extname, isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import type { TestCase, TestModule } from 'vitest/node';
@@ -632,9 +632,36 @@ describe('a build stages its prerendered output where it writes it', () => {
     // wording, which outlived MUSE-41's predicate — would again promise something a
     // passing case violates. The headline is the first line because that is what
     // `buildErrorHeadline` carries into a failed build's report.
+    //
+    // **Stated as a class of wording rather than as the one phrase MUSE-92 deleted**
+    // (MUSE-108). `not.toContain('under the project root')` banned a literal, and „must
+    // be within the project directory" is the same over-claim reworded — the shape of
+    // MUSE-84's first-pass needle, which pinned the two literals its author had already
+    // changed and would have passed the third.
+    //
+    // There is no property here in the strict sense and the reason is worth stating
+    // rather than working around: the over-claim is a claim made in English about a
+    // predicate, and no assertion can read English. What *can* be stated is the pair that
+    // makes the claim checkable — the headline must name the test it performs, which is a
+    // string prefix, and must not describe `outDir`'s relation to the root with the
+    // vocabulary of a directory tree, which every rewording of the over-claim needs.
+    // `overclaims` generates that cross product instead of listing phrases, and it is
+    // asserted below to fire on three wordings so a guard that finds nothing cannot pass.
+    //
+    // It is the headline and not the whole message because the body *denies* the claim in
+    // those words — „even though it is not under the project root", naming the sibling —
+    // and the headline is the line `buildErrorHeadline` carries into a failed build's
+    // report, so it is the one that has to stand alone.
     const headline = fault!.split('\n')[0]!;
     expect(headline).toContain('start with the project root path');
-    expect(headline).not.toContain('under the project root');
+    expect(overclaims(headline), headline).toHaveLength(0);
+    for (const reworded of [
+      'outDir must live under the project root (MUSE-41).',
+      'outDir must be within the project directory (MUSE-41).',
+      'outDir has to sit inside the project root (MUSE-41).',
+    ]) {
+      expect(overclaims(reworded), reworded).not.toHaveLength(0);
+    }
     // Whose rule it is, and the case it therefore admits — so a reader who believes the
     // message cannot be surprised by the predicate.
     expect(fault).toContain('getOutDirWithinCwd');
@@ -692,6 +719,112 @@ describe('a build stages its prerendered output where it writes it', () => {
     expect(fault, `outDir ${cwd} is the project root and was allowed`).not.toBeNull();
     expect(fault).toContain(`outDir   ${cwd}`);
     expect(fault).toContain('MUSE-41');
+  });
+
+  it("refuses an outDir that contains Astro's root, which --root moves off the cwd", async () => {
+    // MUSE-108 — MUSE-92 one level out, found by post-merge QA of MUSE-92 itself.
+    //
+    // MUSE-92 replaced the predicate with the rule its message states: `outDir`'s path
+    // must start with the project root's. It took that root from `process.cwd()` and the
+    // hook passed none. But Astro's root is `config.root` — `--root` sets it, and
+    // `resolveRoot` (`core/config/config.js`) falls back to `process.cwd()` only when it
+    // is absent — and `outDir` is resolved **against that root** rather than against the
+    // working directory (`resolveDirAsUrl(val, fileProtocolRoot)`,
+    // `core/config/schemas/relative.js`). So the exact shape MUSE-92 exists to refuse was
+    // still allowed:
+    //
+    //     astro build --root a/b --outDir ../
+    //       cwd = <cwd>        root = <cwd>/a/b        outDir = <cwd>/a
+    //
+    // `<cwd>/a` starts with `<cwd>` and is not `<cwd>`, so the predicate returned null;
+    // and Astro's own `validateConfig` (`core/build/index.js`) throws only when `outDir`
+    // **equals** `root`, so nothing else objected either. Vite then empties `<cwd>/a`,
+    // which contains the project.
+    //
+    // Asserted against the function and never reproduced, for MUSE-92's reason: there is
+    // nothing to learn from deleting a second project, and this is the thing
+    // `astro:config:setup` consults.
+    const { stagingFault } = await loadStagingRules();
+    const cwd = process.cwd();
+    const root = join(cwd, 'a', 'b');
+    const outDir = join(cwd, 'a');
+
+    const fault = stagingFault(outDir, cwd, root);
+    expect(fault, `outDir ${outDir} contains root ${root} and was allowed`).not.toBeNull();
+    // The label `root` names Astro's root. Printing the working directory under it is the
+    // same defect in the message as the one the predicate had in the code, and the two
+    // directories have to be told apart in a report about a build that distinguished them.
+    expect(fault).toContain(`outDir   ${outDir}`);
+    expect(fault).toContain(`root     ${root}`);
+    expect(fault).toContain(`cwd      ${cwd}`);
+    expect(fault).toContain('MUSE-108');
+
+    // Every ancestor of Astro's root, and the root itself, however far above it the
+    // working directory happens to sit.
+    for (const above of [root, outDir, cwd, dirname(cwd), '/']) {
+      expect(stagingFault(above, cwd, root), above).not.toBeNull();
+    }
+    // And a root below the working directory with its output inside it is allowed:
+    // nothing about `--root` is refused for its own sake.
+    expect(stagingFault(join(root, 'dist'), cwd, root)).toBeNull();
+  });
+
+  it('refuses an outDir inside a root that does not start with the working directory', async () => {
+    // The other half of the same distinction, and why the predicate asks two questions
+    // once the two directories can differ. Astro resolves `outDir` against `config.root`
+    // and stages it against the **working directory** — `getOutDirWithinCwd` tests
+    // `fileURLToPath(outDir).startsWith(process.cwd())` literally — so each directory
+    // carries its own failure:
+    //
+    //   - an `outDir` that contains Astro's root is emptied with the project inside it
+    //     (above, MUSE-92);
+    //   - an `outDir` that does not start with the working directory stages in the shared
+    //     `<cwd>/.astro/.prerender` instead, which is MUSE-41's `EXDEV` and its silent
+    //     asset collision between concurrent builds.
+    //
+    // `astro build --root <elsewhere>` with the default `outDir` is the second, and it is
+    // the case that opens the moment the containment check stops using the working
+    // directory: the output is an ordinary `dist` inside its own project, the containment
+    // question answers yes, and the build still stages where every build stages.
+    const { stagingFault, prerenderStagingDir } = await loadStagingRules();
+    const cwd = process.cwd();
+    const root = join(tmpdir(), 'muse-elsewhere', 'proj');
+    const outDir = join(root, 'dist');
+
+    expect(prerenderStagingDir(outDir, cwd)).toBe(SHARED_STAGING);
+
+    const fault = stagingFault(outDir, cwd, root);
+    expect(
+      fault,
+      `outDir ${outDir} stages in ${SHARED_STAGING} and was allowed`,
+    ).not.toBeNull();
+    expect(fault).toContain(`staging  ${SHARED_STAGING}`);
+    expect(fault).toContain('EXDEV');
+    expect(fault).toContain('MUSE-41');
+  });
+
+  it("takes the guard's root off Astro's config, with the trailing separator gone", async () => {
+    // The wiring, which is where MUSE-108 actually lived: the predicate had the parameter
+    // and the hook passed nothing, so the directory it protected was always
+    // `process.cwd()`. Asserted through the hook a build really calls rather than through
+    // `stagingFault` alone, because a correct predicate handed the wrong directory is
+    // precisely the defect — and the hook is reached off `integrations` rather than
+    // exported, so the wiring cannot be right in a test and wrong in the config.
+    const refuse = await stagingHook();
+    const cwd = process.cwd();
+
+    // The ancestor of Astro's root, with the working directory two levels above it.
+    expect(() => refuse(join(cwd, 'a'), join(cwd, 'a', 'b'))).toThrow('MUSE-108');
+    // The root itself, unchanged from MUSE-92.
+    expect(() => refuse(cwd, cwd)).toThrow('MUSE-41');
+    // A descendant, allowed, which is every build in this repository.
+    expect(() => refuse(join(cwd, 'dist'), cwd)).not.toThrow();
+    // **And the trailing separator is trimmed off the root, which is load-bearing rather
+    // than cosmetic.** `config.root` arrives as a directory URL — `resolveDirAsUrl`
+    // appends `path.sep` before `pathToFileURL` — so an untrimmed `<cwd>/` fails the raw
+    // string prefix MUSE-92 deliberately allows, and the sibling whose name extends the
+    // root's would be refused although Astro stages it inside its own output.
+    expect(() => refuse(`${cwd}-other/dist`, cwd)).not.toThrow();
   });
 
   it('refuses it in a real build, before anything is staged', () => {
@@ -754,6 +887,26 @@ describe('a build stages its prerendered output where it writes it', () => {
   function within(child: string, parent: string): boolean {
     const step = relative(parent, child);
     return step !== '' && !step.startsWith('..') && !isAbsolute(step);
+  }
+
+  /**
+   * Every place `line` describes `outDir`'s relation to the root as containment in a tree.
+   *
+   * The generated class behind the over-claim guard above (MUSE-108). A preposition of
+   * containment within a dozen characters of the project or the root is what every
+   * wording of „outDir must live under the project root" needs, and the headline's own
+   * rule — a raw string prefix, which admits a sibling that is *not* under the root — may
+   * not be stated that way. The gap is short so that an unrelated sentence mentioning
+   * both words cannot match; the match is returned rather than counted so a failure
+   * quotes the phrase it objected to.
+   */
+  function overclaims(line: string): string[] {
+    return ['under', 'within', 'inside', 'in', 'beneath', 'below'].flatMap((preposition) =>
+      ['the project', 'the root'].flatMap((subject) => {
+        const found = new RegExp(`\\b${preposition}\\b[^.]{0,12}${subject}\\b`, 'i').exec(line);
+        return found === null ? [] : [found[0]];
+      }),
+    );
   }
 });
 
@@ -1464,7 +1617,46 @@ async function loadStagingRules(): Promise<StagingRules> {
 /** The named exports of `astro.config.mjs` this file has an opinion about. */
 interface StagingRules {
   prerenderStagingDir(outDir: string, cwd?: string): string;
-  stagingFault(outDir: string, cwd?: string): string | null;
+  stagingFault(outDir: string, cwd?: string, root?: string): string | null;
+}
+
+/**
+ * The staging guard's `astro:config:setup` hook, as a build calls it (MUSE-108).
+ *
+ * Reached through the config's own `integrations` list rather than through a second
+ * export, because what this is about is the *wiring* — which directories the hook takes
+ * off `config` and hands to `stagingFault`. An exported wrapper would let the wiring be
+ * wrong with the test still green, which is the defect MUSE-108 is. `defineConfig` is the
+ * identity function (`astro/dist/config/index.js`, checked at 7.3.6), so the integration
+ * on the default export is the one every build gets.
+ *
+ * The URLs are built the way Astro's own `resolveDirAsUrl` builds them: `path.sep`
+ * appended, then `pathToFileURL`. The trailing separator is part of what the hook has to
+ * handle, so a model that dropped it would test a shape no build produces.
+ */
+async function stagingHook(): Promise<(outDir: string, root: string) => void> {
+  vi.resetModules();
+  const loaded = (await import('../astro.config.mjs')) as unknown as {
+    default: { integrations: { name?: string; hooks?: Record<string, unknown> }[] };
+  };
+
+  const guard = loaded.default.integrations.find((it) => it?.name === 'muse-staging-guard');
+  const hook = guard?.hooks?.['astro:config:setup'];
+  if (typeof hook !== 'function') {
+    throw new Error(
+      'astro.config.mjs no longer registers an `astro:config:setup` hook named ' +
+        'muse-staging-guard. The guard is what stands between a mistyped --outDir and a ' +
+        'deleted project (MUSE-41, MUSE-92, MUSE-108); re-point this helper at whatever ' +
+        'replaced it rather than deleting the tests it serves.',
+    );
+  }
+
+  const asUrl = (dir: string): URL => pathToFileURL(`${dir}${sep}`);
+  return (outDir, root) => {
+    (hook as (ctx: { config: { outDir: URL; root: URL } }) => void)({
+      config: { outDir: asUrl(outDir), root: asUrl(root) },
+    });
+  };
 }
 
 /**
