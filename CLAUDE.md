@@ -176,7 +176,11 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   measured** (MUSE-61): a blank tab satisfies `load` and a `localStorage` read. For a tab
   Chromium opened, `page.url()` is a mirror that can be permanently wrong (MUSE-70) — ask
   the document. **Never gate on `waitForURL(theExpectedUrl)`**; `expect` stays the judge.
-  → `testing.md`
+  **The one exception is a dropped gesture** (MUSE-70): `middleClickOpens` re-clicks —
+  `TAB_ATTEMPTS = 3` × `TAB_BUDGET = 12_000` ms, a 36 s worst case — because whether
+  Chromium opens a tab is not a fact about the site. It retries the gesture, never a wait
+  or an assertion. **No second exception, no raised number, and no claim that the suite's
+  last flake is gone** (MUSE-91). → `testing.md`
 - **A browser check never takes a server it did not start** (MUSE-52). `openSite()` in
   `scripts/dist-origin.mjs` serves `dist` in-process on an ephemeral port. Do not put the
   `astro preview` daemon back. `ORIGIN` is **verified** against the local `dist`.

@@ -352,8 +352,14 @@ async function settleCommit(
  *
  * ## Why it does not go through `settleCommit` (MUSE-70)
  *
- * It used to, and that was the last flake in the suite: about one full `npm test` in four
- * went red here, on three tickets' branches that had touched no browser code. MUSE-61's
+ * It used to, and that was the flake that dominated the suite: about one full `npm test`
+ * in four went red here, on three tickets' branches that had touched no browser code.
+ * **This one is fixed and it was not the last one in the suite** — eight consecutive runs
+ * afterwards produced no middle-click failure and one unexplained `test/trialform.test.ts`
+ * failure with the same shape, a gesture arriving at a live element and producing nothing
+ * (MUSE-91). That was seen **once**, was not bisected, and is recorded as an observation
+ * rather than a diagnosis in `test/helpers/concurrency.ts`; nothing here should be read as
+ * saying the suite is now clean. MUSE-61's
  * wait is on a real main-frame commit and is right about *what* to wait for; what is wrong
  * for a tab opened this way is *whose record of it* you can wait on.
  *
