@@ -371,9 +371,10 @@ ticket (MUSE-114 is the open instance).
   `/schedule`'s CTA band and both `page` descriptions — so in the two
   `<meta name="description">` tags Google shows and in `llms.txt`. The studio offers no
   such thing: its own 2026/2027 enrolment form lists 55 € regular, 40 € student and 20 €
-  drop-in and no trial rate, and the claim came from MUSE-36's commit. It is gone and
-  **nothing replaced it** — naming the drop-in rate would cover one invented offer with a
-  second, since nobody has said that is what a trial costs. Retiring an unsupported
+  drop-in and no trial rate, and the claim entered in `c45d750`, the Astro rebuild, as the
+  header CTA label in `src/lib/nav.ts`. It is gone and **nothing replaced it** — naming
+  the drop-in rate would cover one invented offer with a second, since nobody has said
+  that is what a trial costs. Retiring an unsupported
   commercial promise needs no decision from the studio; **adding one does.**
 
   The guard is one rule in `test/helpers/offer-claims.ts` applied at two levels, and both
@@ -396,6 +397,17 @@ ticket (MUSE-114 is the open instance).
   `page.description` was correctly classified and correctly in the CMS, which is the hole
   this came through, and no test closes it. And the CTA label is still a code literal:
   moving it into `siteSettings` is a schema change and its own ticket.
+
+  **This bullet said „the claim came from MUSE-36's commit" until MUSE-111, and it was
+  wrong.** MUSE-36's commits contain no occurrence of the string, add none and remove none;
+  so do MUSE-6's. `git log -S'Besplatni probni sat' --oneline --all --reverse` names
+  `c45d750` first and then only MUSE-71's own removal, and the same holds for "Free trial
+  class". `src/lib/schedule.ts` blamed a third commit, `c303292`, for the same string in
+  the same round — see the note above `LEVEL_PREREQUISITE` there, which records why no test
+  can hold this and what does instead. The cost of getting it wrong is concrete:
+  `c45d750` is where the free trial, the invented homepage days and times **and** the
+  `intermediate` prerequisite all originate, so a reader chasing one fabrication to
+  MUSE-36's commit stops at the one commit that would have shown them the pattern.
 
 - **The site promises no response time** (MUSE-80). „Javljamo se u roku od jednog radnog
   dana…" / "We reply within one working day…" was in `src/lib/forms.ts` twice per locale —
@@ -591,10 +603,13 @@ ticket (MUSE-114 is the open instance).
     a new level is *inserted*, never appended. **All four of `LEVEL_PREREQUISITE`'s entry
     thresholds are unconfirmed** — this bullet said `improver` was the only one until
     MUSE-85 checked, and the sentence licensing the other three came from the same commit
-    that authored `improver`, two days after the rest, about work MUSE-6 had specified for
-    three levels. The record is `LEVEL_PREREQUISITE_CONFIRMATION` in `src/lib/schedule.ts`,
-    a typed map that cannot say „confirmed" without naming a person and a date, and
-    `test/schedule.test.ts` pins it empty and freezes the four published strings.
+    that authored `improver` — a later ticket than the one that wrote the other three —
+    about work MUSE-6 had specified for three levels. (It said „two days after the rest"
+    until MUSE-111; the commits the table in `src/lib/schedule.ts` cites are 36 h 32 m
+    apart, and no elapsed figure is stated there now.) The record is
+    `LEVEL_PREREQUISITE_CONFIRMATION` in `src/lib/schedule.ts`, a typed map that cannot say
+    „confirmed" without naming a person and a date, and `test/schedule.test.ts` pins it
+    empty and freezes the four published strings.
     **The pages still publish all four**, which is the owner's decision over removing the
     two that carry a number (a year, two years); MUSE-85's second criterion stays open
     until Mina is asked. Do not soften one into vagueness instead — same claim, less

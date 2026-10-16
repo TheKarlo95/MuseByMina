@@ -351,6 +351,12 @@ retired and what must not come back.
   Four comments cited a brief that contains no such phrase. **A fabricated citation is
   worse than fabricated copy**, because the next author trusts it rather than opening the
   file. → `pages.md`
+- **Name a commit only after `git log -S` has shown it authored the string, and put the
+  command in the pull request** (MUSE-111). Two files blamed two different wrong commits
+  for one retired promise, one of them shipped by the ticket whose whole subject was a
+  false provenance claim. No test can hold this — the suite has no history to read. **And
+  prefer a property to a count**: „67/67 green" was already wrong on the day it merged.
+  → `pages.md`
 
 ## Rebuilding when Mina publishes (MUSE-21)
 

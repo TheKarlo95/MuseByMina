@@ -1136,7 +1136,17 @@ describe('MUSE-85: no threshold claims a confirmation nobody can source', () => 
    * a bounded pattern — unlike MUSE-80's reply-verb-plus-period adjacency, which works
    * because both halves are enumerable. Review demonstrated the gap: the same licensing
    * claim reworded („agreed with the studio in person and needs no further check")
-   * inserted into this very comment left the file **67/67 green**.
+   * inserted into this very comment left **every test in this file passing**.
+   *
+   * That is stated as a property rather than as a tally for MUSE-111's reason: it said
+   * „67/67 green", and this file has run **66** at every revision of `main` it has ever
+   * been readable at. `git log -S'67/67'` over `main` names one commit, `5b248f4`, the
+   * squash that landed MUSE-85 — and the file it landed is byte for byte the file here, so
+   * 67 was a count taken at an intermediate revision on that branch, before it deleted an
+   * assertion, and no revision of `main` ever had it. A count of the suite a comment sits
+   * in rots on the next commit to that suite, including the one it arrives in; and the
+   * revision a stale one was true of is typically on a branch that no longer exists, so it
+   * cannot even be checked. „They all passed" carries everything this needed to say.
    *
    * No guard is built for it, deliberately. What carries the general property is the pair
    * above — `PrerequisiteConfirmation` refusing a confirmation without a person and a
