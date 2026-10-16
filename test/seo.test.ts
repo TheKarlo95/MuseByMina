@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -11,6 +11,7 @@ import { FIXTURE_ENV } from '../src/lib/sanity/fixture';
 // sentence again is a test that passes while the build has gone quiet in a slightly
 // different wording. What is pinned here is which claim the build makes, not its prose.
 import { LOCALE_CLAIMS, localeClaims } from '../src/pages/llms.txt';
+import { pageFilesUnder, stripPageExtension } from './helpers/discovery';
 import { claimOutDir } from './helpers/scratch';
 import { resolveRequest } from './helpers/serve';
 import {
@@ -73,18 +74,19 @@ const PAGES_DIR = join(ROOT, 'src/pages');
  */
 const NOT_A_PAGE = new Set(['/404', '/events/[slug]', '/blog/[slug]']);
 
-function walk(dir: string): string[] {
-  return readdirSync(dir).flatMap((entry) => {
-    const full = join(dir, entry);
-    return statSync(full).isDirectory() ? walk(full) : [full];
-  });
-}
-
-/** Every routable page under `src/pages`, as a site-relative route. */
+/**
+ * Every routable page under `src/pages`, as a site-relative route.
+ *
+ * **Discovered with Astro's own page extensions** (MUSE-96). This filtered
+ * `endsWith('.astro')`, which is a model of what Astro routes and was wrong by seven
+ * extensions: `src/pages/etiquette.md` built into `dist/etiquette/index.html`, appeared in
+ * `sitemap-0.xml`, and had no `llms.txt` line — and the set equality below could not see
+ * it, because the page was missing from both sides of the comparison. `PAGE_EXTENSIONS` in
+ * `test/helpers/discovery.ts` is read out of Astro's own `createBaseSettings`.
+ */
 function pageRoutes(): string[] {
-  return walk(PAGES_DIR)
-    .filter((f) => f.endsWith('.astro'))
-    .map((f) => '/' + relative(PAGES_DIR, f).replace(/\.astro$/, '').replace(/\\/g, '/'))
+  return pageFilesUnder(PAGES_DIR)
+    .map((f) => '/' + stripPageExtension(relative(PAGES_DIR, f)).replace(/\\/g, '/'))
     .map((r) => (r.endsWith('/index') ? r.slice(0, -'/index'.length) || '/' : r))
     .filter((r) => !NOT_A_PAGE.has(routeKey(r)))
     .sort();

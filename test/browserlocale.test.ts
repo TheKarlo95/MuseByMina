@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,6 +16,13 @@ import {
 } from '../scripts/browser-checks.mjs';
 import { DEFAULT_LOCALE, LOCALES } from '../src/lib/i18n';
 import { LANG_STORAGE_KEY } from '../src/lib/lang';
+import {
+  scriptFiles,
+  scriptsPackageJsonRuns,
+  suiteFiles,
+  testTreeFiles,
+  vitestFileGlobs,
+} from './helpers/discovery';
 import { PREVIEW_BASE, startPreview, type Preview } from './helpers/preview';
 
 /**
@@ -379,7 +386,7 @@ describe('nothing can open a browser context of its own', () => {
   };
 
   /**
-   * Every file in `dir` that drives a browser, read off the directory rather than listed.
+   * Which of `candidates` drive a browser, read off the tree rather than listed.
    *
    * A file qualifies by **importing** Playwright or this module, which between them are
    * the only two places a browser can come from — so a new script or suite is covered by
@@ -388,19 +395,28 @@ describe('nothing can open a browser context of its own', () => {
    * a string (it discovers the same scripts from the other side) and drives no browser at
    * all. `scripts/browser-checks.mjs` is the module the rules are *about*, and is the one
    * exclusion.
+   *
+   * **The candidates come from `test/helpers/discovery.ts`, and that is the fix MUSE-96
+   * is.** This function used to do its own discovery with a flat `readdirSync` of one
+   * directory, while vitest loads `test/**\/*.test.ts` — so `test/sub/ghost.test.ts`,
+   * which launched Playwright itself and opened a context with a locale on it, ran as a
+   * test and was invisible to every loop below. The hole was purely directory depth and
+   * it defeated MUSE-48's pin and MUSE-68's census at once. The lists are now recursive
+   * and the shape of each one is asserted against the tool that loads it, below.
+   *
+   * (And note this comment names none of the forbidden tokens: the file is checked by its
+   * own loops, so prose that spells one reddens the run. Measured, twice.)
    */
-  function browserFiles(dir: string, extension: string): string[] {
+  function browserFiles(candidates: readonly string[]): string[] {
     const imports = /from ['"](playwright|[^'"]*browser-checks\.mjs)['"]/;
-    return readdirSync(join(ROOT, dir))
-      .filter((file) => file.endsWith(extension))
-      .filter((file) => `${dir}/${file}` !== 'scripts/browser-checks.mjs')
-      .filter((file) => imports.test(readFileSync(join(ROOT, dir, file), 'utf8')))
-      .map((file) => `${dir}/${file}`)
+    return candidates
+      .filter((file) => file !== 'scripts/browser-checks.mjs')
+      .filter((file) => imports.test(readFileSync(join(ROOT, file), 'utf8')))
       .sort();
   }
 
-  const scripts = (): string[] => browserFiles('scripts', '.mjs');
-  const suites = (): string[] => browserFiles('test', '.ts');
+  const scripts = (): string[] => browserFiles(scriptFiles());
+  const suites = (): string[] => browserFiles(testTreeFiles());
   const source = (file: string): string => readFileSync(join(ROOT, file), 'utf8');
 
   /**
@@ -440,11 +456,58 @@ describe('nothing can open a browser context of its own', () => {
       'test/contact.test.ts',
       'test/fonts.test.ts',
       'test/gallery.test.ts',
+      // Not a suite, and that is the point of widening the scan beyond `test/*.ts`: it
+      // imports Playwright for its types and the old flat scan never read it (MUSE-96).
+      'test/helpers/browser-settle.ts',
       'test/lang.test.ts',
       'test/localeswitch.test.ts',
       'test/numerals.test.ts',
       'test/trialform.test.ts',
     ]);
+  });
+
+  /**
+   * **The discovery is a model of vitest's glob, so it is pinned to vitest's glob**
+   * (MUSE-96).
+   *
+   * `suites()` walks `test/` recursively for `.ts`. That states the *meaning* of
+   * `include`, and it is a model: the honest evaluator of a glob is vitest's own matcher,
+   * which vitest exposes to a test only by standing up a second vitest. So the model is
+   * compared with what vitest actually resolves, the way `prerenderStagingDir` is
+   * compared with `getOutDirWithinCwd` (MUSE-41) — because a model nothing compares to
+   * the thing it models is a second opinion, not a guard.
+   *
+   * Two claims, and the second is the one with teeth: the walk reaches **every file
+   * vitest loads**, and `include` is still a pattern the walk's shape covers. Widen
+   * `include` to `src/**\/*.test.ts` and this fails naming the pattern, rather than the
+   * loops above quietly passing over a directory.
+   */
+  it('reaches every file vitest loads, and says so against vitest', async () => {
+    const { include, exclude } = await vitestFileGlobs();
+
+    expect(include).toEqual(['test/**/*.test.ts']);
+    expect(testTreeFiles()).toEqual(expect.arrayContaining(suiteFiles()));
+    expect(suiteFiles().length).toBeGreaterThan(30);
+    // Nothing under `test/` may be excluded from the run, or the walk would claim files
+    // vitest never loads — the opposite error, and the one that makes a guard noisy
+    // rather than blind.
+    expect(exclude.filter((pattern) => pattern.includes('test/'))).toEqual([]);
+  });
+
+  /**
+   * **And the scripts' discovery is a model of `node <path>`, pinned to `package.json`.**
+   *
+   * There is no list to obtain for `scripts/`: a module there is loaded because an npm
+   * script, a workflow step or a person names its path. So the walk claims that anything
+   * `.mjs` under `scripts/` is loadable — the widest honest reading — and the pin is that
+   * every script `package.json` really runs is in it.
+   */
+  it('reaches every script package.json runs', () => {
+    const runnable = scriptFiles();
+    const run = scriptsPackageJsonRuns();
+
+    expect(run.length).toBeGreaterThan(5);
+    expect(runnable).toEqual(expect.arrayContaining(run));
   });
 
   it('lets none of them build a context, a page or an init script', () => {

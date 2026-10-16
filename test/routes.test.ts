@@ -1,4 +1,3 @@
-import { readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -17,6 +16,12 @@ import {
 import { PREVIEW_ROUTES, previewPatterns } from '../src/lib/preview';
 import { FIXTURE_ENV } from '../src/lib/sanity/fixture';
 import { PAGES_DEPLOY, buildSite, type Build } from './helpers/build';
+import {
+  PAGE_EXTENSIONS,
+  isFile,
+  pageFilesUnder,
+  stripPageExtension,
+} from './helpers/discovery';
 import { seedDocs, type SeedDoc } from './helpers/seed';
 import { fixtureOf } from './helpers/structural-content';
 
@@ -68,24 +73,28 @@ const PAGES_DIR = join(ROOT, 'src/pages');
  */
 const NOT_A_ROUTE = new Set(['/404', '/events/[slug]', '/blog/[slug]']);
 
-function walk(dir: string): string[] {
-  return readdirSync(dir).flatMap((entry) => {
-    const full = join(dir, entry);
-    return statSync(full).isDirectory() ? walk(full) : [full];
-  });
-}
-
 /**
  * Every route the build serves, locale prefix stripped, duplicates collapsed.
  *
  * `src/pages/schedule.astro` and `src/pages/en/schedule.astro` are one *route* — HR and
  * EN share slugs (CLAUDE.md), and `ROUTES` has one entry per route rather than per page.
  */
-/** The same walk as `routesUnderSrcPages`, before `NOT_A_ROUTE` is applied. */
+/**
+ * The same walk as `routesUnderSrcPages`, before `NOT_A_ROUTE` is applied.
+ *
+ * **Discovered with Astro's own page extensions, not with `.astro`** (MUSE-96). This
+ * filtered `endsWith('.astro')` while Astro routes eight extensions, so
+ * `src/pages/etiquette.md` and `src/pages/en/etiquette.md` built, landed in
+ * `sitemap-0.xml`, got no `ROUTES` entry, no `page` document, no `<title>` from Sanity and
+ * no `llms.txt` line — and this suite passed 17/17. `src/pages/` is the one list CLAUDE.md
+ * says cannot lie about what the site serves; a scan narrower than the loader made it lie.
+ * `PAGE_EXTENSIONS` in `test/helpers/discovery.ts` is read out of Astro's own
+ * `createBaseSettings`, so it is the loader's list rather than a list of extensions
+ * somebody believed Astro served.
+ */
 function routesUnderSrcPagesRaw(): string[] {
-  const keys = walk(PAGES_DIR)
-    .filter((file) => file.endsWith('.astro'))
-    .map((file) => '/' + relative(PAGES_DIR, file).replace(/\.astro$/, '').replace(/\\/g, '/'))
+  const keys = pageFilesUnder(PAGES_DIR)
+    .map((file) => '/' + stripPageExtension(relative(PAGES_DIR, file)).replace(/\\/g, '/'))
     .map((route) => (route.endsWith('/index') ? route.slice(0, -'/index'.length) || '/' : route))
     .map((route) => (route === '/en' || route.startsWith('/en/') ? route.slice(3) || '/' : route));
 
@@ -93,28 +102,36 @@ function routesUnderSrcPagesRaw(): string[] {
 }
 
 function routesUnderSrcPages(): string[] {
-  const keys = walk(PAGES_DIR)
-    .filter((file) => file.endsWith('.astro'))
-    .map((file) => '/' + relative(PAGES_DIR, file).replace(/\.astro$/, '').replace(/\\/g, '/'))
-    .map((route) => (route.endsWith('/index') ? route.slice(0, -'/index'.length) || '/' : route))
-    .map((route) => (route === '/en' || route.startsWith('/en/') ? route.slice(3) || '/' : route))
-    .filter((route) => !NOT_A_ROUTE.has(route));
-
-  return [...new Set(keys)].sort();
+  return routesUnderSrcPagesRaw().filter((route) => !NOT_A_ROUTE.has(route));
 }
 
-/** Both locale files a route needs, as repo-relative paths — `/` → `index.astro`. */
-function pageFilesFor(route: string): string[] {
+/**
+ * Both locale files a route needs, each as the set of spellings that would serve it.
+ *
+ * One entry per locale, and every page extension Astro routes inside it: a route served
+ * by `schedule.md` is served, and failing it for not being `schedule.astro` would be this
+ * scan's own defect pointing the other way (MUSE-96). `.astro` is named first because it
+ * is the spelling to create.
+ */
+function pageFilesFor(route: string): { locale: string; candidates: string[] }[] {
   const slug = route === '/' ? 'index' : route.replace(/^\//, '');
-  return [`src/pages/${slug}.astro`, `src/pages/en/${slug}.astro`];
+  return [
+    { locale: 'hr', candidates: spellingsOf(`src/pages/${slug}`) },
+    { locale: 'en', candidates: spellingsOf(`src/pages/en/${slug}`) },
+  ];
+}
+
+function spellingsOf(withoutExtension: string): string[] {
+  return [
+    `${withoutExtension}.astro`,
+    ...PAGE_EXTENSIONS.filter((extension) => extension !== '.astro').map(
+      (extension) => `${withoutExtension}${extension}`,
+    ),
+  ];
 }
 
 function exists(repoRelative: string): boolean {
-  try {
-    return statSync(join(ROOT, repoRelative)).isFile();
-  } catch {
-    return false;
-  }
+  return isFile(join(ROOT, repoRelative));
 }
 
 /* ------------------------------------------------- ROUTES against the filesystem */
@@ -130,6 +147,26 @@ describe('`ROUTES` and `src/pages/` describe the same site', () => {
   });
 
   /**
+   * **The walk uses Astro's page extensions, and the list is checked rather than
+   * trusted** (MUSE-96).
+   *
+   * The positive control for the fix. `endsWith('.astro')` was a *model* of what Astro
+   * routes, and it was wrong by seven extensions — `src/pages/etiquette.md` needed no
+   * integration and no config to build, be sitemapped, and be absent from `ROUTES`,
+   * `llms.txt` and the nav with this suite green. `PAGE_EXTENSIONS` comes from Astro's own
+   * `createBaseSettings`, so there is no list here to keep current; what is asserted is
+   * that the obtained list really is the loader's, which an empty or `.astro`-only answer
+   * would not be.
+   */
+  it('discovers pages with every extension Astro routes, not just .astro', () => {
+    expect(PAGE_EXTENSIONS).toContain('.astro');
+    // The escape, by name: Markdown is a page extension in a bare Astro install.
+    expect(PAGE_EXTENSIONS).toContain('.md');
+    expect(PAGE_EXTENSIONS).toContain('.html');
+    expect(PAGE_EXTENSIONS.length).toBeGreaterThan(2);
+  });
+
+  /**
    * **The acceptance criterion: a route in `ROUTES` with no page file fails, naming it.**
    *
    * This is where MUSE-13's defect still lived. `nav.ts` got its dead-link guard; the
@@ -142,8 +179,8 @@ describe('`ROUTES` and `src/pages/` describe the same site', () => {
   it('gives every route in ROUTES a page file in both locales', () => {
     const missing = ROUTES.flatMap(({ route }) =>
       pageFilesFor(route)
-        .filter((file) => !exists(file))
-        .map((file) => `${route} → ${file}`),
+        .filter(({ candidates }) => !candidates.some((file) => exists(file)))
+        .map(({ candidates }) => `${route} → ${candidates[0]}`),
     );
 
     expect(

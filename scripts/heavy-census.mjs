@@ -30,6 +30,11 @@
  */
 
 import { appendFileSync, readFileSync } from 'node:fs';
+import { dirname, isAbsolute, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/** The repository root — this module lives in `<root>/scripts/`. */
+const PROJECT_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 /**
  * The variable naming this run's census file.
@@ -80,9 +85,51 @@ export function recordHeavyOperation(kind) {
 
 /** The nearest `*.test.ts` on the stack, or `UNATTRIBUTED`. */
 function owningTestFile() {
-  const stack = new Error().stack ?? '';
-  const match = /([A-Za-z0-9._-]+\.test\.ts)/.exec(stack);
-  return match === null ? UNATTRIBUTED : `test/${match[1]}`;
+  return owningTestFileFrom(new Error().stack ?? '');
+}
+
+/**
+ * The nearest `*.test.ts` in `stack`, as a path relative to the repository root, or
+ * `UNATTRIBUTED`.
+ *
+ * **The path includes its directories, and that is MUSE-96.** This matched
+ * `([A-Za-z0-9._-]+\.test\.ts)` — a filename, no separator — and then wrote `test/` in
+ * front of it. So a suite at `test/sub/ghost.test.ts` was attributed to
+ * `test/ghost.test.ts`, a file that does not exist: `judge` reported an undeclared
+ * operation under the wrong name, declaring the *real* path produced two contradictory
+ * problems at once, and the only way to green was to declare the fictitious path — which
+ * exits 0. The ratchet on the total still fired, so growth was never invisible, but
+ * attribution is the whole of what `DECLARED` is for (MUSE-68), and an entry naming a
+ * file nobody can open is worse than no entry.
+ *
+ * Separated from the stack so it can be **tested as a rule** against synthetic stacks, the
+ * way `judge` is: there is no other way to assert the subdirectory case without planting a
+ * suite in a subdirectory and paying for a real build to attribute.
+ *
+ * The character class excludes whitespace, parentheses and quotes, which is what separates
+ * a path from the rest of a V8 stack line, and keeps `:` so a `file://` frame matches as a
+ * whole URL. A frame outside the repository is `UNATTRIBUTED` rather than a `../..` path:
+ * the census is the budget's evidence and a path that does not name a file in this tree is
+ * not evidence.
+ *
+ * @param {string} stack
+ * @returns {string}
+ */
+export function owningTestFileFrom(stack) {
+  const match = /[^\s()'"]+\.test\.ts/.exec(stack);
+  if (match === null) return UNATTRIBUTED;
+
+  let path = match[0];
+  if (path.startsWith('file:')) {
+    try {
+      path = fileURLToPath(path);
+    } catch {
+      return UNATTRIBUTED;
+    }
+  }
+
+  const owner = (isAbsolute(path) ? relative(PROJECT_ROOT, path) : path).replace(/\\/g, '/');
+  return owner === '' || owner.startsWith('../') ? UNATTRIBUTED : owner;
 }
 
 /**

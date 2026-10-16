@@ -110,6 +110,66 @@ ticket (MUSE-114 is the open instance).
   `test/localeswitch.test.ts`, whose subject *is* the redirect — it must be handed a
   browser language rather than defaulted one, and `scripts/` may not use it.
 
+- **A discovery scan is a model of another tool's behaviour, and a model is wrong the
+  moment the tool changes** (MUSE-96). Three guards in this tree discovered their subjects
+  with a rule narrower than the loader they shadow, and all three therefore passed over
+  the file that mattered — one shared defect wearing three hats, found by QA of MUSE-46,
+  MUSE-48 and MUSE-68 at once.
+
+  `browserFiles` in `test/browserlocale.test.ts` read `test/` with a flat `readdirSync`
+  while `vitest.config.ts` includes `test/**/*.test.ts`. So `test/sub/ghost.test.ts`,
+  launching Playwright itself and opening a context with a locale on it, **ran as a test
+  and reported `1 passed`** with the guard green — the identical file one directory up
+  fails three of its tests. The hole was purely directory depth and it defeated two
+  guarantees at once: MUSE-48's pinned locale, so a check could measure `/en/` and label it
+  `/`, and MUSE-68's census, which recorded nothing because the launch bypassed the one
+  door that writes a line. The build side never had the hole — `testFiles()` in
+  `source-guard.ts` is recursive — which is why only the browser rule was reachable.
+
+  `test/routes.test.ts` and `test/seo.test.ts` both discovered pages with
+  `endsWith('.astro')`, and Astro's `settings.pageExtensions` is **eight** entries:
+  `.astro`, `.html` and six Markdown spellings, with no integration and no config.
+  `src/pages/etiquette.md` plus its English twin built into `dist/etiquette/index.html`,
+  landed in `sitemap-0.xml`, got no `page` document, no `<title>` from Sanity, no nav entry
+  and no `llms.txt` line — and `test/routes.test.ts` passed 17/17. So `src/pages/`, the
+  one list CLAUDE.md says cannot lie about what exists (MUSE-46), lied. It was not silent
+  overall: `test/nav.test.ts` and `test/urls.test.ts` went red with 17 failures between
+  them. But that is MUSE-68's own named anti-pattern — the thing reporting is not the thing
+  at fault — and not one of those messages said a page was missing from `ROUTES`.
+
+  `owningTestFile()` in `scripts/heavy-census.mjs` matched `([A-Za-z0-9._-]+\.test\.ts)`,
+  a filename with no separator in it, and wrote `test/` in front of it. A heavyweight
+  operation from `test/sub/ghost.test.ts` was recorded against `test/ghost.test.ts`, which
+  does not exist; declaring the real path produced two contradictory problems at once, and
+  **the only declaration that made the run exit 0 was the fictitious one** — measured both
+  ways. The ratchet on the total still fired, so growth was never invisible, but
+  attribution is the whole of what the per-file table is for.
+
+  **The fix is one module and a rule about where a scan's subjects come from.**
+  `test/helpers/discovery.ts` obtains the real list wherever the tool will give one:
+  `PAGE_EXTENSIONS` is Astro's own `settings.pageExtensions`, read out of
+  `createBaseSettings` — the function a build calls — and `vitestFileGlobs()` is the
+  `include`/`exclude` vitest resolves for this project, from vitest's own `resolveConfig`.
+  Where a list genuinely has to be modelled it says so beside the code and is **pinned to
+  the tool**, the way `prerenderStagingDir` is pinned to `getOutDirWithinCwd`: the
+  recursive walk of `test/` states what `include` *means* and is asserted against what
+  vitest resolves, because evaluating a glob honestly needs vitest's own matcher and
+  vitest hands a test no file list without standing up a second vitest; the walk of
+  `scripts/` is pinned to `package.json`, since there a module is loaded because something
+  names its path. Two further things came out of it. The test-tree scan is now over
+  **every** `.ts` under `test/` rather than every suite, because the rule is about files
+  and `test/helpers/browser-settle.ts` imports Playwright and had never been read. And the
+  census's attribution is a function of a stack string, `owningTestFileFrom`, so the
+  subdirectory case is asserted the way `judge` is — against synthetic input, with no
+  planted suite and no build to pay for.
+
+  One residual is recorded rather than fixed, in `test/lockup.test.ts`: `markupRegion`
+  finds the frontmatter fence with `indexOf('\n---', 3)`, so a frontmatter line *beginning*
+  with `---` would close the region early and shift every line number the file reports. No
+  `.astro` file in the tree has one — all 48 checked — the symptom is a wrong line number
+  rather than a missed violation, and the honest fix is Astro's compiler rather than a
+  longer regular expression.
+
 - **What `npm run a11y` audits is read off the build, and each page carries its URL and
   its status** (MUSE-55). It ran over `ROUTES` — two homepages by default, a
   comma-separated list in `ci.yml` whose own comment said "adding a page → add it". The

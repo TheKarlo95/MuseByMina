@@ -133,6 +133,15 @@ interface Region {
  * rather than assumed, because both ways of guessing it — that the fence is on line 3, or
  * that the slice starts on the line after it — are off-by-ones nothing downstream could
  * notice.
+ *
+ * **The fence is found by the first `\n---` and that is a model of Astro's parser, not
+ * Astro's parser** (MUSE-96, theoretical). A frontmatter *line* beginning with `---` — a
+ * YAML-ish divider, or a template literal holding one — would close the region early, and
+ * every line number this file reports below it would shift by the remainder of the
+ * frontmatter. Left as a note rather than fixed: no `.astro` file in the tree has one
+ * (checked, all 48), the symptom is a wrong line number rather than a missed violation,
+ * and the honest fix is Astro's own compiler rather than a longer regular expression. If
+ * one ever appears, parse the fence instead of searching for it.
  */
 function markupRegion(source: string): Region {
   if (!source.startsWith('---')) return { line: 1, markup: source };
