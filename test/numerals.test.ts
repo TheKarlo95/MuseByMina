@@ -618,10 +618,10 @@ describe('a digit inside a form control is a digit too (MUSE-57)', () => {
  * MUSE-59 — the price on `/pricing`, which is the figure a visitor acts on.
  *
  * `/pricing` is a route since MUSE-59, and a price is the one number on this site somebody
- * budgets around: `55 €` set in text figures reads as a raised `55`, and `100 €` reads
- * `Ioo €`. It is also the exact case MUSE-57's comment predicted ("`/pricing` is built and
- * waiting on content … the day its digits are inside a control and in the display face at
- * once"), and the sweep two blocks up — every control on every route computing what the
+ * budgets around: `55 €` set in text figures reads as a raised `55`, and the retired
+ * 100 € rate (MUSE-73) would have read `Ioo €`. It is also the exact case MUSE-57's comment
+ * predicted ("`/pricing` is built and waiting on content … the day its digits are inside a
+ * control and in the display face at once"), and the sweep two blocks up — every control on every route computing what the
  * document computes — picked `/pricing` up the moment it was in `ROUTES`. What no computed
  * value can say is whether the shaper *drew* lining glyphs, which is this file's whole
  * argument, so the prices are measured.
