@@ -143,7 +143,8 @@ ticket (MUSE-114 is the open instance).
   with `sanity dataset export` carries drafts — otherwise the fixture sees a page the
   deploy cannot.
 
-- **A dev server re-reads content per request; a build reads once per reader** (MUSE-47).
+- **A dev server re-reads content per request; a build memoises exactly two readers**
+  (MUSE-47, MUSE-94).
   „Each reader is memoised for the life of the build" was read as a property of the
   module, and a dev server is also one process that lives for days: measured, three
   reloads of `/schedule/` issued `PAGES_QUERY` once, `SITE_SETTINGS_QUERY` once and
@@ -155,6 +156,44 @@ ticket (MUSE-114 is the open instance).
   off a real `astro build` and a real `astro dev`. One dev-only cost, documented rather
   than fixed: the footer and `structured-data.ts` are then two `SITE_SETTINGS_QUERY`
   calls per render rather than one shared promise.
+
+  **„Each reader" was false, and the build log and a test both said it anyway (MUSE-94).**
+  Only `getSiteSettings` and `pagesByRoute` go through `perBuild`; the other thirteen
+  readers — one per query in `queries.ts` — re-query on **every call**, in a build exactly
+  as under a dev server. Measured with `runQuery` instrumented, from a seed build and a
+  live build that agreed to the query: **twenty-nine queries to a build** —
+  `scheduleSlot` 6, `event` 6, `post` 5, `studioStory` 2, `prosePage` 2, `pricingTier` 2,
+  `instructor` 2, `galleryImage` 2, `siteSettings` 1, `page` 1. The two ones are the whole
+  of the memoisation. The announce line said „each reader is queried once and memoised for
+  this process", and the only assertion about the memoisation was
+  `expect(buildLog).toMatch(/queried once and memoised/)` — a test matching the sentence
+  that made the claim, which is MUSE-50's shape in a suite rather than in a component.
+  Nothing could have contradicted it: QA replaced the gate with the spelling `dev.ts`
+  forbids and the file stayed 18/18 green.
+
+  **The sentence was changed and the readers were not, and the reason is not thrift.**
+  `perBuild` keys on nothing, so it cannot memoise a reader that takes an argument, and
+  `getEvents`, `getPastEvents` and `getPosts` each take a `now` that goes *into* the
+  query — a cache ignoring it would answer one instant's question with another's, which is
+  the opposite of why `now` is a parameter (MUSE-20). For the remaining ten the decision
+  is already written beside each one: `test/projections.test.ts` swaps the fixture per
+  test, so a memoised reader answers the second test from the first test's dataset, and
+  that suite says so about the two readers that *do* memoise. Measured cost of leaving the
+  seventeen repeats: a live build spends about **1.6 s inside `runQuery` in total**, on an
+  `npm run build` that `astro check` dominates. So the log now names the two readers, and
+  `census` in `client.ts` prints the count as the build exits — from the process that did
+  the counting, because `astro.config.mjs` is a separate module graph and an integration
+  hook would hold a copy of the counter that is permanently zero. `QUERIES_PER_BUILD` in
+  `test/devcontent.test.ts` pins the number with its measurement beside it, the shape
+  `scripts/budget.mjs` uses: adding a page or a reader moves it, and moving it is then a
+  deliberate edit rather than a drift nothing reports.
+
+  **MUSE-81's arithmetic was computed from the wrong count and is corrected in
+  `client.ts`.** Thirteen was how many *distinct* queries `queries.ts` held, not how many
+  a build issues; four scheduled builds a day is **~3,400 requests a month**, not ~1,600.
+  The conclusion survives untouched — the read volume the CDN exists for is still not this
+  site's — and the whole-build measurement behind it, +0.43 s uncached, was taken on real
+  builds and so already contained all twenty-nine queries.
 
   **Anything that logs from inside a memoised reader now needs to say which it meant.**
   MUSE-46's inert-`page`-document warning sat in `pagesByRoute`, where "warn when it
@@ -174,10 +213,24 @@ ticket (MUSE-114 is the open instance).
   `astro build` just as reliably — all three measured — and all three are settable by
   whoever starts the build, which disqualifies them for a gate deciding whether content
   may come from a file in the repository. Nothing in a workflow or a script can produce
-  an HMR handle. Write it as the literal `import.meta.hot`: Vite's dev transform rewrites
-  that exact member access, so `'hot' in import.meta` is **false** in dev. It is not what
-  `test/sanity.test.ts` forbids — that rule is about reading *configuration* off
-  `import.meta.env`, which Vite substitutes into client bundles.
+  an HMR handle. It is not what `test/sanity.test.ts` forbids — that rule is about reading
+  *configuration* off `import.meta.env`, which Vite substitutes into client bundles.
+
+  **The spelling is a convention, and the reason given for it was false (MUSE-94).** This
+  said: write the literal `import.meta.hot`, because Vite's dev transform rewrites that
+  exact member access and so `'hot' in import.meta` is **false** in dev. Measured — with
+  `dev.ts` reduced to the in-operator and no literal `import.meta.hot` left in the file,
+  comments included, since Vite's injection decision is a source scan — a real `astro dev`
+  on Astro 7.3.6 answered `in-operator says true`, with `hot` present in
+  `Object.keys(import.meta)`, and selected the dev regime correctly. All three spellings
+  behave alike. Write the literal anyway, because it is the form Vite documents and
+  statically understands and the others rest on the dev-SSR `import.meta` object happening
+  to carry the property; but that is a preference and **it is marked unguarded in
+  `dev.ts`**, because no test can distinguish behaviour that is identical, and a guard
+  would want a dev server and a probe route against zero headroom in
+  `test/helpers/concurrency.ts`. What *is* guarded is the property the gate needs: that it
+  cannot be produced from the environment, which `test/devcontent.test.ts` asserts off a
+  real `NODE_ENV=development` build's log.
 
 - **Offline dev is `MUSE_CONTENT_FIXTURE=content/seed.ndjson npm run dev`, and
   MUSE-47 deliberately built no mechanism for it.** No fallback (a build that substituted
