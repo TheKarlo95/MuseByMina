@@ -18,7 +18,7 @@
     "src/lib/events.ts": "d1c2f6da3247c015",
     "src/lib/i18n.ts": "e7b263e73553031c",
     "src/lib/pages.ts": "303cd80ebff01b31",
-    "src/lib/sanity/queries.ts": "feeea35e6391f757",
+    "src/lib/sanity/queries.ts": "b3715be5f540d8ef",
     "src/lib/schedule.ts": "e6cdc12d32d3b677"
   }
 }

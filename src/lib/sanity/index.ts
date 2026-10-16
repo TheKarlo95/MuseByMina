@@ -560,10 +560,12 @@ export async function getFaqs({ minimum = 1 }: ListOptions = {}) {
 /**
  * How many documents of each type the dataset holds.
  *
- * Not used to render anything. It is the answer to "did the query break, or is the
- * dataset empty?" — a reachable, parseable dataset answers with a row of zeros, and an
- * unreachable one throws `SanityUnavailableError`. Worth logging once per build while
- * the dataset is still being filled.
+ * A test-only helper today (MUSE-124): its only caller is `test/projections.test.ts`, and
+ * no build logs it. `DOCUMENT_COUNTS_QUERY` does have a live consumer, but it is
+ * `npm run sanity:read`, which reads the query text and never imports this function.
+ * The answer to "did the query break, or is the dataset empty?": a reachable, parseable
+ * dataset answers with a row of zeros, and an unreachable one throws
+ * `SanityUnavailableError`.
  */
 export async function countDocuments(): Promise<Record<string, number>> {
   const counts = await runQuery<unknown>(DOCUMENT_COUNTS_QUERY);
