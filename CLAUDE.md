@@ -243,6 +243,10 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   successfully with no signal. Importing after the merge needs a forced rebuild — that is
   the forgettable step. `npm run sanity:seed:release` is the blocking gate;
   `sanity:seed:check` beside it must **not** block. → `content-model.md`
+- **`sanity:seed:check` also asks what the dataset *holds*, and that question stays out of
+  the blocking gate** (MUSE-123). A document in the dataset and in neither seed is in no
+  fetch-by-`_id`; it is `UNSEEDED`, scoped to `READ_CONTRACT`'s types, and never fatal.
+  → `content-model.md`
 - **Removing a document is `npx sanity documents delete <id> --dataset production`, *then*
   `npm run sanity:seed`, in that order** (MUSE-83). `--replace` only writes, so the import
   cannot delete; import-first republishes the rate the branch retired, delete-first

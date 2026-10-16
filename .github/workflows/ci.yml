@@ -197,6 +197,12 @@ jobs:
       # that happens — the deploy fetches live — but the fixture ages, and this repo's own
       # standard is that a command nobody is reminded of does not get run.
       #
+      # It also asks the dataset what it *holds*, not only about the ids the seed names:
+      # a document in the dataset and in neither seed is in no fetch-by-`_id`, which is
+      # how MUSE-60's unreviewed `studioStory` sat there unnoticed (MUSE-123). That
+      # question is here and deliberately not in the step below — a document Mina created
+      # in the Studio is the one case that must never fail a pull request.
+      #
       # `continue-on-error` for the same reason as the probe above, and one more: drift is
       # information, not a defect. A pull request that has nothing to do with content must
       # not go red because somebody reworded a title this morning.
