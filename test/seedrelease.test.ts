@@ -6,8 +6,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   baseRevision,
+  idsToCheck,
   releaseVerdict,
   report,
+  ROUTE_LOOKED_UP,
   sequence,
 } from '../scripts/sanity-seed-release.mjs';
 import { parseSeed, readSeed } from '../scripts/seed-compare.mjs';
@@ -162,7 +164,7 @@ describe('whose change is it — the direction that is the whole ticket', () => 
    * carries the whole sequence. The build failing is what stops it reaching a visitor; it
    * is not what tells you that importing before the merge is cheaper than after.
    */
-  it('a document the branch adds is pending too, and says why that case cannot ship silently', () => {
+  it('a `page` the branch adds is pending, and the build is named as the second guard', () => {
     const verdict = releaseVerdict({
       base: [],
       head: [page('page-whatisbachata', 'Što je bachata?')],
@@ -173,27 +175,154 @@ describe('whose change is it — the direction that is the whole ticket', () => 
     expect(verdict.pending[0]).toMatchObject({ id: 'page-whatisbachata', absent: true });
     const message = lines(verdict);
     expect(message).toContain('the dataset has no such document');
-    expect(message).toContain('build refuses to publish past');
+    expect(message).toContain('looked up by route');
   });
 
   /**
-   * An import never deletes, which is a property of `sanity dataset import --replace`
-   * and not of this check. Dropping a document from the seed therefore leaves it live and
-   * leaves the site reading it — worth one line, and not a reason to fail: the document
-   * may be one somebody is about to remove in the Studio.
+   * MUSE-83 finding 2, and the reason the paragraph above is now two paragraphs.
+   *
+   * The build's protection is **not** general. `page` and `prosePage` are read by route
+   * and a missing route has no substitute; every other type is read as a collection whose
+   * `minimum` the documents already in the dataset satisfy. Measured on MUSE-73's branch:
+   * a fourth `pricingTier` in the seed and three in the dataset builds green and
+   * publishes three cards. So for every type but those two, this gate is the only thing
+   * that names the addition before the merge, and the message must not borrow credit from
+   * a build that is going to pass.
    */
-  it('a document dropped from the seed is reported, not blocked — an import never deletes', () => {
+  it('an added non-route document says the build will NOT fail, so the gate is the signal', () => {
+    const tier = (id: string): Doc => ({
+      _id: id,
+      _type: 'pricingTier',
+      name: { _type: 'localeString', hr: 'Drop in sat', en: 'Drop-in class' },
+    });
+
+    const verdict = releaseVerdict({
+      base: [tier('pricing-student')],
+      head: [tier('pricing-student'), tier('pricing-dropin')],
+      live: [tier('pricing-student')],
+    });
+
+    expect(verdict.blocked).toBe(true);
+    expect(verdict.pending[0]).toMatchObject({ id: 'pricing-dropin', absent: true });
+    const message = lines(verdict);
+    expect(message).toContain('the build will not fail');
+    expect(message).toContain('pricingTier');
+    expect(message, 'the retired claim, which was only ever true of two types').not.toContain(
+      'build refuses to publish past',
+    );
+  });
+
+  /**
+   * The two-type list is a claim about `src/lib/sanity/index.ts`, so it is read off it.
+   *
+   * `requireDocuments(rows, '<type>', decode, 0)` is the marker and not a coincidence:
+   * both readers document the same decision — the count is the wrong instrument for a
+   * lookup that knows which document it wants, so the shortfall is reported per route
+   * instead. A third type read that way, or either of these two turned into a counted
+   * collection, changes which rows of MUSE-83's matrix are safe, and this goes red.
+   */
+  it('the route-looked-up types are the ones the read module looks up by route', () => {
+    const source = read('src/lib/sanity/index.ts');
+    const byRoute = new Set(
+      [...source.matchAll(/requireDocuments\(\s*rows,\s*'(\w+)',\s*\w+,\s*0\)/g)].map(
+        ([, type]) => type,
+      ),
+    );
+
+    expect([...byRoute].sort()).toEqual([...ROUTE_LOOKED_UP].sort());
+    expect(byRoute.size).toBe(2);
+  });
+
+  /**
+   * MUSE-83 finding 1, and AC1.
+   *
+   * An import never deletes — that is a property of `sanity dataset import --replace`,
+   * not of this check — so a document dropped from the seed stays live and the site keeps
+   * reading it. MUSE-78 printed exactly that sentence and **asserted** it: `removed` came
+   * from git alone, the dropped id was excluded from the fetch (the query is
+   * `*[_id in $ids]` over head-seed ids), and the verdict never blocked. So the one
+   * operation that genuinely needs a second human command — `npx sanity documents
+   * delete`, which no import performs — was advisory text, and re-running the gate after
+   * the delete printed the same paragraph byte for byte.
+   *
+   * It blocks now. MUSE-45 is untouched by that: a removal is derived from the diff
+   * against the merge base, so only a branch can produce one. Nothing Mina does in the
+   * Studio drops a line from a committed file.
+   */
+  it('a dropped document still in the dataset blocks, and names the delete as step one', () => {
     const verdict = releaseVerdict({
       base: [page('page-home', WITHDRAWN), page('page-old', 'Stara stranica')],
       head: [page('page-home', WITHDRAWN)],
       live: [page('page-home', WITHDRAWN), page('page-old', 'Stara stranica')],
     });
 
+    expect(verdict.blocked).toBe(true);
+    expect(verdict.removed).toEqual([{ id: 'page-old', type: 'page', stillLive: true }]);
+    const message = lines(verdict);
+    expect(message).toContain('STILL IN THE DATASET');
+    expect(message).toContain('page-old');
+    expect(message).toContain('sanity documents delete');
+    // The order is the finding: delete first, then import. Import-first publishes the
+    // document the branch retired.
+    expect(message.indexOf('sanity documents delete')).toBeLessThan(
+      message.indexOf('npm run sanity:seed'),
+    );
+  });
+
+  /**
+   * The other half of AC1: the result has to differ once the delete has happened, or
+   * re-running the gate cannot confirm it. Same base, same head, one changed dataset.
+   */
+  it('the same drop reads differently once the document is actually gone', () => {
+    const base = [page('page-home', WITHDRAWN), page('page-old', 'Stara stranica')];
+    const head = [page('page-home', WITHDRAWN)];
+
+    const before = releaseVerdict({ base, head, live: base });
+    const after = releaseVerdict({ base, head, live: head });
+
+    expect(before.blocked).toBe(true);
+    expect(after.blocked).toBe(false);
+    expect(after.removed).toEqual([{ id: 'page-old', type: 'page', stillLive: false }]);
+    expect(lines(after)).toContain('no longer in the dataset');
+    expect(lines(after)).not.toContain('STILL IN THE DATASET');
+    expect(lines(before)).not.toEqual(lines(after));
+  });
+
+  /**
+   * And the claim that the whole check rests on: the dataset rows have to cover the base
+   * seed as well as the head seed, or the dropped id is absent from `live` for the
+   * uninteresting reason that nobody asked about it — which is the defect, restated as a
+   * false pass. `idsToCheck` is what the command hands `fetchLive`.
+   */
+  it('asks the dataset about every id in either seed, not only the head ones', () => {
+    const base = [page('page-home', WITHDRAWN), page('page-old', 'Stara stranica')];
+    const head = [page('page-home', WITHDRAWN), page('page-new', 'Nova stranica')];
+
+    expect(idsToCheck({ base, head })).toEqual(['page-home', 'page-new', 'page-old']);
+    // Duplicates would be harmless in GROQ and confusing in a log.
+    expect(idsToCheck({ base, head: base })).toEqual(['page-home', 'page-old']);
+
+    const source = read('scripts/sanity-seed-release.mjs');
+    expect(source, 'the command must fetch the union, not the head ids').toMatch(
+      /fetchLive\(\s*idsToCheck\(\{ base, head \}\)/,
+    );
+  });
+
+  /**
+   * A removal is reported on a dataset that could not be read, and does not block: the
+   * unreadable branch is MUSE-78's and this check must not become the second red for one
+   * outage.
+   */
+  it('does not block on a removal it could not check', () => {
+    const verdict = releaseVerdict({
+      base: [page('page-home', WITHDRAWN), page('page-old', 'Stara stranica')],
+      head: [page('page-home', WITHDRAWN)],
+      live: null,
+    });
+
     expect(verdict.blocked).toBe(false);
-    expect(verdict.removed).toEqual([{ id: 'page-old', type: 'page' }]);
-    expect(lines(verdict)).toContain('An import');
-    expect(lines(verdict)).toContain('never deletes');
-    expect(lines(verdict)).toContain('Delete them in the Studio');
+    expect(verdict.removed).toEqual([{ id: 'page-old', type: 'page', stillLive: null }]);
+    expect(lines(verdict)).toContain('could not be read');
   });
 });
 

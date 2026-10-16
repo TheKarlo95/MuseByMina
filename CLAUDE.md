@@ -234,6 +234,16 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   successfully with no signal. Importing after the merge needs a forced rebuild — that is
   the forgettable step. `npm run sanity:seed:release` is the blocking gate;
   `sanity:seed:check` beside it must **not** block. → `content-model.md`
+- **Removing a document is `npx sanity documents delete <id> --dataset production`, *then*
+  `npm run sanity:seed`, in that order** (MUSE-83). `--replace` only writes, so the import
+  cannot delete; import-first republishes the rate the branch retired, delete-first
+  publishes a page one document short, which is true. **An agent runs neither.**
+  → `content-model.md`
+- **Only a missing `page` or `prosePage` fails the build** (MUSE-83) — those are looked up
+  by route. Every other type is a collection whose `minimum` one existing document already
+  satisfies, so adding, editing or removing any other document ships green and publishes
+  without it. **Do not fix that by lowering a `minimum`**; `sanity:seed:release` is the
+  guard and it blocks on all three. → `content-model.md`
 - **Routing a page is two pull-request-shaped halves, and the dataset goes first**
   (MUSE-59, MUSE-60). The branch prepares the seed *and* the route, says in the PR body it
   must not be merged yet, and somebody runs the import between review and merge.
