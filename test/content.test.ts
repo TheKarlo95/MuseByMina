@@ -18,7 +18,7 @@ import { claimOutDir } from './helpers/scratch';
 import { claimsIn, report as offenceReport } from './helpers/offer-claims';
 // The read path's own report of what it is configured to read. Imported from the index,
 // which is the only module anything outside `src/lib/sanity/` may import.
-import { source } from '../src/lib/sanity';
+import { contentEndpoint, endpointNote, source } from '../src/lib/sanity';
 import { ROUTES } from '../src/lib/pages';
 // What `.github/workflows/deploy.yml` greps a failed scheduled build for before retrying.
 import { TRANSIENT_BUILD_FAILURE } from '../src/lib/rebuild';
@@ -431,6 +431,15 @@ const EDITED_DESC_HR = 'Promijenjeni opis rasporeda, napisan u Studiju.';
 const EDITED_DESC_EN = 'An edited schedule description, written in the Studio.';
 const EDITED_ADDRESS = 'Nova ulica 7, Split';
 
+/**
+ * The project the one live-arm build is pointed at, spelled once.
+ *
+ * Three assertions name it — the banner's project, the unreachable-API error, and the
+ * endpoint clause, which has to rebuild the host around it — and three spellings of one
+ * identifier is the MUSE-9 shape.
+ */
+const UNREACHABLE_PROJECT = 'muse20nosuchproject';
+
 beforeAll(() => {
   build = buildSite(PAGES_DEPLOY);
 
@@ -521,7 +530,7 @@ beforeAll(() => {
    */
   unreachableApi = buildFailure(PAGES_DEPLOY, {
     [FIXTURE_ENV]: '',
-    SANITY_PROJECT_ID: 'muse20nosuchproject',
+    SANITY_PROJECT_ID: UNREACHABLE_PROJECT,
     SANITY_DATASET: 'nosuchdataset',
   });
 }, 300_000);
@@ -696,7 +705,39 @@ describe('the suite reads the seed; the deploy reads the live dataset', () => {
     // The banner from the one build that was given no fixture. It names where it looked,
     // which is what makes a build pointed at the wrong dataset diagnosable.
     expect(unreachableApi).toContain('[content] live');
-    expect(unreachableApi).toContain('muse20nosuchproject');
+    expect(unreachableApi).toContain(UNREACHABLE_PROJECT);
+  });
+
+  it('names the host it read, which nothing can recover from a finished build', () => {
+    /**
+     * **Read off a real build's log, because that is what the claim is about** (MUSE-90).
+     *
+     * The endpoint clause is the only place "was this build's content current?" can be
+     * answered after the fact — the dataset will have moved on by the time anybody thinks
+     * to ask — and `test/endpoint.test.ts` could only reach it as a pure function and a
+     * value. QA of MUSE-81 deleted the line from `announce` in `src/lib/sanity/client.ts`
+     * and the whole run stayed green: 1,429 tests, 39 files, the design system and the
+     * formatter clean, `astro check` at zero errors.
+     *
+     * It reads `unreachableApi` rather than a build of its own for two reasons: that is
+     * the only build here given no fixture, so it is the only one whose banner carries
+     * this clause at all, and `DECLARED` in `test/helpers/concurrency.ts` has no headroom
+     * for an eleventh.
+     *
+     * **No host is spelled.** The expected line is composed by the build's own
+     * `endpointNote`, around the host `contentEndpoint()` resolved, with this build's
+     * project id in place of the configured one — so rewording the sentence in
+     * `client.ts` keeps this green, and not printing it at all does not.
+     */
+    const host = new URL(contentEndpoint().url).host.replace(
+      source().projectId,
+      UNREACHABLE_PROJECT,
+    );
+    expect(unreachableApi).toContain(
+      `[content] ${endpointNote({ url: `https://${host}`, cached: false })}`,
+    );
+    // And the regime, not just the host: the one it must never be is the cached one.
+    expect(unreachableApi).not.toContain('CACHED');
   });
 });
 
@@ -1113,7 +1154,7 @@ describe('AC4: empty, unreadable and unreachable stay three different answers', 
      * it back into the message, and this assertion is what holds it there.
      */
     expect(unreachableApi).toContain('SanityUnavailableError');
-    expect(unreachableApi).toContain('muse20nosuchproject');
+    expect(unreachableApi).toContain(UNREACHABLE_PROJECT);
     expect(unreachableApi).toContain('nosuchdataset');
     expect(unreachableApi).toContain('read path failing');
   });

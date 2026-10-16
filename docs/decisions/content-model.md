@@ -110,6 +110,50 @@ ticket (MUSE-114 is the open instance).
   exactly that. The proportionate half shipped instead: the log now names the endpoint, so
   a stale deploy is diagnosable after the fact from the build log alone.
 
+  **Two of the claims above had no guard, and one of them had never been true** (MUSE-90,
+  found by QA of MUSE-81 — the fix itself was sound). *The endpoint line could be deleted
+  in silence.* `test/endpoint.test.ts` had `endpointNote` as a pure function and
+  `contentEndpoint()` as a value, and nothing read a build's log; removing the line from
+  `announce` left 1,429 tests, the design system, the formatter and `astro check` all
+  green. It is now read off `unreachableApi` in `test/content.test.ts` — the one build in
+  the suite given no fixture, so the only one whose banner carries the clause at all, and
+  no eleventh build, because `DECLARED` in `test/helpers/concurrency.ts` has no headroom.
+  *A second client could read the cached host with the suite green.* QA planted a
+  `createClient({ useCdn: true })` in a `.mjs` file under `scripts/` and nothing failed:
+  the hostname scan needles a *name* the client derives from a boolean and never spells,
+  the literal `false` in `SanitySource` binds `CLIENT_CONFIG` and no other object, and the
+  one-client rule in `test/sanity.test.ts` walked `src/` only. That rule now covers
+  everything under `src/` and `scripts/` with no extension filter, plus the root-level
+  `.ts` and `.mjs` configuration a build loads, and **states where it stops** — `test/`,
+  which has to spell both needles to assert about them, and the Studio, whose client runs
+  in a browser against a dataset Mina is editing. The root is the one place an extension
+  filter is needed rather than preferred: `package.json` is how the one legitimate client
+  gets installed.
+
+  **`queryUrl` sent no perspective, and that was nobody's ticket** (MUSE-90). The build
+  reads `perspective: 'published'`; the HTTP API's default with no parameter is the **raw**
+  perspective, so the `.mjs` readers queried a view of the dataset the build does not
+  read. Latent rather than broken — `count(*[_id in path("drafts.**")])` was 0 on
+  2026-10-16 — and wrong in the two places a draft would have shown it:
+  `npm run sanity:read` reporting `OK` for a query the build answers as `EMPTY`, which is
+  the single distinction that script exists to draw, and `npm run sanity:seed:check`
+  listing a `drafts.`-prefixed document as one the seed has not got. Closed by
+  `PERSPECTIVE` in `scripts/seed-compare.mjs`, checked against the client's own setting by
+  `test/endpoint.test.ts`, with all fifteen queries re-run live afterwards: 0 broken. The
+  parameter is honoured rather than ignored — an unknown perspective answers HTTP 400
+  `validationError`, measured the same day — which is what keeps that assertion from being
+  decorative.
+
+  **And say plainly what has never been verified.** MUSE-81's first acceptance criterion —
+  publish, then build immediately, and read the published value — **has not been checked by
+  anybody**, here or by hand. It needs a write to the dataset; no agent may make one and
+  this project holds no token that could (MUSE-21, MUSE-45). What *was* established by hand
+  is the endpoint: two real builds differing only in `useCdn`, with the cached host made
+  unresolvable, recorded in `test/endpoint.test.ts`'s header. That the uncached host answers
+  with the dataset as of the moment it is asked is Sanity's documented behaviour, taken on
+  trust. Nothing in this repository is evidence for it, and the suite's header now says so
+  rather than implying the criterion was covered.
+
 - **The seed lives in `content/`, not in `sanity/`, and that is load-bearing** (MUSE-45).
   `scripts/check-sanity.mjs` hashes every file under `sanity/` with **no extension
   filter** — the MUSE-19 rule — and the fingerprint it produces means one thing: *the
