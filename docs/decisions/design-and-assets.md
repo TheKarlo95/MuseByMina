@@ -164,7 +164,7 @@ ticket (MUSE-114 is the open instance).
   perfectly, passes every contrast check and looks deliberate, which is why
   `test/lockup.test.ts` reads the markup rather than the page. `src/assets/
   muse-lockup-white.png` is the supplied transparent PNG trimmed to its 855 × 622 of ink;
-  `logo/` stays a source directory. One 320px WebP, 11.1 KB, no `srcset` (the gate runs
+  `logo/` stays a source directory. One 260px WebP (exactly 2× the 130px footer draw, MUSE-125), 8.5 KB, no `srcset` (the gate runs
   at `deviceScaleFactor: 1`, so a 1× entry would budget a file almost nobody fetches) and
   **no theme swap** — both bands are `--surface-deep`, so the white variant is right on
   both. §12's clear space is a *fraction of the drawn size*, so it is derived in

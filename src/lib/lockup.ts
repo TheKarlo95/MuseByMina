@@ -77,19 +77,19 @@ export function lockupHeight(width: number): number {
 /**
  * **The one size the build emits, in device pixels.**
  *
- * 320px wide, as a single file with no `srcset`. The footer draws the lockup 130 CSS px
- * wide (`LOCKUP_WIDTH` in `Footer.astro`), so the file is 2.46× the drawn box: sharp on a
- * 2× display and on the 2.5× some phones report, and 60px wider than 2× needs (260). That
- * margin is kept rather than trimmed (MUSE-105). The old sentence said 160 CSS px, which
- * is not what the footer draws; 260 would change the emitted file and every figure the
- * budget recorded for it, to save a few KB.
+ * 260px wide, as a single file with no `srcset`. The footer draws the lockup 130 CSS px
+ * wide (`LOCKUP_WIDTH` in `Footer.astro`), so the file is exactly 2× the drawn box: one
+ * device pixel per drawn pixel on a 2× display, the same ratio as the masthead mark
+ * (`MASTHEAD_MARK_EMITTED`, 72px for a 36px box). It was 320 (2.46×) until MUSE-125, which
+ * measured the saving: 11,356 bytes became 8,738. A wider draw needs this number moved with
+ * it, and `test/lockup.test.ts` asserts the ratio rather than the constants.
  *
- * A `densities={[1, 2]}` srcset would save about 7 KB on a 1× display, and it is
+ * A `densities={[1, 2]}` srcset would save a few KB on a 1× display, and it is
  * deliberately not used. The budget (`scripts/budget.mjs`) measures what a browser
  * fetches, and Playwright runs at `deviceScaleFactor: 1` — so a srcset would have the
- * gate measure the 130px file while almost every real visitor downloads the 320px one,
+ * gate measure the 130px file while almost every real visitor downloads the 260px one,
  * and the recorded image budget would be a number no phone ever pays. One file means the
- * measurement and the visitor agree. At 11.1 KB the simplicity is worth more than the
+ * measurement and the visitor agree. At 8.5 KB the simplicity is worth more than the
  * saving; revisit if a page ever carries photography, where the ratio reverses.
  */
-export const LOCKUP_EMITTED_WIDTH = 320;
+export const LOCKUP_EMITTED_WIDTH = 260;

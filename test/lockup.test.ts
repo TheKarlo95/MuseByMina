@@ -586,6 +586,14 @@ describe('the built site presents the white lockup', () => {
     expect(img).toContain(`height="${lockupHeight(LOCKUP_EMITTED_WIDTH)}"`);
   });
 
+  it('emits the file at exactly 2x the width the footer draws (MUSE-125)', () => {
+    const root = new URL('..', import.meta.url).pathname;
+    const footer = readFileSync(join(root, 'src/components/Footer.astro'), 'utf8');
+    const drawn = Number(/const LOCKUP_WIDTH = (\d+);/.exec(footer)?.[1]);
+    expect(drawn).toBeGreaterThan(0);
+    expect(LOCKUP_EMITTED_WIDTH).toBe(drawn * 2);
+  });
+
   it('ships no second copy of the source raster', () => {
     // The 1254px original and the two 85 KB pseudo-SVGs live in `logo/`, which is a
     // source directory and not a served one. Anything that reached `dist` got there by

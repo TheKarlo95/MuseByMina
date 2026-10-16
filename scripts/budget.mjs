@@ -261,7 +261,7 @@ export const BUDGET = {
    *
    * Measured, at `deviceScaleFactor: 1`, on the populated builds above:
    *
-   *   - `muse-lockup-white.*.webp` — **11.1 KB**, the footer lockup on every page (MUSE-64)
+   *   - `muse-lockup-white.*.webp` — **8.5 KB**, the footer lockup on every page (MUSE-64; 11.1 KB until MUSE-125 re-emitted it at 2×, 260px)
    *   - `muse-mark-white.*.webp` — 1.6 KB, the masthead mark (MUSE-67)
    *   - a gallery tile at the `350w` rung the engine selects for a 290 px box — **4.0 KB**
    *     to **11.5 KB** across two real camera photographs, the second a warm, low-light
@@ -429,7 +429,7 @@ export const BUDGET = {
  * unmeasured", never „that width does not matter".
  *
  * `deviceScaleFactor` is **1**. That was a Playwright default too, and it is written down
- * for MUSE-64's reason: the lockup ships one 320px WebP with no `srcset`, so a 2× entry
+ * for MUSE-64's reason: the lockup ships one 260px WebP with no `srcset`, so a 2× entry
  * would budget a file almost nobody fetches. The heights are not decoration either —
  * `loading="lazy"` fetches what is inside the viewport, so a taller window is a heavier
  * `/gallery`; 844 and 900 are the heights the checks named above already use, measured on a
