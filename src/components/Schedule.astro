@@ -184,6 +184,21 @@ const filterGroups = [
             >
               {group.all}
             </button>
+            {/*
+              `data-level-name` is the site-wide contract (MUSE-11), and these chips are
+              the render site it never reached (MUSE-119): a chip's whole content is the
+              level's name, which is what the contract requires, so layers 1–2 of
+              `test/home.test.ts` check it against `LEVEL_NAME` for free. Relabelling the
+              chips used to be invisible to every suite on the site — the docstring there
+              said the chips did not exist.
+
+              Conditional on the group rather than unconditional, for the reason the
+              blank option in `TrialForm.astro` opts out: the "all" chip above is the
+              unfiltered state and not a level, and a future group over something that is
+              not a level must not claim to be one. `data-filter`/`data-value` are
+              untouched — they are what the script below keys on, and what
+              `test/schedule.test.ts` reads.
+            */}
             {group.values.map((option) => (
               <button
                 class="chip"
@@ -191,6 +206,7 @@ const filterGroups = [
                 aria-pressed="false"
                 data-filter={group.kind}
                 data-value={option.value}
+                data-level-name={group.kind === 'level' ? option.value : undefined}
               >
                 {option.label}
               </button>
