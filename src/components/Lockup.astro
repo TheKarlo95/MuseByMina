@@ -15,13 +15,13 @@
  * `currentColor`, will not scale past their raster resolution, and weigh ~85 KB. So the
  * honest options were to ship the raster properly or to redraw it, and a redraw by
  * tracing is inventing brand. This ships the raster properly: trimmed of its transparent
- * canvas, emitted once at `LOCKUP_EMITTED_WIDTH`, content-hashed by Vite, 11.1 KB of
+ * canvas, emitted once at `LOCKUP_EMITTED_WIDTH`, content-hashed by Vite, 8.5 KB of
  * WebP with a pixel-exact alpha channel.
  *
  * `quality` is deliberately low and costs nothing. The artwork is pure white — every
  * opaque pixel is `#FFFFFF` and the shape lives entirely in the alpha channel — so lossy
  * RGB compression has no detail to lose, while `alphaQuality: 100` keeps the hairlines
- * exact. Measured: q80/alpha100 is 11,358 bytes at alpha RMSE 0.00 against the
+ * exact. Measured: q80/alpha100 is 8,738 bytes (11,358 at the old 320px width) at alpha RMSE 0.00 against the
  * full-fidelity resize; raising `quality` to 90 adds 520 bytes and changes nothing.
  *
  * ## Why no theme swap

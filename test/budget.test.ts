@@ -715,7 +715,7 @@ describe('MUSE-104: the budget measures widths it chose', () => {
       expect(viewport.width, viewport.name).toBeGreaterThan(0);
       expect(viewport.height, viewport.name).toBeGreaterThan(0);
       // MUSE-64's argument, now written down rather than inherited from Playwright: the
-      // lockup ships one 320px WebP with no `srcset`, so a 2× entry would budget a file
+      // lockup ships one 260px WebP with no `srcset`, so a 2× entry would budget a file
       // almost nobody fetches.
       expect(viewport.deviceScaleFactor, viewport.name).toBe(1);
     }
