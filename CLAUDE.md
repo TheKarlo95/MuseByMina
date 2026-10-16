@@ -293,7 +293,9 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
 - **Every query is executed against a row, and `test/projections.test.ts` is the only
   thing that does it** (MUSE-44). GROQ returns `null` for a field that does not exist, so
   `class->nam` type-checks, builds and ships blanks. Rename one projected field and that
-  suite must go red. → `content-model.md`
+  suite must go red. **That a new query has a case at all is asserted** (MUSE-120): the
+  suite records the queries the read path ran and fails naming an exported query nothing
+  executed. → `content-model.md`
 - **A query may not run without the parameters it references** (MUSE-51).
   `requireQueryParameters` runs in front of *both* read paths. The count check cannot be
   the instrument — it fires on a legitimate zero result. → `content-model.md`
@@ -303,7 +305,9 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
 - **Every dereference in `queries.ts` is projected beside its `_ref`** (MUSE-49). For an
   optional reference, a deleted target and an empty field arrive identically, so the `_ref`
   is the missing evidence. **The pair must stay a pair**, arrays are read positionally, and
-  `instructors` being an array is load-bearing. → `content-model.md`
+  `instructors` being an array is load-bearing. **Every `->` is scanned for its `_ref`
+  against the query *text*** (MUSE-120), pinned to `groq-js`'s own `Deref` nodes — a
+  dereference no fixture row exercises has no decoder watching it. → `content-model.md`
 - **Bilingual values are two named fields**, `hr` and `en`, inside a `localeString` /
   `localeText` object — not a field-level i18n plugin and not one document per locale. Both
   locales separately `required()`. `postTranslation` is the one place the inverse grouping
