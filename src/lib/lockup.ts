@@ -77,12 +77,17 @@ export function lockupHeight(width: number): number {
 /**
  * **The one size the build emits, in device pixels.**
  *
- * 320px wide, as a single file with no `srcset`, serving the footer's 160 CSS px at 2×.
+ * 320px wide, as a single file with no `srcset`. The footer draws the lockup 130 CSS px
+ * wide (`LOCKUP_WIDTH` in `Footer.astro`), so the file is 2.46× the drawn box: sharp on a
+ * 2× display and on the 2.5× some phones report, and 60px wider than 2× needs (260). That
+ * margin is kept rather than trimmed (MUSE-105). The old sentence said 160 CSS px, which
+ * is not what the footer draws; 260 would change the emitted file and every figure the
+ * budget recorded for it, to save a few KB.
  *
  * A `densities={[1, 2]}` srcset would save about 7 KB on a 1× display, and it is
  * deliberately not used. The budget (`scripts/budget.mjs`) measures what a browser
  * fetches, and Playwright runs at `deviceScaleFactor: 1` — so a srcset would have the
- * gate measure the 160px file while almost every real visitor downloads the 320px one,
+ * gate measure the 130px file while almost every real visitor downloads the 320px one,
  * and the recorded image budget would be a number no phone ever pays. One file means the
  * measurement and the visitor agree. At 11.1 KB the simplicity is worth more than the
  * saving; revisit if a page ever carries photography, where the ratio reverses.

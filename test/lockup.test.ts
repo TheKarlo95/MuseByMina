@@ -178,19 +178,65 @@ function withoutComments(region: Region): Region {
 }
 
 /**
- * Elements in `region` whose entire text content is one of the lockup's parts, as
- * `{ line, text }` — the line being the one in the **original file**, not in the slice.
+ * Names under `src/` that are bound to one of the lockup's parts: `first` in
+ * `{ first: 'Muse' }`, `FIRST` in `const FIRST = 'Muse'`. Read from every `.astro` and
+ * `.ts` file, frontmatter included, because the expression that renders a part is rarely
+ * written in the file that defines it.
  *
- * Deliberately not a parser. The shape being looked for is a tag pair with nothing
- * between it but one of four literals, which a regular expression states exactly and a
- * DOM would only state at the cost of a dependency that cannot see `.astro` anyway.
+ * This is what lets the scan see `<span>{BRAND.first}</span>`: the markup alone does not
+ * say what `BRAND.first` is, and "an element holding one expression" is every label on the
+ * site (a pairing rule was tried first — 17 real elements matched, none a lockup). A name
+ * whose value is a part is the evidence. **The limit, stated:** a value that arrives from
+ * the dataset or from a computed key has no literal in `src/` to find, and is not seen.
  */
-function lockupTextParts(region: Region): { line: number; text: string }[] {
+function lockupPartNames(): Set<string> {
+  const root = new URL('..', import.meta.url).pathname;
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) return walk(full);
+      return /\.(astro|ts)$/.test(entry.name) ? [full] : [];
+    });
+  const names = new Set<string>();
+  const bound = /([A-Za-z_$][\w$]*)['"]?\s*[:=]\s*(['"`])([^'"`]*)\2/g;
+  for (const file of walk(join(root, 'src'))) {
+    for (const m of readFileSync(file, 'utf8').matchAll(bound)) {
+      if (LOCKUP_PARTS.includes(m[3].trim())) names.add(m[1]);
+    }
+  }
+  return names;
+}
+
+/**
+ * Elements in `region` whose entire content renders one of the lockup's parts, as
+ * `{ line, text }` — the line being the one in the **original file**, not in the slice.
+ * The content is one of:
+ *
+ * 1. the literal, bare (`<span>Muse</span>`);
+ * 2. the literal quoted in braces (`<span>{'Muse'}</span>`);
+ * 3. one expression ending in a name from `names` (`{BRAND.first}`, `{FIRST}`).
+ *
+ * Deliberately not a parser. Content is read as text or as `{…}` groups with no `<`, `>`
+ * or nested brace inside. **The content class excludes `<` outright, and that is what
+ * keeps allowing braces from matching across an element boundary**: a match cannot hold
+ * another tag, so `<a>{x}</a>…<b>{y}</b>` is two matches and never one. An expression
+ * containing markup (`{items.map((i) => <li>…</li>)}`) is not read at all, which errs
+ * towards missing a violation rather than inventing one.
+ */
+function lockupTextParts(
+  region: Region,
+  names: ReadonlySet<string>,
+): { line: number; text: string }[] {
   const found: { line: number; text: string }[] = [];
-  const element = /<(\w+)(?:\s[^>]*)?>([^<>{}]*)<\/\1>/g;
+  const element = /<(\w+)(?:\s[^>]*)?>((?:[^<>{}]|\{[^<>{}]*\})*)<\/\1>/g;
   for (const match of region.markup.matchAll(element)) {
-    const text = match[2].trim();
-    if (!LOCKUP_PARTS.includes(text)) continue;
+    const content = match[2].trim();
+    const quoted = /^\{\s*(['"`])([^'"`]*)\1\s*\}$/.exec(content);
+    const text = quoted ? quoted[2].trim() : content;
+    const lastName = /^\{\s*(?:[\w$.]*\.)?([A-Za-z_$][\w$]*)\s*\}$/.exec(content)?.[1];
+    if (!LOCKUP_PARTS.includes(text) && !(lastName !== undefined && names.has(lastName))) {
+      continue;
+    }
     // The region's first line *is* `region.line`, so what is added is the number of
     // newlines before the match rather than the line count including it.
     const newlinesBefore = region.markup.slice(0, match.index).split('\n').length - 1;
@@ -204,9 +250,11 @@ describe('no component rebuilds the lockup from separate parts (§12)', () => {
 
   beforeAll(() => {
     const root = new URL('..', import.meta.url).pathname;
+    const names = lockupPartNames();
     for (const file of astroSources()) {
       const parts = lockupTextParts(
         withoutComments(markupRegion(readFileSync(join(root, file), 'utf8'))),
+        names,
       );
       if (parts.length > 0) offenders.set(file, parts);
     }
@@ -247,7 +295,7 @@ describe('no component rebuilds the lockup from separate parts (§12)', () => {
 
     const planted = comment + 1;
     lines.splice(planted - 1, 0, '      <span>Muse</span><span>by Mina</span>');
-    const parts = lockupTextParts(withoutComments(markupRegion(lines.join('\n'))));
+    const parts = lockupTextParts(withoutComments(markupRegion(lines.join('\n'))), new Set());
 
     expect(parts).toEqual([
       { line: planted, text: 'Muse' },
@@ -255,6 +303,32 @@ describe('no component rebuilds the lockup from separate parts (§12)', () => {
     ]);
     // And the line really does say what the message would send the reader to read.
     expect(lines[planted - 1]).toContain('<span>Muse</span>');
+  });
+
+  it('sees a part written as a constant, a member access or a quoted literal (MUSE-105)', () => {
+    const names = new Set(['first', 'FIRST']);
+    const at = (markup: string) => lockupTextParts({ line: 1, markup }, names);
+    expect(at('<span>{BRAND.first}</span>')).toEqual([{ line: 1, text: '{BRAND.first}' }]);
+    expect(at('<span>{FIRST}</span>')).toEqual([{ line: 1, text: '{FIRST}' }]);
+    expect(at("<span>{'Muse'}</span>")).toEqual([{ line: 1, text: 'Muse' }]);
+    expect(at('<span>{"by Mina"}</span>')).toEqual([{ line: 1, text: 'by Mina' }]);
+    // The literal, unchanged: today's message for today's case.
+    expect(at('<span>Muse</span>')).toEqual([{ line: 1, text: 'Muse' }]);
+  });
+
+  it('does not flag expressions that are not parts, and cannot span two elements', () => {
+    const names = new Set(['first']);
+    const at = (markup: string) => lockupTextParts({ line: 1, markup }, names);
+    // Ordinary labels, a sentence that contains the brand, and a quoted literal that is
+    // not a part.
+    expect(at('<h1>{t.h1}</h1><p>{t.lede}</p>')).toEqual([]);
+    expect(at('<small>© {year} Muse by Mina</small>')).toEqual([]);
+    expect(at("<span>{'Home'}</span>")).toEqual([]);
+    // Across a boundary: a match that crossed one would read `{x}</a>…<b>{first}` as one
+    // element's content. Each is its own match, and only the second is a part.
+    expect(at('<a>{x}</a>\n<i>by</i>\n<b>{first}</b>')).toEqual([{ line: 3, text: '{first}' }]);
+    // A name that merely contains a part's key is not that key.
+    expect(at('<span>{firstName}</span>')).toEqual([]);
   });
 
   it('is looking at the components it thinks it is', () => {

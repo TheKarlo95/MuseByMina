@@ -816,7 +816,8 @@ describe('the brand card is the supplied artwork, laid out by design system §12
    * Graph spec's 8 MB: WhatsApp and iMessage give up on a preview image well before that,
    * and 300 KB is comfortably inside every published practical limit.
    *
-   * The committed file is **23,745 bytes** — a flat ground and one white mark, stored as
+   * The committed file is **23,745 bytes** today. The assertion is a **ceiling of 40 KB**,
+   * not a pin on that figure. A flat ground and one white mark, stored as
    * a 256-colour palette rather than RGBA, which is the same picture at half the size.
    */
   it('weighs well under what a messaging client will fetch', () => {
