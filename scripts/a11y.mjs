@@ -153,6 +153,18 @@ for (const target of targets) {
      * bump should widen what this sees, not silently not-widen it. Rules axe ships
      * **disabled** (`experimental`, `color-contrast-enhanced`/AAA) stay off, which is the
      * right default — those are opt-in by design rather than by our omission.
+     *
+     * **And this paragraph is no longer the only thing holding it** (MUSE-98). Re-adding
+     * the four tags was green on every check in the repository: MUSE-55's deletion of the
+     * route list got a guard in `test/origin.test.ts`, and MUSE-75's deletion of the rule
+     * list got these lines. `test/a11yrules.test.ts` is that guard — stated against the
+     * **call** rather than the text, so the two `withTags` mentions above are prose it
+     * cannot trip over, and as an allow-list of one method (`analyze`, with `{ page }` and
+     * no `axeSource`) rather than a list of configuration calls to keep current.
+     *
+     * One limit of this gate, recorded beside the rule rather than left to be rediscovered:
+     * **it audits one viewport**, the 1280 × 900 below. MUSE-75's mobile observations are
+     * outside it on every page and in both themes, and closing that is its own ticket.
      */
     const { violations, incomplete } = await new AxeBuilder({ page }).analyze();
     notes += incomplete.length;
