@@ -7,7 +7,11 @@ and rejected live here. Read the section that covers what your ticket touches.
 Nothing here is decoration. Each passage records a defect that recurred, or an approach
 that was tried and failed, and the cost of rediscovering it is the cost of the original
 bug. Do not shorten a passage to tidy it up — if something is genuinely stale, that is a
-ticket (MUSE-114 is the open instance).
+ticket: a statement one of these documents makes that the code does not support is filed
+and corrected, not trimmed in passing. **No ticket number is named here**, and
+`test/docs.test.ts` keeps it that way — a pointer naming whichever ticket happens to be
+filed is a claim about status, it stops being true the day that ticket closes, and naming
+a successor only moves the staleness to the next close (MUSE-114).
 
 - **`/privacy/` is a statutory document, so it stays in code — and the one fact that varies
   is read off the form's own configuration** (MUSE-72). It had asserted, in both locales and
@@ -522,8 +526,15 @@ ticket (MUSE-114 is the open instance).
 
   „bez obveze" / "no commitment" went with the sentence and nothing replaced it: it is a
   *term of an offer* nobody has specified, where „bez partnera, bez iskustva" are facts
-  about how a class runs. `test/pricing.test.ts` already refuses "no commitment" in the
-  period names, which is the same claim one layer down.
+  about how a class runs. **Nothing guards it** (MUSE-114). `test/pricing.test.ts` was
+  credited here, and in `Contact.astro`, with refusing "no commitment" „one layer down",
+  and it does not: its needle reads `periodName(period, locale)` — the three
+  `PRICE_PERIODS` names, never page copy — and it is English-only, so the Croatian would
+  pass it even inside a period name. `RETIRED_CLAIMS` in `test/helpers/offer-claims.ts`
+  has no entry for it either, so the sentence can come back with every gate green; what
+  stops it is this paragraph and the one above `Contact.astro`'s lede. A needle would have
+  to be a class rather than a literal (MUSE-84, MUSE-109) and carry the live strings it was
+  measured against, which is its own ticket rather than a comment correction.
 
 - **The form's own failure copy is gated on the same constant** (MUSE-110). `failBody`
   said „Tvoji odgovori su ostali u obrascu, pa možeš pokušati ponovno." / "Your answers
