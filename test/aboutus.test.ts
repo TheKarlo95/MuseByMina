@@ -223,11 +223,64 @@ const ENTITIES: Record<string, string> = {
 };
 
 /**
- * Every run of text inside `<main>`, one entry per element, tags and attributes gone.
+ * The elements that end a run of text, because a visitor reads them as separate lines.
  *
- * Per element rather than as one blob: the question below is whether any *chunk* reads as
+ * The HTML spec's flow and sectioning containers, plus the form and table parts, written
+ * out rather than derived: there is no list in the platform that says "block", and a
+ * guess is what MUSE-102 was about.
+ *
+ * **An element nobody listed is treated as inline** — it joins the text around it rather
+ * than splitting it. That direction is deliberate: guessing wrong here produces a red
+ * test on a page that reads as two labels, and guessing wrong the other way produces
+ * MUSE-102, which is a sentence nobody wrote shipping with every gate green.
+ */
+const BLOCK_ELEMENTS: ReadonlySet<string> = new Set(
+  (
+    'address article aside blockquote body button canvas caption col colgroup dd details ' +
+    'dialog div dl dt fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 head ' +
+    'header hgroup hr html iframe input label legend li main menu nav noscript ol ' +
+    'optgroup option p pre search section select summary svg table tbody td template ' +
+    'textarea tfoot th thead tr ul video audio'
+  ).split(' '),
+);
+
+/**
+ * The elements that carry no text of their own but do keep the words either side apart.
+ *
+ * `textContent` drops a `<br>` entirely, which would read „Najveći<br>studio" as the one
+ * word „Najvećistudio" and hand the word count a way out. A line break inside a sentence
+ * does not end the sentence, so it is a space here and not a boundary.
+ */
+const TEXTLESS_ELEMENTS: ReadonlySet<string> = new Set([
+  'br',
+  'wbr',
+  'img',
+  'picture',
+  'source',
+]);
+
+/**
+ * Every run of text inside `<main>`, one entry per **block** element, tags and attributes
+ * gone — the `textContent` of each block, in other words.
+ *
+ * Per block rather than as one blob: the question below is whether any *chunk* reads as
  * prose, and flattening the page into a single string would join nine unrelated two-word
  * labels into one nine-word run that looks exactly like a sentence.
+ *
+ * **And per *block*, not per element, which is the whole of MUSE-102.** This used to
+ * split on `/<[^>]*>/` — every tag a boundary — and so
+ * `<p>Najveći <b>bachata</b> studio u Zagrebu<span>.</span></p>` arrived as four chunks:
+ * „Najveći", „bachata", „studio u Zagrebu" and „.". Each is at most three words and
+ * carries no digit, and the full stop was dropped by the punctuation filter below before
+ * the no-full-stop rule ran — so "the biggest bachata studio in Zagreb" shipped on both
+ * locale pages, from the component rather than from the CMS, with all three rules green.
+ * The three counts are independently sidesteppable; measuring a sentence as fragments is
+ * what made sidestepping all three a matter of adding `<b>`.
+ *
+ * So inline markup is flattened and only a block boundary starts a new chunk. The
+ * boundary matters in both directions and is asserted in both: three `<li>` of two words
+ * each must stay three chunks, or a list of labels reads as one six-word sentence and
+ * fails for no reason.
  *
  * `<main>` and not the whole page, because the header and the footer are not this
  * component's copy — `Footer.astro` owns its own words and `test/content.test.ts` owns
@@ -235,9 +288,20 @@ const ENTITIES: Record<string, string> = {
  */
 function mainChunks(html: string): string[] {
   const main = /<main\b[^>]*>([\s\S]*?)<\/main>/.exec(html)?.[1] ?? '';
+  // A character no document can contain, so the boundary cannot be forged in content.
+  const BREAK = '\u0000';
   return main
-    .replace(/<(script|style)\b[\s\S]*?<\/\1>/g, '<>')
-    .split(/<[^>]*>/)
+    .replace(/<(script|style)\b[\s\S]*?<\/\1>/g, BREAK)
+    // A comment is not text a visitor reads, and it is not a line break either.
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<\/?([a-zA-Z][-\w]*)\b[^>]*>/g, (_tag, name: string) => {
+      const element = name.toLowerCase();
+      if (TEXTLESS_ELEMENTS.has(element)) return ' ';
+      return BLOCK_ELEMENTS.has(element) ? BREAK : '';
+    })
+    // Anything still shaped like a tag — a doctype, a stray `<` — is nobody's sentence.
+    .replace(/<[^>]*>/g, BREAK)
+    .split(BREAK)
     .map((chunk) =>
       chunk
         .replace(/&(#?\w+);/g, (_match, name: string) => ENTITIES[name] ?? ' ')
@@ -245,6 +309,84 @@ function mainChunks(html: string): string[] {
         .trim(),
     )
     .filter(Boolean);
+}
+
+/** The component the page's own words would be written in, if anybody wrote any. */
+const COMPONENT = 'src/components/AboutUs.astro';
+
+/**
+ * `AboutUs.astro`'s lines with every comment and the `<style>` block blanked out, and the
+ * numbering left intact: what is left is the code and the markup, which between them hold
+ * every word the component itself could put on the page.
+ *
+ * The comments have to go, or a failure names one of them: the file's own prose explains
+ * at length why the studio's story is not written in it, so „studio" and „prose" — the
+ * needles a residue chunk hands the search — both appear in paragraphs about not writing
+ * them. A failure pointing there sends the next reader to the argument instead of to the
+ * sentence.
+ */
+function writtenLines(): string[] {
+  const newlinesOnly = (text: string): string => text.replace(/[^\n]/g, '');
+  return readFileSync(join(ROOT, COMPONENT), 'utf8')
+    // Every block comment, the JSX-style `{/* … */}` ones included, then every line
+    // comment, then the stylesheet — which is not words.
+    .replace(/\/\*[\s\S]*?\*\//g, newlinesOnly)
+    .replace(/\/\/[^\n]*/g, '')
+    .replace(/<style>[\s\S]*/, newlinesOnly)
+    .split('\n');
+}
+
+/**
+ * Where a run of text was written, as `file:line`.
+ *
+ * The longest word first, because the shortest are „u" and „na" and every line has one.
+ * A chunk the component composes at render time — a label beside a CMS value — matches no
+ * line literally, and saying so is more use than naming a line that does not hold it.
+ */
+function writtenAt(chunk: string): string {
+  const lines = writtenLines();
+  const words = [...chunk.matchAll(/[\p{L}\p{N}]+/gu)]
+    .map((match) => match[0])
+    .sort((a, b) => b.length - a.length);
+  for (const word of words) {
+    const at = lines.findIndex((line) => line.includes(word));
+    if (at !== -1) return `${COMPONENT}:${at + 1}`;
+  }
+  return `${COMPONENT} (composed at render time — no line holds it literally)`;
+}
+
+/**
+ * The three things no label ever violates and no invented sentence ever satisfies.
+ *
+ * A table rather than three `expect` calls so that a failure can say *which* of them
+ * caught the text, and so the rules can be asserted against synthetic markup below
+ * without a build. Every rule is asked of a whole block's text — see `mainChunks`.
+ */
+const PROSE_RULES: readonly {
+  readonly name: string;
+  readonly says: string;
+  readonly caught: (chunk: string) => boolean;
+}[] = [
+  {
+    name: 'a full stop',
+    says: 'a full stop means a sentence, and a sentence means prose',
+    caught: (chunk) => /\./.test(chunk),
+  },
+  {
+    name: 'a digit',
+    says: 'every number on this page comes from the CMS',
+    caught: (chunk) => /\p{N}/u.test(chunk),
+  },
+  {
+    name: 'more than three words',
+    says: 'too long to be a label — is it copy that should be in Sanity?',
+    caught: (chunk) => chunk.split(' ').length > 3,
+  },
+];
+
+/** Which rules one run of text breaks, by name. */
+function faults(chunk: string): string[] {
+  return PROSE_RULES.filter((rule) => rule.caught(chunk)).map((rule) => rule.name);
 }
 
 /** CSS with every `@media` block removed: what applies at any viewport width. */
@@ -273,7 +415,7 @@ function withoutMediaBlocks(css: string): string {
 
 /** The component's own `<style>` block, read from source. */
 function componentStyle(): string {
-  const source = readFileSync(join(ROOT, 'src/components/AboutUs.astro'), 'utf8');
+  const source = readFileSync(join(ROOT, COMPONENT), 'utf8');
   return source.slice(source.indexOf('<style>'));
 }
 
@@ -578,6 +720,17 @@ describe('AC1: who runs the studio, how it started, and who teaches', () => {
      * instead — adding `<p>Studio je otvoren 2019.</p>` to the component fails this on all
      * three counts at once.
      *
+     * **„A sentence has nowhere to hide" was false for a year, and `<b>` was the hiding
+     * place** (MUSE-102). The three counts are sound; what was wrong was *what they were
+     * asked of*. The text was split on every tag, so
+     * `<p>Najveći <b>bachata</b> studio u Zagrebu<span>.</span></p>` was measured as four
+     * fragments of at most three words each with the full stop filtered away as
+     * punctuation, and „the biggest bachata studio in Zagreb" shipped on both locale
+     * pages with this test green. The fix is in `mainChunks`, which now measures a
+     * block's text rather than an element's, and **not a fourth count** — the counts
+     * caught the sentence the moment they were shown it whole. The sentence above is
+     * still the right claim; it just needed the measurement it was written for.
+     *
      * ---
      *
      * **What this answers: provenance, not placement** (MUSE-53).
@@ -624,15 +777,18 @@ describe('AC1: who runs the studio, how it started, and who teaches', () => {
         .filter((chunk) => /[\p{L}\p{N}]/u.test(chunk));
 
       for (const chunk of residue) {
-        expect(chunk, `${locale}: a full stop means a sentence, and a sentence means prose`)
-          .not.toMatch(/\./);
-        expect(chunk, `${locale}: every number on this page comes from the CMS`).not.toMatch(
-          /\p{N}/u,
-        );
+        const broken = faults(chunk);
+        // `writtenAt` reads the component off disk, so it is asked only when there is a
+        // failure to locate — and the message names the file and the line, because
+        // „which sentence" is the first thing whoever reads the failure needs.
+        const where = broken.length === 0 ? COMPONENT : writtenAt(chunk);
         expect(
-          chunk.split(' ').length,
-          `${locale}: "${chunk}" is too long to be a label — is it copy that should be in Sanity?`,
-        ).toBeLessThanOrEqual(3);
+          broken,
+          `${locale}: "${chunk}" — ${where} — ` +
+            PROSE_RULES.filter((rule) => rule.caught(chunk))
+              .map((rule) => rule.says)
+              .join('; '),
+        ).toEqual([]);
       }
 
       // And the subtraction has to have had something to subtract, or this passes on an
@@ -648,6 +804,95 @@ describe('AC1: who runs the studio, how it started, and who teaches', () => {
       expect(levels.filter((level) => level === 1), locale).toHaveLength(1);
       expect(new Set(levels), locale).toEqual(new Set([1, 2, 3]));
     }
+  });
+});
+
+/* ------------------------------------------------- what the guard above measures */
+
+/**
+ * **MUSE-102 — the guard is only as good as the thing it is asked of.**
+ *
+ * Found by post-merge QA of MUSE-23: the guard is named for the MUSE-36 class and a
+ * MUSE-36-class claim walked past it. `mainChunks` split the page on every tag, so
+ * `<p>Najveći <b>bachata</b> studio u Zagrebu<span>.</span></p>` reached the three rules
+ * as „Najveći", „bachata", „studio u Zagrebu" and „.", and „the biggest bachata studio in
+ * Zagreb" shipped on both locale pages, from the component rather than from the CMS, with
+ * all 54 tests in this file passing.
+ *
+ * These are the rules asked of markup written here rather than of a build, for two
+ * reasons. One: a build costs against `DECLARED` in `test/helpers/concurrency.ts`, whose
+ * headroom is zero, and this needs no build — the defect is in the measurement, not in the
+ * page. Two: it is the only way to state the **boundary**, which has to hold in both
+ * directions and neither of which the real page exercises. Inline children join, so one
+ * sentence is one sentence however much `<b>` runs through it; block children stay apart,
+ * so three two-word `<li>` are three labels and not one six-word sentence. Flattening
+ * everything would be the same defect with the sign reversed: a red test on an honest page.
+ */
+describe('MUSE-102: a sentence is measured as a sentence, not as its fragments', () => {
+  /** One block of markup, as the page would carry it. */
+  const inMain = (body: string): string[] =>
+    mainChunks(`<main id="main"><section class="story">${body}</section></main>`);
+
+  const SENTENCE = 'Najveći bachata studio u Zagrebu.';
+
+  it('reads a sentence inline markup runs through as one sentence', () => {
+    // The planted paragraph from the ticket, verbatim; the same claim with all four inline
+    // elements the acceptance criteria name; and a clean `<p>` for the control, which is
+    // the form the guard always caught and the one the other two must now match.
+    const forms = {
+      planted: '<p class="prose">Najveći <b>bachata</b> studio u Zagrebu<span>.</span></p>',
+      'four tags':
+        '<p class="prose"><em>Najveći</em> <b>bachata</b> <a href="/">studio</a>' +
+        ' u Zagrebu<span>.</span></p>',
+      control: '<p class="prose">Najveći bachata studio u Zagrebu.</p>',
+    };
+
+    for (const [form, body] of Object.entries(forms)) {
+      expect(inMain(body), form).toEqual([SENTENCE]);
+      expect(faults(SENTENCE), form).toEqual(['a full stop', 'more than three words']);
+    }
+  });
+
+  it('counts a full stop that is an element of its own', () => {
+    // The half the old punctuation filter dropped: the `.` was a chunk, the chunk carried
+    // no letter or number, and it was removed *before* the no-full-stop rule ran.
+    expect(inMain('<p>Dođi<span>.</span></p>')).toEqual(['Dođi.']);
+    expect(faults('Dođi.')).toEqual(['a full stop']);
+  });
+
+  it('keeps block-level children apart, and that is not negotiable either', () => {
+    // Six words, two ways. As three `<li>` they are three labels and every one of them
+    // passes; in one `<p>` they are one run and too long to be a label. A flatten that
+    // ignored the boundary would fail the first of these, on a page saying nothing wrong.
+    const labels = ['Jedan dva', 'tri četiri', 'pet šest'];
+    const list = inMain(`<ul role="list">${labels.map((l) => `<li>${l}</li>`).join('')}</ul>`);
+    expect(list).toEqual(labels);
+    for (const label of list) expect(faults(label), label).toEqual([]);
+
+    expect(inMain(`<p>${labels.join(' ')}</p>`)).toEqual([labels.join(' ')]);
+    expect(faults(labels.join(' '))).toEqual(['more than three words']);
+  });
+
+  it('names the file and the line of the sentence it caught', () => {
+    // The failure has to say where to go, so the word is looked up in the file. A string
+    // the component holds resolves to the line that holds it.
+    const at = writtenAt('Instruktori');
+    expect(at).toMatch(/^src\/components\/AboutUs\.astro:\d+$/);
+    expect(writtenLines()[Number(at.split(':')[1]) - 1]).toContain('Instruktori');
+
+    // One it composes at render time matches no line, and says that rather than naming a
+    // line that does not hold it. „Zyzzyva" stands in for such a chunk: what the function
+    // has to do with a word the file does not contain is say so.
+    expect(writtenAt('Zyzzyva')).toBe(
+      `${COMPONENT} (composed at render time — no line holds it literally)`,
+    );
+
+    // And the lookup reads the code and the markup, not the prose around them: „deploy"
+    // is in this component's comments four times — in the paragraphs explaining why it
+    // writes no prose — and a failure pointing at one of those sends the next reader to
+    // the argument instead of to the sentence.
+    expect(readFileSync(join(ROOT, COMPONENT), 'utf8')).toContain('deploy');
+    expect(writtenAt('deploy')).toContain('composed at render time');
   });
 });
 
