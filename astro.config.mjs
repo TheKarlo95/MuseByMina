@@ -111,10 +111,13 @@ export function prerenderStagingDir(outDir, cwd = process.cwd()) {
 /**
  * Why this `outDir` cannot be built into, or `null` if it can.
  *
- * One question — *does `outDir`'s path start with the project root's, and is it something
- * other than the root itself?* — rather than a list of the ways a build can go wrong.
- * `EXDEV`, the shared directory and the deleted project are three symptoms of the same
- * condition, and a check per symptom is a check that misses the fourth.
+ * Two questions about where `outDir` is — *does its path start with the project root's,
+ * and is it something other than the root itself?* and *does its path start with the
+ * working directory?* — rather than a list of the ways a build can go wrong. `EXDEV`, the
+ * shared directory and the deleted project are three symptoms of the same condition, and
+ * a check per symptom is a check that misses the fourth. There are two questions and not
+ * one because Astro resolves `outDir` against one directory and stages it against the
+ * other; see MUSE-108 below, and note that they were one question until it.
  *
  * **It asks that about `outDir` and not about the staging directory** (MUSE-92). It used
  * to compare the staging directory against `outDir` — *does this build stage inside its
@@ -142,22 +145,65 @@ export function prerenderStagingDir(outDir, cwd = process.cwd()) {
  *     changes, but a guard against deleting the project may not rest on a check inside a
  *     dependency, and the prefix alone would admit it.
  *
+ * **The root is Astro's `config.root`, and the working directory is a second, separate
+ * question** (MUSE-108). MUSE-92 took the protected root from `process.cwd()`, which is
+ * the root only when nobody passed `--root`: `resolveRoot` (`core/config/config.js`)
+ * falls back to the working directory, and `outDir` is resolved **against the root**
+ * (`resolveDirAsUrl(val, fileProtocolRoot)`, `core/config/schemas/relative.js`). So
+ * `astro build --root a/b --outDir ../` produced an `outDir` of `<cwd>/a` — which
+ * contains the project root, starts with the working directory, and was therefore
+ * allowed. Astro's own `validateConfig` (`core/build/index.js`) did not object either; it
+ * throws only when `outDir` **equals** `root`.
+ *
+ * Two directories, so two questions, and neither covers the other once `--root` separates
+ * them:
+ *
+ *   - **`outDir` must start with the root's path and not be the root.** This is the
+ *     deletion: an output directory containing the project is emptied with the project
+ *     inside it.
+ *   - **`outDir` must start with the working directory.** This is the staging location,
+ *     and it has to be the working directory because `getOutDirWithinCwd` tests
+ *     `fileURLToPath(outDir).startsWith(process.cwd())` literally. `--root <elsewhere>`
+ *     with the default `outDir` passes the first question — an ordinary `dist` inside its
+ *     own project — and still stages in the shared `<cwd>/.astro/.prerender`, which is
+ *     MUSE-41's `EXDEV` and its silent asset collision.
+ *
+ * They are the same directory for every build in this repository, which is why one test
+ * stood in for both and why this was latent rather than live. Keeping them as two
+ * questions is not a check per symptom — MUSE-92's objection to that stands — it is one
+ * question per directory Astro resolves against.
+ *
+ * Out of scope and worth knowing (MUSE-108): an unnormalised `outDir` is not handled —
+ * `stagingFault('<root>/..', '<root>')` returns `null`. It is unreachable through the
+ * hook, because `resolveDirAsUrl` calls `path.resolve` before the hook sees `config.outDir`,
+ * and the same hole predates MUSE-92. It would need fixing if this function gained a
+ * second caller.
+ *
  * @param {string} outDir Absolute path to the build's output directory.
  * @param {string} [cwd] The working directory the build will run in.
+ * @param {string} [root] Astro's `config.root`; the working directory when `--root` is absent.
  * @returns {string | null}
  */
-export function stagingFault(outDir, cwd = process.cwd()) {
-  if (outDir.startsWith(cwd) && relative(cwd, outDir) !== '') return null;
+export function stagingFault(outDir, cwd = process.cwd(), root = cwd) {
+  const insideRoot = outDir.startsWith(root) && relative(root, outDir) !== '';
+  const stagesLocally = outDir.startsWith(cwd);
+  if (insideRoot && stagesLocally) return null;
 
   return [
     // One line, and the ticket refs stay on it: `buildErrorHeadline` in
     // test/helpers/scratch.ts reads the `[ERROR]` marker line plus the line after it, so
     // a headline split in two loses half of what a failed build reports (MUSE-77).
-    'outDir must start with the project root path, and may not be the root (MUSE-41, MUSE-92).',
+    'outDir must start with the project root path and with the working directory, and may not be the root (MUSE-41, MUSE-92, MUSE-108).',
     '',
     `  outDir   ${outDir}`,
-    `  root     ${cwd}`,
+    `  root     ${root}`,
+    `  cwd      ${cwd}`,
     `  staging  ${prerenderStagingDir(outDir, cwd)}`,
+    '',
+    "root is Astro's config.root — what --root sets, and the working directory only when",
+    'it is absent — because outDir is resolved against it. cwd is the working directory,',
+    'which is the one Astro stages against, below. They are the same directory unless',
+    '--root says otherwise, and both are checked because each has its own failure.',
     '',
     "A string prefix and not a directory tree, because it is Astro's test rather than",
     'ours: getOutDirWithinCwd stages prerendered output in <outDir>/.prerender/ exactly',
@@ -180,9 +226,19 @@ function stagingGuard() {
   return {
     name: 'muse-staging-guard',
     hooks: {
-      /** @param {{ config: { outDir: URL } }} ctx */
+      /** @param {{ config: { outDir: URL, root: URL } }} ctx */
       'astro:config:setup': ({ config }) => {
-        const fault = stagingFault(fileURLToPath(config.outDir).replace(/[/\\]$/, ''));
+        // `config.root` and not `process.cwd()` (MUSE-108): the hook used to pass neither,
+        // so the predicate's default made the working directory the protected root even
+        // when `--root` had moved it. The working directory is still passed, separately,
+        // because that is the one Astro stages against.
+        //
+        // Both arrive as directory URLs, so both lose the trailing separator — and that is
+        // load-bearing: with it, `<cwd>/` fails the raw string prefix MUSE-92 deliberately
+        // allows and a sibling whose name extends the root's would be refused although
+        // Astro stages it inside its own output.
+        const dir = (/** @type {URL} */ url) => fileURLToPath(url).replace(/[/\\]$/, '');
+        const fault = stagingFault(dir(config.outDir), process.cwd(), dir(config.root));
         if (fault !== null) throw new Error(fault);
       },
     },
