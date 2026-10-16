@@ -563,6 +563,20 @@ describe('nothing can open a browser context of its own', () => {
     );
   });
 
+  it('reads a launcher taken off a namespace import', () => {
+    // MUSE-113. `import * as` recorded an entry with no imported name, so the launcher
+    // rule above — which is keyed on that name — went quiet, and the property read is the
+    // only place the launcher is spelled in code. `drivesBrowser` never had the hole,
+    // because it is keyed on the *module*; this rule is the one that did.
+    const probe = ["import * as pw from 'playwright';", 'const launcher = pw.chromium;'].join(
+      '\n',
+    );
+
+    expect(drivesBrowser('probe.ts', probe)).toBe(true);
+    expect(listed(browserOwnership('probe.ts', probe))).toHaveLength(1);
+    expect(listed(browserOwnership('probe.ts', probe))[0]).toContain('chromium');
+  });
+
   it('fires on a forbidden call written as a computed member', () => {
     const probe = "const context = await browser['new' + 'Context']({ locale: 'en-US' });";
     const [offence] = browserOwnership('probe.ts', probe);

@@ -1509,6 +1509,100 @@ describe('the guard catches what it claims to, and nothing else', () => {
     expect(unmeasuredDevServers('probe.ts', without)[0]?.line).toBe(1);
     expect(unmeasuredDevServers('probe.ts', with_)).toEqual([]);
   });
+
+  it('reads a name taken off a namespace import, for every rule keyed on one', () => {
+    // MUSE-113's first escape. `importedNames` resolved the default binding and
+    // `ts.isNamedImports` — including an alias, through `propertyName` — and had no branch
+    // for `import * as`, so the entry was recorded with no name at all and *every* rule
+    // stated against an imported name went quiet. Two of the three are here; the third is
+    // `browserOwnership`, whose probe is in `test/browserlocale.test.ts` beside its rule.
+    //
+    // The deletion probe is MUSE-34's alias evasion wearing a namespace: the call is
+    // `tidy(…)`, which no rule over callees can recognise, and the only place the name is
+    // spelled in code is the property read. Before the fix this returned nothing.
+    const deletion = [
+      "import * as fs from 'node:fs';",
+      `const tidy = fs.${RM_SYNC};`,
+      'tidy(dir, { recursive: true });',
+    ].join('\n');
+    const devServer = [
+      "import * as scratch from './helpers/scratch';",
+      `dev = await scratch.${DEV_SERVER}({}, 'fonts');`,
+    ].join('\n');
+    const measured = [
+      "import * as measure from './helpers/measured';",
+      "import * as scratch from './helpers/scratch';",
+      `dev = await scratch.${DEV_SERVER}({}, 'fonts');`,
+      "await measure.assertMeasuredPage(dev, '/');",
+    ].join('\n');
+
+    expect(deletions('probe.ts', deletion).length).toBeGreaterThan(0);
+    expect(unmeasuredDevServers('probe.ts', devServer).length).toBeGreaterThan(0);
+    expect(unmeasuredDevServers('probe.ts', devServer)[0]?.line).toBe(1);
+    expect(unmeasuredDevServers('probe.ts', measured)).toEqual([]);
+  });
+
+  it('reads only the names a namespace import is actually asked for', () => {
+    // The other half, and the reason the fix is a *read* off the namespace rather than
+    // „this module was imported wholesale": a namespace brings in every export, so a rule
+    // that fired on the import alone would fire on `test/format.test.ts` and
+    // `test/projections.test.ts`, which is the permanent false positive MUSE-34 is about.
+    const innocent = [
+      "import * as prettier from 'prettier';",
+      'const formatted = await prettier.format(text, options);',
+    ].join('\n');
+
+    expect(deletions('probe.ts', innocent)).toEqual([]);
+    expect(processStarts('probe.ts', innocent)).toEqual([]);
+    expect(unmeasuredDevServers('probe.ts', innocent)).toEqual([]);
+  });
+
+  it('tracks a tab through a ?? default — the shape that once turned this rule off', () => {
+    // MUSE-113's second escape, and the one that has already cost something. The comment
+    // above `middleClickOpens` in `test/localeswitch.test.ts` records it: an earlier cut of
+    // the MUSE-61 branch read `context.pages()` first and defaulted to it, and
+    // `already ?? …` is not a call expression, so the binding carried no callee, the tab
+    // was never tracked, and the guard passed while asserting nothing. Verbatim shape.
+    const probe = [
+      `const opened = already ?? context.${TAB_EVENT}('page', { timeout: 15_000 });`,
+      "await page.locator(switchTo('hr')).click({ button: 'middle' });",
+      'const tab = await opened;',
+      'expect(tab.url()).toBe(expected);',
+    ].join('\n');
+
+    const [offence] = uncommittedTabs('test/somewhere.test.ts', probe);
+    expect(offence?.line).toBe(1);
+    expect(offence?.what).toContain(TAB_COMMIT);
+  });
+
+  it('is satisfied by the commit wait when the tab came through a default', () => {
+    // The same shape with the barrier in place, which is what the live helper does. A
+    // guard that fired here as well would be a guard that gets deleted.
+    const probe = [
+      `const opened = already ?? context.${TAB_EVENT}('page');`,
+      'const tab = await opened;',
+      `const url = await ${TAB_COMMIT}(tab, 'the tab to commit');`,
+    ].join('\n');
+
+    expect(uncommittedTabs('probe.ts', probe)).toEqual([]);
+  });
+
+  it('stops the obligation at the name the choice is bound to when nothing awaits it on', () => {
+    // A choice expression leaves awaitedness genuinely unknown — `already` may be a tab
+    // and the event's promise may be the other branch — so the rule cannot say whether
+    // this name holds a tab or the promise of one. What it can say is that a tab reaches
+    // this name, so the obligation stops here unless the file hands it to another name.
+    // `||` and a ternary are the same ambiguity written two other ways.
+    for (const operator of ['??', '||']) {
+      const probe = `const tab = already ${operator} context.${TAB_EVENT}('page');`;
+      const [offence] = uncommittedTabs('probe.ts', probe);
+      expect(offence?.line, probe).toBe(1);
+      expect(offence?.what, probe).toContain('tab');
+    }
+
+    const ternary = `const tab = already ? already : await context.${TAB_EVENT}('popup');`;
+    expect(uncommittedTabs('probe.ts', ternary).length).toBeGreaterThan(0);
+  });
 });
 
 describe('the run reports a dead hook rather than swallowing it', () => {
