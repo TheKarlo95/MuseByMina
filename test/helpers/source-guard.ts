@@ -49,6 +49,46 @@ import ts from 'typescript';
  * which is the whole reason the rules read syntax, and is why the sentence explaining why
  * a sleep was removed can stay in the file it was removed from. What the rule cannot
  * reach is written out there too, under its own heading, rather than left implied.
+ *
+ * ---
+ *
+ * ## What this module cannot see
+ *
+ * Each rule carries its own limits under its own heading. These are the limits of the
+ * *facts* every rule reads, so they apply to all of them at once — and they are here
+ * because MUSE-113 found three shapes that got past the guard, two of which the module
+ * claimed no limitation about. „The guard passes because it cannot see" is the failure mode
+ * this file exists to prevent, so a limit that is not written down is the defect.
+ *
+ *   - **`inspectedFiles()` walks `test/` and nothing else, so no census taken with it reads
+ *     `scripts/`** (MUSE-113). The rules themselves take a path and have no opinion about
+ *     it — `test/browserlocale.test.ts` already applies `drivesBrowser` and
+ *     `browserOwnership` to `scriptFiles()`, which is where the browser exposure in
+ *     `scripts/` is actually bounded, and `test/isolation.test.ts`'s own census is the one
+ *     that stops at `test/`. **Widening that walk was considered and rejected**: the
+ *     invariants it enforces are MUSE-17's, which are about a *test* not choosing where it
+ *     builds, and a script's job includes starting processes. Measured over the 17 files in
+ *     `scripts/`: `processStarts` reports 6 and `copyPasteTripwire` 8, all of them in
+ *     the two maintenance scripts that run `git` through `execFileSync` — correct code in
+ *     both, and a guard that reddens correct code is a guard somebody turns off. (Neither is
+ *     named here: one of the two is a command only a human may reach, which the guard three
+ *     screens down this same tree enforces, and it reported this sentence when the first
+ *     draft of it spelled the name.) The other five rules report nothing there today, which is
+ *     the state the boundary is being stated against rather than an argument for moving it.
+ *   - **A namespace import is read by the names the file takes off it**, not by the module
+ *     it names (`namespaceImports`). A namespace reached some other way is not: `const fs =
+ *     require('node:fs')` and `const ns = await import('playwright')` bind an object this
+ *     module records as an import of no name, so the rules keyed on a name see nothing and
+ *     only the rules keyed on a *module* or on a *call* apply — which is how both of those
+ *     are in fact covered today, and `copyPasteTripwire` is the second line behind them.
+ *   - **A name is matched across the whole file, never within a scope.** Two functions that
+ *     both call their tab `tab` are one name here, so one gated tab satisfies an ungated
+ *     one. That is acceptable only because the suite takes delivery of a tab in exactly one
+ *     helper; the note under `uncommittedTabs` says what a second delivery point would have
+ *     to bring with it.
+ *   - **No value is followed.** `staticString` folds a name spelled in pieces and
+ *     `candidateValues` flattens a `??`, and neither reads a variable, a function's return
+ *     value or a property off an object. A rule that needed to would be a type checker.
  */
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
@@ -366,24 +406,39 @@ export interface Call {
 }
 
 /**
- * One `const x = …` whose initializer is simple enough to follow.
+ * One `const x = …`, read down to the values its initializer can produce.
  *
  * Enough to track a tab from the event that produced it to the wait that commits it, which
  * is two hops at most: `const opened = ctx.waitForEvent('page')` and then
  * `const tab = await opened`. Deliberately not a scope-aware resolver — see the honesty note
  * under `uncommittedTabs` for what that costs.
+ *
+ * **The initializer is a *set* of candidate values, not one** (MUSE-113). It used to be
+ * read as a single expression — a call, or an identifier, or nothing — so
+ * `const opened = already ?? ctx.waitForEvent('page')` carried no callee, and the rule that
+ * tracks tabs stopped tracking at the first hop. That shape silently disabled MUSE-61's
+ * guard on an earlier cut of its own branch, which is written down above
+ * `middleClickOpens` in `test/localeswitch.test.ts`. `??`, `||`, `&&` and `?:` are all the
+ * same question — which branch runs is not a question syntax answers — so every branch is
+ * a candidate and a rule asks whether *any* of them is the thing it forbids.
  */
 interface Binding {
   name: string;
   line: number;
-  /** Was the initializer `await`ed? */
+  /** Was the initializer, or any branch of it, `await`ed? */
   awaited: boolean;
-  /** The callee's name, when the initializer is a call. */
-  call: string | null;
-  /** That call's first string argument. */
-  callArgument: string | null;
-  /** The identifier, when the initializer is nothing but one. */
-  identifier: string | null;
+  /**
+   * Did the initializer choose between values — `a ?? f()`, `a || f()`, `a ? b : f()`?
+   *
+   * Then awaitedness is unknown rather than false: the alternative may be a value the
+   * event's promise resolves to. `uncommittedTabs` is where that costs something and where
+   * what it does about it is written out.
+   */
+  choice: boolean;
+  /** Every candidate that is a call, by callee name and first string argument. */
+  calls: { name: string; argument: string | null }[];
+  /** Every candidate that is nothing but an identifier. */
+  identifiers: string[];
 }
 
 interface Facts {
@@ -398,6 +453,20 @@ interface Facts {
   bindings: Binding[];
   /** Every string literal and every template-literal text span, separately. */
   literals: { value: string; line: number }[];
+}
+
+/** `import * as ns from 'm'` — the local name, and the module behind it. */
+interface Namespace {
+  local: string;
+  module: string;
+  line: number;
+}
+
+/** `ns.name` or `ns['name']`, where the object is written as a plain identifier. */
+interface Read {
+  object: string;
+  name: string;
+  line: number;
 }
 
 const cache = new Map<string, Facts>();
@@ -428,14 +497,17 @@ function facts(file: string, source?: string): Facts {
   const calls: Call[] = [];
   const bindings: Binding[] = [];
   const literals: { value: string; line: number }[] = [];
+  const namespaces: Namespace[] = [];
+  const reads: Read[] = [];
   const lineOf = (node: ts.Node): number =>
     tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
 
   const visit = (node: ts.Node): void => {
-    collect(node, { imports, calls, bindings, literals }, lineOf);
+    collect(node, { imports, calls, bindings, literals, namespaces, reads }, lineOf);
     ts.forEachChild(node, visit);
   };
   visit(tree);
+  for (const entry of namespaceImports(namespaces, reads)) imports.push(entry);
 
   const built: Facts = {
     file,
@@ -486,6 +558,8 @@ function collect(
     calls: Call[];
     bindings: Binding[];
     literals: { value: string; line: number }[];
+    namespaces: Namespace[];
+    reads: Read[];
   },
   lineOf: (node: ts.Node) => number,
 ): void {
@@ -496,22 +570,27 @@ function collect(
     ts.isIdentifier(node.name) &&
     node.initializer !== undefined
   ) {
-    const awaited = ts.isAwaitExpression(node.initializer);
-    const value = awaited
-      ? (node.initializer as ts.AwaitExpression).expression
-      : node.initializer;
-    const called = ts.isCallExpression(value) ? calleeName(value.expression) : null;
-    const firstArgument = ts.isCallExpression(value) ? value.arguments[0] : undefined;
+    const values = candidateValues(node.initializer, false);
     into.bindings.push({
       name: node.name.text,
       line: lineOf(node),
-      awaited,
-      call: called,
-      callArgument:
-        firstArgument !== undefined && ts.isStringLiteral(firstArgument)
-          ? firstArgument.text
-          : null,
-      identifier: ts.isIdentifier(value) ? value.text : null,
+      awaited: values.some(({ awaited }) => awaited),
+      choice: values.length > 1,
+      calls: values.flatMap(({ expression }) => {
+        if (!ts.isCallExpression(expression)) return [];
+        const name = calleeName(expression.expression);
+        if (name === null) return [];
+        const first = expression.arguments[0];
+        return [
+          {
+            name,
+            argument: first !== undefined && ts.isStringLiteral(first) ? first.text : null,
+          },
+        ];
+      }),
+      identifiers: values.flatMap(({ expression }) =>
+        ts.isIdentifier(expression) ? [expression.text] : [],
+      ),
     });
   }
 
@@ -525,6 +604,13 @@ function collect(
     const names = importedNames(node);
     if (names.length === 0) into.imports.push({ module, name: null, line: lineOf(node) });
     for (const name of names) into.imports.push({ module, name, line: lineOf(node) });
+
+    // `import * as ns from 'm'` brings in no *name*, so the entry above carries none and
+    // every rule keyed on one goes quiet (MUSE-113). The names it brings in are the ones
+    // the file then reads off `ns`, which `namespaceImports` pairs up once the whole file
+    // has been walked.
+    const local = namespaceLocal(node);
+    if (local !== null) into.namespaces.push({ local, module, line: lineOf(node) });
     return;
   }
 
@@ -586,6 +672,19 @@ function collect(
       }
     }
     return;
+  }
+
+  // `ns.name` and `ns['name']`, which is how a namespace import is spent (MUSE-113). Not
+  // returned on, and recorded for every object rather than only for a namespace: which
+  // identifiers are namespaces is known once the whole file has been walked, and an import
+  // can sit below its first use.
+  if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression)) {
+    into.reads.push({ object: node.expression.text, name: node.name.text, line: lineOf(node) });
+  } else if (ts.isElementAccessExpression(node) && ts.isIdentifier(node.expression)) {
+    const key = staticString(node.argumentExpression);
+    if (key !== null) {
+      into.reads.push({ object: node.expression.text, name: key, line: lineOf(node) });
+    }
   }
 
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
@@ -660,7 +759,15 @@ function calleeName(expression: ts.Expression): string | null {
   return null;
 }
 
-/** The names an import clause brings in, as the *exporting* module spells them. */
+/**
+ * The names an import clause brings in, as the *exporting* module spells them.
+ *
+ * A namespace import brings in no name here on purpose — `import * as ns` binds one local
+ * object and the names are whatever the file reads off it, which is `namespaceImports`'
+ * question (MUSE-113). The `name: null` entry this returns nothing for is still pushed, and
+ * is what the rules keyed on a *module* rather than a name read: `drivesBrowser` never had
+ * the hole for exactly that reason.
+ */
 function importedNames(node: ts.ImportDeclaration | ts.ExportDeclaration): string[] {
   const clause = ts.isImportDeclaration(node) ? node.importClause : node.exportClause;
   if (clause === undefined) return [];
@@ -682,6 +789,91 @@ function importedNames(node: ts.ImportDeclaration | ts.ExportDeclaration): strin
     return clause.elements.map((element) => (element.propertyName ?? element.name).text);
   }
   return [];
+}
+
+/** The local name a namespace import binds, or `null` for any other import clause. */
+function namespaceLocal(node: ts.ImportDeclaration | ts.ExportDeclaration): string | null {
+  if (!ts.isImportDeclaration(node)) return null;
+  const bindings = node.importClause?.namedBindings;
+  return bindings !== undefined && ts.isNamespaceImport(bindings) ? bindings.name.text : null;
+}
+
+/**
+ * The names a file imports by reading them off a namespace.
+ *
+ * MUSE-113. `importedNames` resolves a default binding and `ts.isNamedImports`, aliases
+ * included, and a namespace import has neither — so `import * as scratch from
+ * './helpers/scratch'` recorded one entry with `name: null` and **every rule stated against
+ * an imported name went quiet**: the deletion rule's `REMOVAL_NAMES`, MUSE-62's
+ * `unmeasuredDevServers`, MUSE-48's launcher rule. Not one rule's bug — the shape of the
+ * fact they all read.
+ *
+ * The name is taken from the *use*, not from the import: a namespace brings in everything
+ * the module exports, so a rule that fired on the import alone would fire on
+ * `test/format.test.ts` and `test/projections.test.ts`, which legitimately import a
+ * namespace and read nothing forbidden off it. A permanent false positive is a guard that
+ * gets deleted (MUSE-34), so the question asked is the one a reader asks: *which* names
+ * does this file take off that module.
+ *
+ * Reported at the import's line, so the message reads the same as it does for a named
+ * import, and deduplicated per name, so reading one name twice is one offence.
+ */
+function namespaceImports(namespaces: Namespace[], reads: Read[]): Import[] {
+  const found: Import[] = [];
+  for (const { local, module, line } of namespaces) {
+    const seen = new Set<string>();
+    for (const read of reads) {
+      if (read.object !== local || seen.has(read.name)) continue;
+      seen.add(read.name);
+      found.push({ module, name: read.name, line });
+    }
+  }
+  return found;
+}
+
+/** The operators that pick between two values without syntax saying which. */
+const CHOICE_OPERATORS = new Set<ts.SyntaxKind>([
+  ts.SyntaxKind.QuestionQuestionToken,
+  ts.SyntaxKind.BarBarToken,
+  ts.SyntaxKind.AmpersandAmpersandToken,
+]);
+
+/**
+ * The values an initializer can produce, with whether each one was `await`ed.
+ *
+ * MUSE-113. A binding used to be read as one expression, so the whole of
+ * `already ?? ctx.waitForEvent('page')` was „not a call" and the tab it produces was never
+ * tracked — the shape that turned MUSE-61's guard off on an earlier cut of its own branch.
+ * Parentheses and `await` are unwrapped, and `??`, `||`, `&&` and `?:` are flattened into
+ * their branches, because which branch runs is not a question syntax answers.
+ *
+ * Deliberately shallow in the same way `staticString` is: no variable is followed and no
+ * call's return value is looked into. It is the shape of the initializer, not its value.
+ */
+function candidateValues(
+  expression: ts.Expression,
+  awaited: boolean,
+): { expression: ts.Expression; awaited: boolean }[] {
+  if (ts.isParenthesizedExpression(expression)) {
+    return candidateValues(expression.expression, awaited);
+  }
+  if (ts.isAwaitExpression(expression)) return candidateValues(expression.expression, true);
+  if (ts.isConditionalExpression(expression)) {
+    return [
+      ...candidateValues(expression.whenTrue, awaited),
+      ...candidateValues(expression.whenFalse, awaited),
+    ];
+  }
+  if (
+    ts.isBinaryExpression(expression) &&
+    CHOICE_OPERATORS.has(expression.operatorToken.kind)
+  ) {
+    return [
+      ...candidateValues(expression.left, awaited),
+      ...candidateValues(expression.right, awaited),
+    ];
+  }
+  return [{ expression, awaited }];
 }
 
 /**
@@ -861,6 +1053,16 @@ export function fixedSleeps(file: string, source?: string): Offence[] {
  *     their tab `tab` are satisfied by either one routing it. That is the same crudeness
  *     `buildDirectoryNames` accepts, and it is why the suite now takes delivery of a tab in
  *     exactly one helper: one binding is a rule that cannot be fooled by a second one.
+ *     **The limit now rests on that convention holding** (MUSE-113): a second place that
+ *     takes delivery of a tab has to arrive with a scope-aware fix for this, because at that
+ *     point one gated tab named `tab` would satisfy an ungated one.
+ *   - **A tab bound through a choice is held to the name it stops at, not to its
+ *     awaitedness.** `const tab = already ?? ctx.waitForEvent('page')` may hold a tab or a
+ *     promise, so the rule treats the name as the tab unless some later binding awaits it
+ *     onward — which is conservative in one direction only. A plain non-awaited call
+ *     (`const opened = ctx.waitForEvent('page')`, never awaited into a name) is still read
+ *     as a promise and is still invisible, which is the first limit above; MUSE-61 decided
+ *     that deliberately and MUSE-113 did not reopen it.
  *   - **It says nothing about what happens *after* the commit.** A test that waits properly
  *     and then asserts the wrong thing is a wrong test, not a flaky one, and no guard reading
  *     syntax can tell those apart.
@@ -879,22 +1081,41 @@ export function uncommittedTabs(file: string, source?: string): Offence[] {
    */
   const tabs: { name: string; line: number }[] = [];
 
+  /**
+   * Names the file hands on to another name: `const tab = await opened`.
+   *
+   * Computed over every binding before the walk below, because it is what decides where a
+   * choice-bound tab's obligation stops, and the binding that hands the tab on is further
+   * down the file than the one that holds the choice.
+   */
+  const handedOn = new Set(
+    bindings.filter(({ awaited }) => awaited).flatMap(({ identifiers }) => identifiers),
+  );
+
   for (const binding of bindings) {
-    const fromEvent =
-      binding.call === TAB_EVENT &&
-      binding.callArgument !== null &&
-      TAB_EVENT_NAMES.has(binding.callArgument);
+    const fromEvent = binding.calls.some(
+      (call) =>
+        call.name === TAB_EVENT &&
+        call.argument !== null &&
+        TAB_EVENT_NAMES.has(call.argument),
+    );
 
     if (fromEvent) {
       if (binding.awaited) tabs.push({ name: binding.name, line: binding.line });
-      else promised.set(binding.name, binding.line);
+      // `const opened = already ?? ctx.waitForEvent('page')` (MUSE-113). The alternative
+      // may already be a tab, so whether this name holds a tab or the promise of one is not
+      // something syntax answers. What it does answer is that a tab reaches this name — so
+      // the obligation stops here unless the file hands it to a name that awaits it, which
+      // is what the live helper does and why it stays green.
+      else if (binding.choice && !handedOn.has(binding.name)) {
+        tabs.push({ name: binding.name, line: binding.line });
+      } else promised.set(binding.name, binding.line);
       continue;
     }
     // `const tab = await opened` — the second hop, and the only one.
-    const awaitedFrom =
-      binding.awaited && binding.identifier !== null
-        ? promised.get(binding.identifier)
-        : undefined;
+    const awaitedFrom = binding.awaited
+      ? binding.identifiers.map((name) => promised.get(name)).find((line) => line !== undefined)
+      : undefined;
     if (awaitedFrom !== undefined) tabs.push({ name: binding.name, line: awaitedFrom });
   }
 
