@@ -24,6 +24,25 @@
  * evidence instead — a merged pull request plus a clean tree plus a tip commit the pull
  * request already contains.
  *
+ * ## What enforces that, and what was declined
+ *
+ * `test/isolation.test.ts` reads `package.json` **structurally** — every string at every
+ * key, not the one key this task is defined at — and the checkout minus what `.gitignore`
+ * disclaims, so a lifecycle hook, a workflow step, a `.claude/settings.json` hook or a
+ * wrapper script naming this file is a red test (MUSE-89). The guard it replaces read
+ * three named files and never the rest of the manifest, so a `posttest` running
+ * `--remove` on every `npm test` was green.
+ *
+ * **A no-TTY refusal for `--remove` was weighed and declined**, and the reason is nesting:
+ * a hook spelled `npm run worktrees:sweep -- --remove` starts a *nested* `npm run`, which
+ * sets `npm_lifecycle_event` to this task's own name and leaves the child
+ * indistinguishable from a human typing the command. The environment cannot tell the two
+ * apart. `process.stdout.isTTY` is false for every legitimate run here as well — this
+ * project is driven through an agent's tool calls and read back out of CI logs, neither of
+ * which has a terminal — so a refusal would fire on the ordinary case and teach whoever
+ * hit it to add an override flag, which the hook would then carry. The manifest is the one
+ * surface a nested invocation cannot hide from, so that is where the rule is stated.
+ *
  * ## The trap: this repository squash-merges
  *
  * A squash merge creates a **new commit** on `main` with no parent link to the branch, so

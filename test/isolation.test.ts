@@ -492,23 +492,265 @@ describe('the worktree sweep removes a finished ticket and nothing else', () => 
       action: 'keep',
     });
   });
+});
 
-  it('is a command and is wired to nothing that runs on its own', () => {
-    // The acceptance criterion that is about *absence*: no schedule, no hook, no
-    // `globalSetup`. A sweep that ran by itself would eventually delete a worktree an
-    // agent was thinking in, and that is worse than the disk filling up.
-    const script = 'scripts/sweep-worktrees.mjs';
-    const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
-    expect(manifest.scripts['worktrees:sweep']).toBe(`node ${script}`);
+/**
+ * **The rule is about what can invoke the sweep, not about three named files** (MUSE-89).
+ *
+ * The block above asserted `scripts['worktrees:sweep']` and then text-scanned
+ * `test/helpers/clean-scratch.ts`, `vitest.config.ts` and `.github/workflows/*`. It never
+ * read the rest of `package.json`, so QA added
+ *
+ *     "posttest": "npm run worktrees:sweep -- --remove"
+ *
+ * and **every `npm test` would have deleted every merged worktree** — with this file,
+ * `test/origin.test.ts` and `test/format.test.ts` all green. The same hole covered the
+ * tracked `.claude/settings.json`, which is where a session hook would live.
+ *
+ * This board has filed thirteen guards whose rule could not reach their case. Those cost a
+ * missed regression; this one costs an agent's uncommitted work, silently, on a command
+ * everybody runs — `git worktree remove` without `--force` protects a dirty tree and not a
+ * clean one holding commits that exist nowhere else, which is the state MUSE-79 found three
+ * worktrees in.
+ *
+ * So the question is asked of the repository rather than of a list of files:
+ *
+ *   - **`package.json`, structurally.** Every string in the manifest, at whatever key, is
+ *     read; exactly one may name the sweep and it has to *be* the definition. And the
+ *     manifest declares **no npm lifecycle hook at all** — no `pre`/`post` partner of a
+ *     declared script, none of npm's own install names — because a hook is the only entry
+ *     here that runs without being asked, and that half of the rule holds however the
+ *     command is spelled.
+ *   - **everywhere else, by file.** The walk is the checkout minus what `.gitignore`
+ *     disclaims, so a workflow, `.claude/settings.json`, an agent command or a wrapper
+ *     script is read the day it lands and there is no scan list to keep current (MUSE-42's
+ *     shape). Six paths may name the sweep, each with the reason it has to, each asserted
+ *     still live.
+ *
+ * What it cannot reach, stated rather than implied: a **non-hook** script whose command
+ * reaches the file without naming it — a shell glob, a variable holding the path — which
+ * still only runs when somebody types that script's own name; a needle assembled at
+ * runtime, the evasion every text rule in this repository shares; and anything outside the
+ * checkout, such as a shell alias, an untracked `.git/hooks` entry or a cron line. The
+ * no-TTY refusal the ticket raised was weighed and declined — the reasoning is in
+ * `scripts/sweep-worktrees.mjs`, under the heading about nesting.
+ */
+describe('nothing in the repository can invoke the worktree sweep on its own', () => {
+  const SWEEP_SCRIPT = 'scripts/sweep-worktrees.mjs';
+  const SWEEP_TASK = 'worktrees:sweep';
 
-    for (const file of ['test/helpers/clean-scratch.ts', 'vitest.config.ts']) {
-      expect(readFileSync(join(ROOT, file), 'utf8')).not.toContain('sweep-worktrees');
+  /** The two spellings an invocation has: the npm task, and the file it runs. */
+  const NEEDLES = [SWEEP_TASK, 'sweep-worktrees'];
+
+  /**
+   * npm's own lifecycle names, which fire with no same-named script to partner.
+   *
+   * `prepare` is the one that matters most here — it runs on a bare `npm install` in a
+   * git checkout, which is every agent's first command.
+   */
+  const NPM_LIFECYCLE = [
+    'preinstall',
+    'install',
+    'postinstall',
+    'prepare',
+    'prepublish',
+    'prepublishOnly',
+    'prepack',
+    'postpack',
+    'dependencies',
+  ];
+
+  /**
+   * The paths that may name the sweep, and the reason each one has to.
+   *
+   * Every entry is asserted *live* below — it must exist and must still contain a needle —
+   * so a stale exemption is an error rather than a widening nobody notices. Prose is on the
+   * list by path rather than by extension: `.claude/commands/` is Markdown an agent
+   * executes, so "a `.md` cannot run" is not true in this checkout.
+   */
+  const MAY_NAME_THE_SWEEP: { path: string; why: string }[] = [
+    {
+      path: 'package.json',
+      why:
+        'defines the one task. Read structurally by the first test in this ' +
+        'block, which is where the interesting failure is.',
+    },
+    { path: SWEEP_SCRIPT, why: 'is the sweep.' },
+    {
+      path: 'test/isolation.test.ts',
+      why:
+        'is this guard: it imports `verdict` for the block above and has to name ' +
+        'what it searches for.',
+    },
+    { path: 'CLAUDE.md', why: 'lists the command for a human to type.' },
+    { path: 'README.md', why: 'lists the command, and says what `--remove` will not touch.' },
+    { path: 'docs/decisions/testing.md', why: 'argues why the sweep is manual.' },
+  ];
+
+  /**
+   * `.gitignore`, as patterns: comments and blanks dropped, slashes trimmed.
+   *
+   * Same derivation as `test/seo.test.ts`'s host scan and `scripts/check-format.mjs`, and
+   * duplicated rather than imported because importing a `.test.ts` runs its suites. The
+   * exclusions only ever make the walk read *more* than it has to, so a pattern that stops
+   * matching is a loud false positive rather than silent coverage loss.
+   */
+  function notSource(): string[] {
+    return readFileSync(join(ROOT, '.gitignore'), 'utf8')
+      .split('\n')
+      .map((line) => line.replace(/#.*$/, '').trim())
+      .map((line) => line.replace(/^\/+|\/+$/g, ''))
+      .filter(Boolean);
+  }
+
+  function isIgnored(rel: string, patterns: string[]): boolean {
+    if (rel === '.git' || rel.startsWith('.git/')) return true;
+    return patterns.some((pattern) => {
+      if (pattern.includes('/')) return rel === pattern || rel.startsWith(`${pattern}/`);
+      const escaped = pattern
+        .split('*')
+        .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      const glob = new RegExp(`^${escaped.join('[^/]*')}$`);
+      return rel.split('/').some((segment) => glob.test(segment));
+    });
+  }
+
+  /** Every file in the checkout that `.gitignore` does not disclaim, repo-relative. */
+  function repoFiles(): string[] {
+    const patterns = notSource();
+    const descend = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = join(dir, entry.name);
+        const rel = relative(ROOT, full).replace(/\\/g, '/');
+        if (isIgnored(rel, patterns)) return [];
+        return entry.isDirectory() ? descend(full) : [rel];
+      });
+    return descend(ROOT).sort();
+  }
+
+  /** Every string in the manifest, with the key path that reaches it. */
+  function manifestStrings(
+    value: unknown,
+    at: string[] = [],
+  ): { key: string; value: string }[] {
+    if (typeof value === 'string') return [{ key: at.join('.'), value }];
+    if (Array.isArray(value)) {
+      return value.flatMap((item, i) => manifestStrings(item, [...at, String(i)]));
     }
-    for (const workflow of readdirSync(join(ROOT, '.github/workflows'))) {
-      const yaml = readFileSync(join(ROOT, '.github/workflows', workflow), 'utf8');
-      expect(yaml, workflow).not.toContain('worktrees:sweep');
-      expect(yaml, workflow).not.toContain('sweep-worktrees');
+    if (value !== null && typeof value === 'object') {
+      return Object.entries(value).flatMap(([key, item]) =>
+        manifestStrings(item, [...at, key]),
+      );
     }
+    return [];
+  }
+
+  function manifest(): Record<string, unknown> {
+    return JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+  }
+
+  it('names the sweep in exactly one npm script, and that script is the whole of it', () => {
+    // The assertion the old one was missing: over *every* key, not over the one key the
+    // sweep is defined at. A `posttest`, a `prepare`, or a second script shelling out to
+    // the first all land here, and the failure prints the key and its command.
+    const naming = manifestStrings(manifest()).filter(({ value }) =>
+      NEEDLES.some((needle) => value.includes(needle)),
+    );
+    expect(naming).toEqual([{ key: `scripts.${SWEEP_TASK}`, value: `node ${SWEEP_SCRIPT}` }]);
+  });
+
+  it('declares no npm lifecycle hook, so no command of ours runs a second one', () => {
+    // The half that does not depend on how the hook's command is spelled. `preview` is
+    // not a hook: npm pairs `pre`/`post` with a script of the remaining name, and there is
+    // no `view` script — which is why this is computed from the manifest rather than from
+    // a prefix.
+    const scripts = Object.keys((manifest().scripts ?? {}) as Record<string, string>);
+    const hooks = scripts.filter((name) => {
+      if (NPM_LIFECYCLE.includes(name)) return true;
+      const target = name.replace(/^(pre|post)/, '');
+      return target !== name && scripts.includes(target);
+    });
+    expect(hooks).toEqual([]);
+  });
+
+  it('is named by nothing else in the checkout, workflows and agent config included', () => {
+    const exempt = (file: string) =>
+      MAY_NAME_THE_SWEEP.some(
+        ({ path }) => file === path || (path.endsWith('/') && file.startsWith(path)),
+      );
+
+    const offences = repoFiles()
+      .filter((file) => !exempt(file))
+      .flatMap((file) => {
+        const lines = readFileSync(join(ROOT, file), 'utf8').split('\n');
+        return lines.flatMap((line, i) => {
+          const needle = NEEDLES.find((candidate) => line.includes(candidate));
+          return needle === undefined
+            ? []
+            : [
+                `${file}:${i + 1} — names the worktree sweep (${needle}); it is a command a ` +
+                  'human types, so nothing else may reach it',
+              ];
+        });
+      });
+    expect(offences).toEqual([]);
+  });
+
+  it('reads the files a hook could live in, and no dependency tree', () => {
+    // The anti-narrowing half. The walk is derived from disk, so a new workflow or a new
+    // agent config file is covered the day it lands; these are the ones the defect was
+    // about, named so that a scan which quietly stopped reading them is a failure here.
+    const files = repoFiles();
+    expect(files).toContain('package.json');
+    expect(files).toContain('.claude/settings.json');
+    expect(files).toContain('vitest.config.ts');
+    expect(files).toContain('test/helpers/clean-scratch.ts');
+    expect(
+      files.filter((file) => file.startsWith('.github/workflows/')).length,
+    ).toBeGreaterThan(0);
+    expect(files.filter((file) => file.startsWith('.claude/commands/')).length).toBeGreaterThan(
+      0,
+    );
+    expect(files.filter((file) => file.startsWith('node' + '_modules/'))).toEqual([]);
+  });
+
+  it('keeps every exemption live', () => {
+    for (const { path } of MAY_NAME_THE_SWEEP) {
+      expect(existsSync(join(ROOT, path)), path).toBe(true);
+      const text = readFileSync(join(ROOT, path), 'utf8');
+      expect(
+        NEEDLES.some((needle) => text.includes(needle)),
+        `${path} no longer names the sweep — delete its entry`,
+      ).toBe(true);
+    }
+  });
+
+  it('removes through git without --force, and never asks the commit graph', () => {
+    // Two of MUSE-79's properties that nothing asserted. Read off the argument arrays
+    // rather than the file's text, because its own prose states both and a text scan would
+    // pass on the comment while the code disagreed (MUSE-34's false positive, inverted).
+    const source = readFileSync(join(ROOT, SWEEP_SCRIPT), 'utf8');
+    const commands = [...source.matchAll(/\bgit\(\s*\[([^\]]*)\]/g)].map((call) =>
+      [...call[1]!.matchAll(/'([^']*)'/g)].map((arg) => arg[1]!),
+    );
+
+    expect([...commands.map((args) => args.join(' '))].sort()).toEqual([
+      'branch -r --contains',
+      'status --porcelain',
+      'worktree list --porcelain',
+      'worktree prune',
+      'worktree remove',
+    ]);
+
+    const removal = commands.find((args) => args[0] === 'worktree' && args[1] === 'remove');
+    expect(removal, 'the sweep no longer removes anything').toBeDefined();
+    // Without `--force`, so git re-checks the working tree and has the last word.
+    expect(removal).not.toContain('--force');
+    // And the signal is the pull request: this repository squash-merges, so a merged
+    // branch is never an ancestor of `main` and the commit graph says "unmerged" for
+    // every worktree the sweep exists to reclaim.
+    expect(commands.flat()).not.toContain('merge-base');
+    expect(commands.flat()).not.toContain('--is-ancestor');
   });
 });
 
