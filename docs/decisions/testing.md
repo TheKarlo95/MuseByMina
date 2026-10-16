@@ -46,7 +46,10 @@ ticket (MUSE-114 is the open instance).
   Note what MUSE-48's landing assertion cannot do for you here: it compares the path and
   the `?lang=` it *asked for* against the ones it landed on, so it catches a redirect and
   not a URL that was wrong before it was requested. `astro dev` serves `404.astro` at the bad path with no
-  redirect, and that page carries the same six faces and two preloads — so
+  redirect, and that page carries the same six faces and the same preloads a Croatian page
+  carries. The set is per page since MUSE-74 — six links on the error page, on `/` and on
+  `/schedule/`, against three on `/en/` — and the error page's is byte-identical to the
+  Croatian one, so
   `test/fonts.test.ts` measured the error page in all three environments and stayed green.
   A check needs something from the page's own markup saying which page it is, and that is
   one function: `fetchMeasuredPage` in `test/helpers/measured.ts` (MUSE-62), the `fetch`
@@ -513,16 +516,24 @@ ticket (MUSE-114 is the open instance).
   `location.href` poll observes the commit too, but in the renderer, and the gap between
   the renderer knowing and the frame bookkeeping knowing is where this was lost: 11 of 160
   trials reproduce the exact CI failure with the tab's first document request delayed 8–14
-  ms, and 0 of 240 do with the commit awaited. **Never gate on
+  ms, and 0 of 240 do with the commit awaited — 240 trials of that same
+  delayed-first-request reproduction, **and the figure holds only for a page Playwright
+  has owned since before it moved**. For a tab Chromium opened and Playwright adopted
+  afterwards the commit event can be lost outright, so awaiting it there fixed nothing:
+  that is the flake the next paragraph measures at about one full `npm test` in four
+  (MUSE-70). **Never gate on
   `waitForURL(theExpectedUrl)`** — that hands the judging to the wait, so a dropped
   `?lang=` becomes a 15-second timeout instead of a comparison naming what it got, and
   `?lang=` is the whole subject of those tests. The predicate is a property of the URL
   (*not blank*, *not where we started*); `expect` stays the judge. The `localStorage` wait
   is **gone rather than moved**: `langInitScript` is a blocking head script, so
   `readyState === 'complete'` already proves it ran, and waiting for the thing the next
-  line asserts made that assertion unfailable except by timeout. `uncommittedTabs` keeps
-  the shape out, and the suite takes delivery of a new tab in exactly one helper so that
-  name-scoped rule has one binding to watch rather than three.
+  line asserts made that assertion unfailable except by timeout **in the case it is written
+  for**: the old predicate was `getItem(key) !== null` against an assertion of `'hr'`, so a
+  wrong language stored still failed as a comparison, and a language not stored at all —
+  which is the state those tests exist to catch — could only time out. `uncommittedTabs`
+  keeps the shape out, and the suite takes delivery of a new tab in exactly one helper so
+  that name-scoped rule has one binding to watch rather than three.
 
   **For a tab Chromium opened, `page.url()` is not that bookkeeping — it is a mirror that
   can be permanently wrong** (MUSE-70), and that was the flake that dominated the suite:

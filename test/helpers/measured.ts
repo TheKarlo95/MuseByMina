@@ -23,8 +23,10 @@
  * exactly how `test/devcontent.test.ts` could have gone green with eight copies of the
  * homepage, and how `test/fonts.test.ts` went green for the life of MUSE-35's coverage
  * against eight copies of the 404: the error page loads the same stylesheet, declares the
- * same six faces and carries the same two preloads, so every font measurement gave the
- * right answer for the wrong document.
+ * same six faces and carries a preload set byte-identical to a Croatian page's — six
+ * links on the error page, on `/` and on `/schedule/` alike, against three on `/en/` since
+ * MUSE-74 made the set per page — so every font measurement gave the right answer for the
+ * wrong document.
  *
  * Nor can the status alone, though it is checked here too and it is cheap. A built site
  * served by `test/helpers/serve.ts` answers an unknown path with the *error page's body*

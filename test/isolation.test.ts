@@ -1712,12 +1712,13 @@ describe('the run reports a dead hook rather than swallowing it', () => {
       const coloured =
         '\u001b[31m\u001b[1m10:03:30\u001b[22m [ERROR] [muse-staging-guard]\u001b[39m ' +
         'An unhandled error occurred while running the "astro:config:setup" hook\n' +
-        'outDir must start with the project root path, and may not be the root (MUSE-41).';
+        'outDir must start with the project root path and with the working directory, and ' +
+        'may not be the root (MUSE-41, MUSE-92, MUSE-108).';
 
       expect(buildErrorHeadline(coloured)).toBe(
         '[muse-staging-guard] An unhandled error occurred while running the ' +
-          '"astro:config:setup" hook — outDir must start with the project root path, and ' +
-          'may not be the root (MUSE-41).',
+          '"astro:config:setup" hook — outDir must start with the project root path and ' +
+          'with the working directory, and may not be the root (MUSE-41, MUSE-92, MUSE-108).',
       );
     });
 

@@ -421,9 +421,15 @@ async function settleCommit(
  * one, as a stand-in for "the destination's script has run", and it was wrong twice over.
  * It is unnecessary — `langInitScript` is a blocking inline script in `<head>`, so a
  * document that reaches `readyState === 'complete'` has already run it, which is exactly
- * what the second condition above establishes. And it was *harmful*: `expect(await
- * storedLang(tab))` right after it could only fail by timing out, because the wait had
- * already demanded the thing the assertion then checked. Measured on the way in, it is
+ * what the second condition above establishes. And it was *harmful in the case these
+ * tests are written against*: the old predicate was `localStorage.getItem(key) !== null`
+ * and the assertion after it is `expect(tab.stored).toBe('hr')`, so a tab that stored the
+ * wrong language satisfied the wait and then failed the assertion as a readable
+ * comparison — but a tab that stored *nothing*, which is what a tab opened this way did
+ * before MUSE-33 and the state these three tests exist to catch, could only fail by
+ * timing out, because the wait had already demanded exactly that. A narrowing rather than
+ * a reversal (MUSE-114): the wait is still gone, on this reason and the two others here.
+ * Measured on the way in, it is
  * also not even safe on its own terms — on a tab still at `about:blank` the read raises
  * `SecurityError` (the initial empty document of a middle-clicked tab has an opaque
  * origin), so that gate's two possible verdicts were "the right answer by luck" and "an
