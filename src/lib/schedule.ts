@@ -146,14 +146,38 @@ export const LEVEL_NAME: Record<Locale, Record<Level, string>> = {
  * | the sentence licensing the other three | `4be63d3` — MUSE-36 |
  *
  * So the sentence licensing three of them arrived in **the same commit that authored the
- * fourth**, two days after the other three, and it could not have been about `c303292`'s
- * work in any case: MUSE-6 specified three levels („Početni / Srednji / Napredni") and
- * used „oko godinu dana" as an *example of the required format*, not as a threshold
- * anybody had agreed. MUSE-36's comments flag `improver` for confirmation and record no
- * conversation about the rest. `c303292` is also the commit that produced MUSE-36's
- * thirteen invented classes and the commercial promise MUSE-71 retired, both
- * fabrications — the claim itself is not restated here, for the reason `RETIRED_CLAIMS`
- * in `test/helpers/offer-claims.ts` has no exemption list.
+ * fourth** — a later ticket than the one that wrote the other three — and it could not
+ * have been about `c303292`'s work in any case: MUSE-6 specified three levels („Početni /
+ * Srednji / Napredni") and used „oko godinu dana" as an *example of the required format*,
+ * not as a threshold anybody had agreed. MUSE-36's comments flag `improver` for
+ * confirmation and record no conversation about the rest. **No elapsed time is stated
+ * here** (MUSE-111): this said „two days after the other three", which is true of neither
+ * pair of commits the table cites — `c303292` to `4be63d3` is 36 h 32 m, and the branch
+ * commits behind them, `6eb97d0` to `4fe2ae0`, are 37 h 24 m apart — and the figure
+ * carries nothing that „a later ticket" does not.
+ *
+ * `c303292` is also the commit that produced the thirteen invented classes MUSE-36
+ * retired: it **adds** `src/data/schedule.ts`, with all thirteen rows in it, so that
+ * clause is sound. It is **not** where the commercial promise MUSE-71 retired came from,
+ * which is what this comment claimed until MUSE-111 — a false provenance claim shipped by
+ * the ticket whose entire subject was a false provenance claim, two lines under the table
+ * that corrected it. That string is `c45d750`'s, the Astro rebuild, which introduced it as
+ * the header CTA label in `src/lib/nav.ts`, earlier than any commit of either ticket;
+ * both of them inherited it untouched, adding and removing no occurrence of it. The claim
+ * itself is not restated here, for the reason `RETIRED_CLAIMS` in
+ * `test/helpers/offer-claims.ts` has no exemption list.
+ *
+ * **Every commit named above was established with `git log -S` on the string itself, in
+ * the course of the ticket that wrote the line, and the commands are in that ticket's pull
+ * request.** That is the whole of the guard and it is deliberately not a test. „Which
+ * commit authored this string" is answerable only by walking history; invariant (5) of
+ * `test/isolation.test.ts` lets nothing under `test/` start a process except the one build
+ * helper, and that allow-list is one file long on purpose; and history is not a stable
+ * input — a shallow CI clone answers `-S` from the commits it happens to have, so the gate
+ * would pass here and be vacuous or wrong there. A test that asserted the *strings* in
+ * this table against a hardcoded copy of them would be green on exactly the two defects
+ * MUSE-111 found, because both were internally consistent. Run the command before writing
+ * the sentence; that is the only instrument there is.
  *
  * **All four are therefore unconfirmed, and all four are still published** — the owner's
  * decision, taken in MUSE-85 over removing the two that carry a number. They are honest
