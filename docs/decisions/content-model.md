@@ -446,10 +446,20 @@ ticket (MUSE-114 is the open instance).
   `test/seedcheck.test.ts` driving it against fixtures the way `test/seedrelease.test.ts`
   drives the release verdict: **a test that needs a dataset write is a test that cannot
   run**, and the asset exclusion has no live instance to assert against at all, because
-  nothing has been uploaded yet. An unreachable API prints what happened and exits 0, for
-  the release gate's reason — `npm run build` fetches the dataset in two `ci.yml` jobs and
-  in `deploy.yml`, so an outage is already red everywhere it matters, and a second red for
-  it teaches people to ignore this one.
+  nothing has been uploaded yet — measured 2026-10-16, `count(*)` is 27 over eight content
+  types and not one asset document, which is written beside that assertion so a green test
+  is not read as evidence about the dataset.
+
+  **On an unreachable API the verdict fails open and the exit code does not, and those are
+  two questions.** „Could not tell" never becomes a finding: no document is reported
+  missing, drifted or unseeded on evidence that did not arrive. But the command still
+  exits 1, which is where this differs from `sanity:seed:release` — there the exit code
+  blocks a merge, so failing open *has* to include it, while here the step is
+  `continue-on-error` and the code blocks nothing, which leaves a human running the command
+  as its only reader. For that reader `0` says *all clear*, and „I could not read the
+  dataset" is not all clear. `exitCode` is the one place that lives and
+  `test/seedcheck.test.ts` pins it both ways — the old script's exit was pinned by nothing,
+  which is why it could have moved in silence.
 
 - **An optional field is a decision, not laziness.** `instructor.portrait`,
   `instructor.instagram`, `instructor.bio`, `class.description`, `class.image`,

@@ -71,13 +71,23 @@
  * `scripts/seed-compare.mjs` so that the blocking check and this one cannot disagree
  * about what a difference is.
  *
- * ## Why an unreachable API exits 0
+ * ## An unreachable API: the verdict fails open, the exit code does not
  *
- * For the release gate's reason, which applies here unchanged: since MUSE-20 `npm run
- * build` fetches the dataset and hard-fails if Sanity does not answer — two `ci.yml` jobs
- * and `deploy.yml` — so an outage is already red everywhere it matters, and a second red
- * for the same outage only teaches people to ignore this one. „We could not tell" is
- * printed loudly and is not a finding.
+ * Two different things get called *failing open* and only one of them is the exit code.
+ *
+ * **The verdict fails open.** A dataset that did not answer yields „could not tell" and
+ * nothing else: no document is reported `MISSING`, `DRIFTED` or `UNSEEDED` on evidence
+ * that never arrived. `scripts/sanity-seed-release.mjs` does the same, and there the
+ * exit code follows, because *there* the exit code blocks a merge and „we could not
+ * tell" must not.
+ *
+ * **The exit code reports that the question went unanswered — `1`.** This step is
+ * `continue-on-error: true` in `ci.yml`, so nothing is blocked by it either way, which
+ * means the only reader of the code is a human or an agent running the command. For that
+ * reader `0` says *all clear*, and „I could not read the dataset" is not all clear.
+ * `exitCode` is the one place that decision lives and `test/seedcheck.test.ts` pins it
+ * both ways, because the old script's exit was pinned by nothing and could therefore have
+ * moved in silence.
  */
 import { READ_CONTRACT } from './check-sanity.mjs';
 import {
@@ -228,9 +238,10 @@ export function seedReport(verdict) {
   if (verdict.unreadable) {
     return [
       'The dataset could not be read, so whether it still says what the seed says is',
-      'unknown. Not failing on it: `npm run build` fetches the dataset in two `ci.yml`',
-      'jobs and in `deploy.yml` and hard-fails on an outage, so an unreachable API is',
-      'already red everywhere it matters.',
+      'unknown — and unknown is what this reports: nothing is called missing, drifted or',
+      'unseeded on evidence that did not arrive. It exits 1 all the same. The step is',
+      '`continue-on-error` in `ci.yml`, so that blocks nothing; the code is read by a',
+      'human, and a check that could not answer must not say nothing is wrong.',
     ];
   }
 
@@ -311,6 +322,21 @@ export function seedAdvice(verdict) {
   return advice;
 }
 
+/**
+ * **The exit code, which is not the same question as the verdict.**
+ *
+ * `1` for a disagreement and `1` for „could not tell", `0` only when the dataset was read
+ * and said what the seed says. The verdict still fails open — see the header — and this is
+ * the half that does not: the step is `continue-on-error`, so the code blocks nothing and
+ * its one reader is a human, for whom `0` means *all clear*.
+ *
+ * @param {Verdict} verdict
+ * @returns {0 | 1}
+ */
+export function exitCode(verdict) {
+  return verdict.unreadable || verdict.disagrees ? 1 : 0;
+}
+
 /* ------------------------------------------------------------------ the command */
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -345,5 +371,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   for (const line of seedReport(verdict)) console.log(line);
   for (const line of seedAdvice(verdict)) console.error(line);
 
-  process.exit(verdict.disagrees ? 1 : 0);
+  process.exit(exitCode(verdict));
 }

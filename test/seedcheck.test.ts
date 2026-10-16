@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CONTENT_TYPES,
+  exitCode,
   seedAdvice,
   seedReport,
   seedVerdict,
@@ -175,6 +176,12 @@ describe('Sanity’s own asset documents are in the dataset legitimately', () =>
    * queries project `asset._ref` off the *referring* document and build the URL from the
    * id, so the asset document itself is read by nothing. Reported as drift they would be
    * the whole output, and the one real finding would be a line in the middle of it.
+   *
+   * **This is proved by fixture only, and it cannot be read as evidence about the live
+   * dataset.** Measured 2026-10-16: `count(*)` is 27 and `array::unique(*._type)` is
+   * eight content types, so the production dataset holds **no asset document at all** —
+   * nothing has been uploaded yet. Green here therefore says the rule is implemented, not
+   * that it has ever been exercised; the first upload is the first live instance of it.
    */
   it('are not reported, however many of them there are', () => {
     const verdict = seedVerdict({
@@ -290,19 +297,46 @@ describe('a dataset that matches the seed exactly', () => {
 
 describe('an unreachable API', () => {
   /**
-   * AC4, and the release gate's reasoning verbatim: „we could not tell" must not be a
-   * finding. Since MUSE-20 `npm run build` fetches the dataset and hard-fails if Sanity
-   * does not answer — in two `ci.yml` jobs and in `deploy.yml` — so an outage is already
-   * red everywhere it matters. A second red for the same outage only teaches people to
-   * ignore this one.
+   * AC4. **The verdict fails open and the exit code does not, and those are two
+   * questions.** „We could not tell" must never become a finding: no document is reported
+   * missing, drifted or unseeded on evidence that did not arrive, which is the property
+   * the release gate has too.
    */
-  it('is not a disagreement, and the report says why not', () => {
+  it('is not a disagreement, and invents no finding', () => {
     const verdict = seedVerdict({ seeded: SEEDED, live: null, index: null });
 
     expect(verdict.unreadable).toBe(true);
-    expect(verdict.disagrees, 'the exit code is this flag').toBe(false);
+    expect(verdict.disagrees, 'nothing disagreed; nothing was read').toBe(false);
+    expect(verdict.missing).toEqual([]);
+    expect(verdict.drifted).toEqual([]);
+    expect(verdict.unseeded).toEqual([]);
     expect(seedAdvice(verdict)).toEqual([]);
     expect(seedReport(verdict).join('\n')).toContain('could not be read');
+  });
+
+  /**
+   * And the other half, pinned because the old script's exit code was pinned by nothing
+   * and could therefore have moved in silence: `sanity:seed:check` is
+   * `continue-on-error` in `ci.yml`, so this code blocks nothing and its only reader is a
+   * human running the command — for whom `0` means *all clear*, and a check that could
+   * not answer must not say nothing is wrong.
+   */
+  it('still exits 1, because the code is a human’s only signal', () => {
+    expect(exitCode(seedVerdict({ seeded: SEEDED, live: null, index: null }))).toBe(1);
+    expect(
+      exitCode(seedVerdict({ seeded: SEEDED, live: SEEDED, index: indexOf(SEEDED) })),
+      'read, and in agreement, is the only 0',
+    ).toBe(0);
+    expect(
+      exitCode(
+        seedVerdict({
+          seeded: SEEDED,
+          live: SEEDED,
+          index: [...indexOf(SEEDED), row('studioStory', 'studioStory')],
+        }),
+      ),
+      'an unseeded document is the same register as a drifted one',
+    ).toBe(1);
   });
 
   /**
