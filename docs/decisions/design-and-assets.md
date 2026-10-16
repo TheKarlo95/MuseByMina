@@ -73,6 +73,32 @@ ticket (MUSE-114 is the open instance).
   rebuild does not, so a *Sanity* edit putting a Croatian name into English copy can stale
   `EN_LATIN_EXT` and deploy.
 
+  **`display: none` is a hole in the measurement as well as an argument about the
+  derivation, and it is blind in the direction a visitor reads** (MUSE-106). `[hidden]` is
+  `display: none`, so there is no layout and the engine requests no face — so latin-ext
+  text a page can paint *only after an interaction* measures as a face the page does not
+  need. Reachable from code, not only from the CMS: `Header.astro` renders **every**
+  `MORE_NAV` entry inside the closed `<ul id="more-menu" hidden>` while the footer takes
+  only `MORE_NAV.slice(0, 4)`, so a fifth entry with a diacritic in its *English* label
+  lives on an English page in exactly one place. „Noć bachate" was planted there and
+  `test/fonts.test.ts` stayed green in all three environments. Two answers were weighed and
+  refused: **measuring with the dropdown opened** makes the gate depend on a list of which
+  interactions exist, which is the list this design exists not to keep, and **defaulting
+  every English page to all three latin-ext subsets** is the 135.9 KB already refused above.
+  What the suite does instead is ask a *different question of the same document* — which
+  characters it holds that **no `latin` subset can paint**, in text the engine laid out no
+  box for, `Range.getClientRects()` answering rather than a model. A character-range
+  question needs no cascade model because it never asks which *face* paints the character;
+  it cannot, so the requirement is **all three** latin-ext subsets or a failure quoting the
+  string and the page. Croatian and content-keyed routes satisfy it by construction, so it
+  has teeth exactly where `EN_LATIN_EXT` can be short an entry, and that table is untouched
+  and still additive-only. **Keep both measurements**: only the request measurement sees a
+  preload pointing at a face nothing paints, and only the character-range measurement sees
+  text no interaction in the suite ever triggers. The `unicode-range` values are parsed out
+  of `src/styles/fonts.css` rather than transcribed, because a copy typed slightly too wide
+  reports every diacritic as covered and the guard then finds nothing for the rest of its
+  life — which is why two counters beside it refuse a scan that found nothing at all.
+
 - **There is a performance budget, it is `scripts/budget.mjs`, and it is deliberately
   not Lighthouse** (MUSE-63). The original plan listed `lighthouse` among the blocking
   checks; it was never built, and the only size guard was a `du -sm dist` step watching
