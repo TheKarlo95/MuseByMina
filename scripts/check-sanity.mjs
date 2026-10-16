@@ -108,6 +108,14 @@ const SOURCES = [
   { file: 'src/lib/schedule.ts' },
   { file: 'src/lib/pages.ts' },
   { file: 'src/lib/events.ts' },
+  // `src/lib/events.ts` imports `localeUrl` out of it, so it is in the schema's own
+  // module graph — one import deeper than the three above, which is why nobody had put
+  // it here. MUSE-95 is why it is here now: `test/sanity.test.ts` walks the graph from
+  // `sanity/schemaTypes/index.ts` and fails on a module this list does not cover, so
+  // "everything the schema is built from is fingerprinted" is asserted rather than
+  // maintained by hand. A constant declared in an unfingerprinted module can reach a
+  // field's `Rule.valid()`, and edits to it would then not be a schema change at all.
+  { file: 'src/lib/i18n.ts' },
   { file: 'src/lib/sanity/queries.ts' },
 ];
 
