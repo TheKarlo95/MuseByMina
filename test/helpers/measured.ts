@@ -132,6 +132,16 @@ export function assertMeasuredPage(
  * The one way anything under `test/` should read a page over HTTP. Status first, because
  * it is the clearer message when it fires, then the canonical, which is the half that
  * holds when the status is 200.
+ *
+ * **`NO_CANONICAL_ADVICE` is attached to a 404 and to nothing else** (MUSE-112). It used
+ * to go on every non-200, so a 500 was told it is *"almost certainly the error page,
+ * served at a URL that does not exist — check the base and the route"*. On the one failure
+ * mode that fires for in this repository — `test/devcontent.test.ts`'s unreachable dataset,
+ * where `astro dev` answers a render failure with an 88-byte 500 — the URL existed and the
+ * base was right, so the first diagnosis sent the reader to look at the two things that
+ * were correct. A 404 inside the deploy's prefix really is served with the error page's
+ * body (MUSE-38), so there the advice is the right first thing to read. For everything
+ * else the status is the message, and it stays in the headline.
  */
 export async function fetchMeasuredPage(
   requested: string,
@@ -146,8 +156,7 @@ export async function fetchMeasuredPage(
       [
         `A check${context} asked for ${requested} and the server answered ` +
           `${response.status}.`,
-        '',
-        NO_CANONICAL_ADVICE,
+        ...(response.status === 404 ? ['', NO_CANONICAL_ADVICE] : []),
       ].join('\n'),
     );
   }
@@ -162,8 +171,14 @@ export async function fetchMeasuredPage(
  * base put an escape sequence in the path, every page of the dev server 404ed, and the
  * only visible consequence was that a green suite had been measuring `404.astro` for
  * months.
+ *
+ * **Exported so `test/measured.test.ts` can pin where it is attached rather than quote it**
+ * (MUSE-112). A test holding a copy of the sentence would go red on a reworded diagnosis
+ * and say nothing about the thing that matters, which is *which failures get it* — see the
+ * 404/500 split in `fetchMeasuredPage`. Same shape as `TRANSIENT_BUILD_FAILURE`, which
+ * `test/content.test.ts` asserts against a real build's output rather than retyping.
  */
-const NO_CANONICAL_ADVICE =
+export const NO_CANONICAL_ADVICE =
   'Every page this site serves declares a canonical; `404.astro` deliberately does not ' +
   '(MUSE-38). So this is almost certainly the error page, served at a URL that does not ' +
   'exist — check the base and the route the URL was built from (MUSE-62).';
