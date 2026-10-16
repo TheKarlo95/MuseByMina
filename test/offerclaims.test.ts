@@ -66,8 +66,9 @@ import {
  * cannot ask whether a human said it**, and neither can this file. So each claim is
  * pinned by name rather than by category — which is also why MUSE-80 is a second set of
  * needles here and not a broader rule: a needle for "any commitment" would match the
- * GDPR deadline on `/privacy`, which is law and is true. Prices are left alone too: 55 € and 100 € are confirmed,
- * `/pricing` publishes them on purpose (`test/pricing.test.ts`'s `CONFIRMED_TIERS` is the
+ * GDPR deadline on `/privacy`, which is law and is true. Prices are left alone too: the three rates
+ * (55 € regular monthly, 40 € student monthly, 20 € drop-in) are confirmed, and the 100 €
+ * two-month rate was retired by MUSE-73. `/pricing` publishes the three on purpose (`test/pricing.test.ts`'s `CONFIRMED_TIERS` is the
  * receipt for those), and a needle that matched any price would fail on the page whose job
  * is to show them.
  */

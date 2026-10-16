@@ -53,8 +53,9 @@
  *
  * So this is deliberately not a general truthfulness check. It is the narrow, checkable
  * half: **one specific retired commercial promise stays retired**, in either language,
- * wherever it could come back from. Prices are not in it — 55 € and 100 € are confirmed,
- * are CMS-owned, and `/pricing` publishes them on purpose.
+ * wherever it could come back from. Prices are not in it — the three rates (55 € regular
+ * monthly, 40 € student monthly, 20 € drop-in) are confirmed, are CMS-owned, and `/pricing`
+ * publishes them on purpose. A fourth, 100 € for two months, was retired by MUSE-73.
  *
  * ## Why it reads plain text, prose included
  *
