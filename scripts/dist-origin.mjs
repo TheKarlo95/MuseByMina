@@ -608,7 +608,7 @@ export async function verifyServedBuild({ origin, base, outDir, routes }) {
 
     // Nothing in the build answers this URL at all. A 301 lands here too: a redirect is
     // not a page, and a run that measured one would be measuring the hop.
-    if (expected.file === undefined) {
+    if (expected.status === 301 || expected.file === undefined) {
       problems.push(
         [
           `  ${url}`,

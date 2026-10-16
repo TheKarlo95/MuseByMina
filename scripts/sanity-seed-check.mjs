@@ -54,14 +54,14 @@ console.log(
 let published;
 try {
   published = await fetchLive(
-    seeded.map((doc) => doc._id),
+    seeded.map((/** @type {any} */ doc) => doc._id),
     where,
   );
 } catch (error) {
-  console.error(error.message);
+  console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 }
-const live = new Map(published.map((doc) => [doc._id, doc]));
+const live = new Map(published.map((/** @type {any} */ doc) => [doc._id, doc]));
 
 let drifted = 0;
 let missing = 0;

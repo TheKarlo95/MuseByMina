@@ -504,7 +504,10 @@ export function widthConstraints(condition) {
     rest = rest.replace(whole, ' ');
     constraints.push(
       feature === undefined
-        ? { feature: RANGE_FEATURE[operator], px: Number(bound) }
+        ? {
+            feature: /** @type {Record<string, string>} */ (RANGE_FEATURE)[operator],
+            px: Number(bound),
+          }
         : { feature, px: Number(px) },
     );
   }
@@ -513,7 +516,7 @@ export function widthConstraints(condition) {
   // not read, and reporting none of it is the failure.
   const readable = !MENTIONS_WIDTH.test(rest);
 
-  const satisfiedBy = (width) => {
+  const satisfiedBy = (/** @type {number} */ width) => {
     if (!readable) return false;
     return constraints.every(({ feature, px }) => {
       if (feature === 'min-width') return width >= px;
@@ -594,9 +597,14 @@ const PRELOAD_TAG = /<link\b[^>]*\brel="preload"[^>]*>/g;
  * @returns {string}
  */
 export function kindOf(url, resourceType) {
-  const byExtension = KIND_BY_EXTENSION[extensionOf(new URL(url).pathname)];
+  const byExtension = /** @type {Record<string, string>} */ (KIND_BY_EXTENSION)[
+    extensionOf(new URL(url).pathname)
+  ];
   if (byExtension !== undefined) return byExtension;
-  return KIND_BY_RESOURCE_TYPE[resourceType] ?? `other:${resourceType}`;
+  return (
+    /** @type {Record<string, string>} */ (KIND_BY_RESOURCE_TYPE)[resourceType] ??
+    `other:${resourceType}`
+  );
 }
 
 /**
@@ -809,7 +817,9 @@ export async function measurePage(browser, site, route, viewport) {
      * makes it able to, that edit is the regression.
      */
     const advisory = await page.evaluate(() => {
-      const nav = performance.getEntriesByType('navigation')[0];
+      const nav = /** @type {PerformanceNavigationTiming | undefined} */ (
+        performance.getEntriesByType('navigation')[0]
+      );
       const paint = performance
         .getEntriesByType('paint')
         .find((entry) => entry.name === 'first-contentful-paint');
@@ -1022,7 +1032,12 @@ export function checkBudget(page) {
   const where =
     page.viewport === undefined ? page.route : `${page.route} @${page.viewport.width}`;
 
-  const over = (kind, actual, budget, unit = 'bytes') =>
+  const over = (
+    /** @type {string} */ kind,
+    /** @type {number} */ actual,
+    /** @type {number} */ budget,
+    unit = 'bytes',
+  ) =>
     problems.push(
       `${where}  ${kind}  budget ${
         unit === 'bytes' ? formatBytes(budget) : budget
@@ -1042,7 +1057,7 @@ export function checkBudget(page) {
    *
    * @param {string} kind What the reader calls this line.
    * @param {string} path Where the number lives, for the message.
-   * @param {number} actual
+   * @param {number | string} actual A number, or a string the caller has already formatted.
    * @returns {number | null} `null` when there is nothing to compare against.
    */
   const ceiling = (kind, path, actual) => {
@@ -1050,7 +1065,7 @@ export function checkBudget(page) {
       .split('.')
       .reduce(
         (node, key) => (node === undefined || node === null ? undefined : node[key]),
-        BUDGET,
+        /** @type {any} */ (BUDGET),
       );
     if (typeof value === 'number' && Number.isFinite(value)) return value;
     problems.push(
@@ -1072,7 +1087,9 @@ export function checkBudget(page) {
    * and `requests` have one. A `perImage` that is not an object at all is a different thing
    * and is reported, because every line below would then silently tighten (MUSE-104).
    */
-  const allowed = (kind, base) => base + (BUDGET.perImage?.[kind] ?? 0) * page.images;
+  const perImage = /** @type {Record<string, number> | undefined} */ (BUDGET.perImage);
+  const allowed = (/** @type {string} */ kind, /** @type {number} */ base) =>
+    base + (perImage?.[kind] ?? 0) * page.images;
 
   if (typeof BUDGET.perImage !== 'object' || BUDGET.perImage === null) {
     problems.push(
@@ -1090,7 +1107,7 @@ export function checkBudget(page) {
     // a stricter budget than it used to.
     if (kind === 'image') continue;
 
-    const budget = BUDGET.bytes[kind];
+    const budget = /** @type {Record<string, number>} */ (BUDGET.bytes)[kind];
     if (budget === undefined) {
       problems.push(
         `${where}  ${kind}  budget — none declared —  actual ${formatBytes(actual)}  ` +
@@ -1113,7 +1130,7 @@ export function checkBudget(page) {
   const heaviest = Math.max(0, ...(page.imageResponses ?? []).map((image) => image.bytes));
   const perResponse = ceiling('image response', 'imageResponse', formatBytes(heaviest));
   for (const image of perResponse === null ? [] : (page.imageResponses ?? [])) {
-    if (image.bytes <= perResponse) continue;
+    if (perResponse === null || image.bytes <= perResponse) continue;
     problems.push(
       `${where}  image response  budget ${formatBytes(perResponse)}  actual ` +
         `${formatBytes(image.bytes)}  (over by ${formatBytes(image.bytes - perResponse)}` +
@@ -1178,8 +1195,10 @@ export function checkBudget(page) {
  */
 export function report(pages) {
   const columns = [...KINDS, 'total'];
-  const widest = (pick) => Math.max(...pages.map(pick));
-  const bytesOf = (page, kind) => (kind === 'total' ? page.total : (page.bytes[kind] ?? 0));
+  const widest = (/** @type {(page: Measurement) => number} */ pick) =>
+    Math.max(...pages.map(pick));
+  const bytesOf = (/** @type {Measurement} */ page, /** @type {string} */ kind) =>
+    kind === 'total' ? page.total : (page.bytes[kind] ?? 0);
 
   /**
    * The allowance the worst page was actually judged against, images and all (MUSE-25).
@@ -1189,20 +1208,35 @@ export function report(pages) {
    * is the one thing this table must never do, because MUSE-63's second criterion is that
    * the next ticket reads its room off here rather than discovering it by going red.
    */
-  const mostImages = pages.length === 0 ? 0 : widest((page) => page.images ?? 0);
-  const allowance = (kind, base) => base + (BUDGET.perImage?.[kind] ?? 0) * mostImages;
+  const mostImages =
+    pages.length === 0 ? 0 : widest((/** @type {Measurement} */ page) => page.images ?? 0);
+  const perImage = /** @type {Record<string, number> | undefined} */ (BUDGET.perImage);
+  const allowance = (/** @type {string} */ kind, /** @type {number} */ base) =>
+    base + (perImage?.[kind] ?? 0) * mostImages;
 
   /** What `total` is compared against: the page without its photography. */
-  const unphotographed = (page) => page.total - (page.bytes.image ?? 0);
+  const unphotographed = (/** @type {Measurement} */ page) =>
+    page.total - (page.bytes.image ?? 0);
   /** The single heaviest image response on a page, which is how `image` is budgeted. */
-  const heaviestImage = (page) =>
-    Math.max(0, ...(page.imageResponses ?? []).map((image) => image.bytes));
+  const heaviestImage = (/** @type {Measurement} */ page) =>
+    Math.max(
+      0,
+      ...(page.imageResponses ?? []).map(
+        (/** @type {{ bytes: number }} */ image) => image.bytes,
+      ),
+    );
 
-  const budgetOf = (kind) =>
-    kind === 'total' ? allowance('total', BUDGET.total) : allowance(kind, BUDGET.bytes[kind]);
+  const budgetOf = (/** @type {string} */ kind) =>
+    kind === 'total'
+      ? allowance('total', BUDGET.total)
+      : allowance(kind, /** @type {Record<string, number>} */ (BUDGET.bytes)[kind]);
 
   /** One line of the table: a label, the byte columns, then the counts. */
-  const row = (label, cells, counts) =>
+  const row = (
+    /** @type {string} */ label,
+    /** @type {unknown[]} */ cells,
+    /** @type {unknown[]} */ counts,
+  ) =>
     `${label.padEnd(28)}${cells.map((cell) => String(cell).padStart(11)).join('')}` +
     counts.map((count) => String(count).padStart(7)).join('');
 
@@ -1212,7 +1246,7 @@ export function report(pages) {
    * between them — a face is pulled in by text that is laid out, and a background is
    * fetched at the width its rule applies at.
    */
-  const label = (page) =>
+  const label = (/** @type {Measurement} */ page) =>
     page.viewport === undefined ? page.route : `${page.route} @${page.viewport.width}`;
 
   const lines = [row('page', columns, ['imgs', 'reqs', 'block', 'faces', 'load*'])];
@@ -1258,14 +1292,14 @@ export function report(pages) {
             ? widest(heaviestImage)
             : kind === 'total'
               ? widest(unphotographed)
-              : widest((page) => bytesOf(page, kind)),
+              : widest((/** @type {Measurement} */ page) => bytesOf(page, kind)),
         ),
       ),
       [
         mostImages,
-        widest((page) => page.requests),
-        widest((page) => page.renderBlocking),
-        widest((page) => page.fonts.length),
+        widest((/** @type {Measurement} */ page) => page.requests),
+        widest((/** @type {Measurement} */ page) => page.renderBlocking),
+        widest((/** @type {Measurement} */ page) => page.fonts.length),
         '',
       ],
     ),
@@ -1279,14 +1313,17 @@ export function report(pages) {
             ? BUDGET.imageResponse - widest(heaviestImage)
             : kind === 'total'
               ? budgetOf(kind) - widest(unphotographed)
-              : budgetOf(kind) - widest((page) => bytesOf(page, kind)),
+              : budgetOf(kind) -
+                widest((/** @type {Measurement} */ page) => bytesOf(page, kind)),
         ),
       ),
       [
         '',
-        allowance('requests', BUDGET.requests) - widest((page) => page.requests),
-        BUDGET.renderBlocking - widest((page) => page.renderBlocking),
-        BUDGET.fonts.max - widest((page) => page.fonts.length),
+        allowance('requests', BUDGET.requests) -
+          widest((/** @type {Measurement} */ page) => page.requests),
+        BUDGET.renderBlocking -
+          widest((/** @type {Measurement} */ page) => page.renderBlocking),
+        BUDGET.fonts.max - widest((/** @type {Measurement} */ page) => page.fonts.length),
         '',
       ],
     ),

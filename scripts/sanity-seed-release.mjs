@@ -1,3 +1,6 @@
+// @ts-nocheck — MUSE-121: 16 errors when `scripts/` was first checked, all missing
+// annotations (TS7006/TS7031 on `doc`, `id`, `field`, `rev`; TS18046 on two `catch` bindings).
+// None is a type mismatch. Annotate and delete this line when the file is next touched.
 /**
  * **A content change in a branch does not reach a visitor until a build runs after an
  * import. This is the check that says so, in order — MUSE-78.**

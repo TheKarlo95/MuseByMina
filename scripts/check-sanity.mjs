@@ -257,6 +257,9 @@ const NOT_READ = {
  * failure mode of a deny-list is a build that stops on a file it should have ignored,
  * which is loud and takes a second to fix. The failure mode of an allow-list is a schema
  * file nobody is watching, which is what put this comment here.
+ *
+ * @param {string} dir
+ * @returns {string[]}
  */
 function walk(dir) {
   return readdirSync(dir, { withFileTypes: true })
@@ -276,6 +279,7 @@ export function fingerprint() {
     return statSync(target).isDirectory() ? walk(target) : [target];
   }).sort();
 
+  /** @type {Record<string, string>} */
   const hashes = {};
   for (const file of files) {
     const key = relative(ROOT, file).replace(/\\/g, '/');
@@ -342,7 +346,7 @@ function problems() {
  * contract and the exemptions are parameters for the same reason and default to the real
  * ones, which is what the build runs.
  */
-function contractProblems(schema, contract = READ_CONTRACT, exempt = NOT_READ) {
+function contractProblems(/** @type {any[]} */ schema, contract = READ_CONTRACT, exempt = NOT_READ) {
   const found = [];
   const byName = new Map(schema.map((type) => [type.name, type]));
 

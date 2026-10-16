@@ -42,6 +42,16 @@ mkdirSync(OUT, { recursive: true });
  */
 const browser = await launchChecks();
 
+/**
+ * @param {string} name
+ * @param {{
+ *   route?: string,
+ *   colorScheme: 'dark' | 'light',
+ *   stored?: string,
+ *   viewport?: { width: number, height: number },
+ *   mobile?: boolean,
+ * }} options
+ */
 async function shot(name, { route = ROUTE, colorScheme, stored, viewport, mobile }) {
   const { page, measured, close } = await openCheckPage(browser, site, route, {
     // The theme a returning visitor chose, which is the whole point of shots 03 and 04.
