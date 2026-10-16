@@ -862,6 +862,90 @@ const step = (negations: string) =>
 const HR_STEP = step(NEGATION_HR);
 const EN_STEP = step(NEGATION_EN);
 
+/**
+ * **The surfaces both class needles are asked of, read off the build in one place
+ * (MUSE-109).**
+ *
+ * MUSE-84's needle was applied to three strings — one section of `/contact`, that page's
+ * `<meta name="description">` and `llms.txt` — while MUSE-110's was applied to every
+ * `data-msg-*` attribute on every page that renders the form. Each had its own copy of
+ * the plumbing, so the second guard's wider reach was unavailable to the first: a
+ * `data-msg-*` reading „pošalji obrazac" instructs a submission with no adverb anywhere
+ * in it, which is outside `RETRY` by construction and was outside `SUBMIT` by scope.
+ *
+ * One list and one parser, hoisted here rather than copied, because "which pages render
+ * the form" is a derived fact, and two derivations of one fact are two things to keep
+ * agreeing — which is the argument `test/routes.test.ts` is built on.
+ */
+interface Message {
+  /** The attribute's suffix: `fail-body` for `data-msg-fail-body`. */
+  name: string;
+  value: string;
+}
+
+/** Entities decoded, so an attribute's text reads as the visitor will see it. */
+const decodeEntities = (text: string): string =>
+  text
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)))
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
+
+async function pageMarkup(preview: Preview, route: string): Promise<string> {
+  const response = await fetch(preview.url(route));
+  expect(response.status, `${route} did not build`).toBe(200);
+  return await response.text();
+}
+
+/** `/schedule` → `/en/schedule`; `/` → `/en`. The spelling `preview.url` takes. */
+const localeRoute = (route: string, locale: Locale): string =>
+  locale === DEFAULT_LOCALE ? route : route === '/' ? '/en' : `/${locale}${route}`;
+
+/**
+ * **Every message the browser can show, read off the page.**
+ *
+ * The copy reaches the script as `data-msg-*` and is invisible until something writes it
+ * into the alert, so the markup is the only place the whole set is observable at once —
+ * and reading the attributes rather than a list of names means a message added next year
+ * is inside both guards without anybody adding it.
+ */
+const messagesIn = (html: string): Message[] =>
+  [...html.matchAll(/data-msg-([a-z-]+)="([^"]*)"/g)].map((match) => ({
+    name: match[1]!,
+    value: decodeEntities(match[2]!),
+  }));
+
+/**
+ * **Which pages render the form — derived, with a floor.**
+ *
+ * Walked off `ROUTES` rather than listed, so the guards cover `/`, `/contact` and
+ * `/pricing` today because they carry the form and not because this file names them, and
+ * a fourth embedding joins on its own. The floor is what stops a renamed
+ * `data-trial-form` turning every loop over this list into a loop over nothing.
+ */
+const formPages: { locale: Locale; route: string }[] = [];
+
+beforeAll(async () => {
+  for (const locale of ['hr', 'en'] as const) {
+    for (const { route } of ROUTES) {
+      const spelling = localeRoute(route, locale);
+      if ((await pageMarkup(unconfigured, spelling)).includes('data-trial-form')) {
+        formPages.push({ locale, route: spelling });
+      }
+    }
+  }
+}, 60_000);
+
+describe('the pages the class needles are asked of', () => {
+  it('finds the pages that render the form', () => {
+    expect(
+      formPages.length,
+      'no page under ROUTES renders [data-trial-form] — has the form or the attribute ' +
+        'been renamed? Every assertion that loops over the form pages reads this list',
+    ).toBeGreaterThanOrEqual(6);
+  });
+});
+
 describe('MUSE-84: the contact copy describes the form that was actually built', () => {
   /**
    * Which of the two heroes was rendered.
@@ -919,22 +1003,132 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
    * needle read the `<noscript>` line as an instruction — measured, which is why it is
    * written this way and why that sentence is in `INNOCENT_FORM_PROSE`.
    */
-  const VERB_HR = String.raw`(?<!(?:${NEGATION_HR})[\s-])(?:ispun|popun|pošalj|poslat|predaj|predat|prijav)[\p{L}]*`;
-  const VERB_EN = String.raw`(?<!(?:${NEGATION_EN})[\s-])\b(?:fill|send|submit|complete|use|return|post)\b`;
+  /**
+   * **„obrazac" loses its `z` in every oblique case, and the needle covered one case form
+   * out of seven** (MUSE-109). The object was `obraz[\p{L}]*`, which cannot match
+   * „obrasca", „obrascu", „obrascem", „obrasci" or „obrasče" — and the oblique cases are
+   * how the instruction is naturally phrased: „preko obrasca", „putem obrasca", „u
+   * obrascu". Every tooth below used to be nominative or accusative, so the needle set was
+   * only ever exercised against the one form it happened to cover, while `src/lib/forms.ts`
+   * already writes „u obrascu" twice. `obra[sz]` closes it, and `OBRAZAC_HR` pins the whole
+   * declension against the pattern so a future narrowing is a red test rather than a
+   * sentence nobody wrote down.
+   *
+   * The plural genitive is „obrazaca" and keeps the `z`, so the character class is a class
+   * rather than a second stem.
+   */
+  const OBJECT_HR = String.raw`obra[sz][\p{L}]*`;
+
+  /**
+   * **Every form of the word, so the teeth cannot all be one inflection.** All seven
+   * singular cases and the four plural surfaces; the two cases that share a surface
+   * („obrascu" is both dative and locative) are separate entries, because a tooth is
+   * labelled with the case it means and the label is what the coverage check reads.
+   *
+   * Every entry is asserted against the object pattern. Only `SENTENCE_FORMS` — the forms
+   * studio copy can actually reach for — is required to appear in a sentence: a vocative
+   * of an inanimate noun would be an invented sentence, and an invented sentence in a
+   * tooth is a tooth about nothing.
+   */
+  const OBRAZAC_HR = {
+    nominative: 'obrazac',
+    genitive: 'obrasca',
+    dative: 'obrascu',
+    accusative: 'obrazac',
+    vocative: 'obrasče',
+    locative: 'obrascu',
+    instrumental: 'obrascem',
+    plural: 'obrasci',
+    pluralGenitive: 'obrazaca',
+    pluralAccusative: 'obrasce',
+    pluralDative: 'obrascima',
+  } as const;
+
+  /** The case forms a tooth has to exercise, which is MUSE-109's first criterion. */
+  const SENTENCE_FORMS = [
+    'nominative',
+    'genitive',
+    'dative',
+    'accusative',
+    'locative',
+    'instrumental',
+  ] as const satisfies readonly (keyof typeof OBRAZAC_HR)[];
+
+  /**
+   * **The English window is four words and a determiner spends one** (MUSE-109).
+   * "Send us a request in form." was caught and "Send us your request using the form
+   * below." escaped: the trailing `[^\p{L}\d]+` cannot absorb "the", so the determiner
+   * ate a slot that the gap needed for a content word. The Croatian verb-first needle
+   * avoided this by accident — „prijav" is in the verb list and „prijavu" is a *noun*, so
+   * a later noun re-anchored the match and widened the window.
+   *
+   * The slot is optional and sits against the object rather than widening the gap, so the
+   * window stays four *content* words in both locales and the bound the object-first
+   * needle depends on is untouched.
+   */
+  const DETERMINER_EN = String.raw`(?:the|a|an|this|that|these|those|our|your|their|its|my)`;
+  const OBJECT_EN = String.raw`(?:${DETERMINER_EN}[^\p{L}\d]+)?\bforms?\b`;
+
+  /**
+   * **The verbs, as a list rather than inside the pattern** (MUSE-109), because the other
+   * half of a class needle is which verbs it knows and a list can be asserted against the
+   * teeth: the lists and `INSTRUCTIONS_HR`/`INSTRUCTIONS_EN` are compared below, so a verb added
+   * with no sentence behind it is a red test and the next gap is at least visible.
+   *
+   * `ostavi`, `javi`, `piši` and `koristi` / `leave`, `sign`, `tell` and `give` were the
+   * measured gaps — „Svoje podatke ostavi u obrascu i zovemo te." missed on the verb and
+   * on the case at once. The new Croatian stems carry their `i` on purpose: `javi[\p{L}]*`
+   * matches „javi" and „javite" and **not** „javljamo" (we reply, which is not an
+   * instruction and is all over the honest copy); `ostavi` likewise misses „ostali", which
+   * is `failBody`'s „ostali u obrascu"; `piši` misses „piše" („the form says"), which is a
+   * statement about the form rather than an instruction to send it.
+   */
+  const VERBS_HR = [
+    'ispun',
+    'popun',
+    'pošalj',
+    'poslat',
+    'predaj',
+    'predat',
+    'prijav',
+    'ostavi',
+    'javi',
+    'piši',
+    'koristi',
+  ] as const;
+  const VERBS_EN = [
+    'fill',
+    'send',
+    'submit',
+    'complete',
+    'use',
+    'return',
+    'post',
+    'leave',
+    'sign',
+    'tell',
+    'give',
+  ] as const;
+
+  const VERB_HR = String.raw`(?<!(?:${NEGATION_HR})[\s-])(?:${VERBS_HR.join('|')})[\p{L}]*`;
+  const VERB_EN = String.raw`(?<!(?:${NEGATION_EN})[\s-])\b(?:${VERBS_EN.join('|')})\b`;
 
   const SUBMIT = {
     hr: {
       verbFirst: new RegExp(
-        String.raw`${VERB_HR}${HR_STEP}{0,4}?[^\p{L}\d]+obraz[\p{L}]*`,
+        String.raw`${VERB_HR}${HR_STEP}{0,4}?[^\p{L}\d]+${OBJECT_HR}`,
         'iu',
       ),
       objectFirst: new RegExp(
-        String.raw`obraz[\p{L}]*${HR_STEP}{0,2}?[^\p{L}\d]+${VERB_HR}`,
+        String.raw`${OBJECT_HR}${HR_STEP}{0,2}?[^\p{L}\d]+${VERB_HR}`,
         'iu',
       ),
     },
     en: {
-      verbFirst: new RegExp(String.raw`${VERB_EN}${EN_STEP}{0,4}?[^\p{L}\d]+\bforms?\b`, 'iu'),
+      verbFirst: new RegExp(
+        String.raw`${VERB_EN}${EN_STEP}{0,4}?[^\p{L}\d]+${OBJECT_EN}`,
+        'iu',
+      ),
       objectFirst: new RegExp(
         String.raw`\bforms?\b${EN_STEP}{0,2}?[^\p{L}\d]+${VERB_EN}`,
         'iu',
@@ -957,24 +1151,266 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
    * This is the teeth. Without it the needles are a regex nobody has run against the
    * sentence they are for, which is the shape of defence this repository keeps re-filing.
    */
-  const INSTRUCTIONS = {
-    hr: [
-      'Ispuni obrazac i javljamo se s terminom koji ti odgovara.',
-      'Prijavi se na probni sat bachate u Zagrebu. Javi nam se i dogovaramo termin — pošalji obrazac na ovoj stranici.',
-      'Prijavu možeš poslati i kroz obrazac ispod.',
-      'Obrazac ispuni i javljamo se s terminom.',
-      'Popunite obrazac i čekajte poziv.',
-      'Prijavi se kroz obrazac.',
-    ],
-    en: [
-      'Fill in the form and we will come back with a time that suits you.',
-      'Sign up for a bachata trial class in Zagreb. Get in touch and we will find a time — submit the form on this page.',
-      'You can also send your request through the form below.',
-      'The form? Fill it in below and we will be in touch.',
-      'Complete the form and we will come back with a time.',
-      'Use the form below.',
-    ],
-  } as const;
+  interface ToothHR {
+    /** The case form of „obrazac" the sentence uses — a key of `OBRAZAC_HR`. */
+    form: keyof typeof OBRAZAC_HR;
+    order: 'verbFirst' | 'objectFirst';
+    /** The verb alternative this sentence is here to exercise. */
+    verb: (typeof VERBS_HR)[number];
+    text: string;
+  }
+
+  interface ToothEN {
+    order: 'verbFirst' | 'objectFirst';
+    /** The determiner standing between the verb and "form", if any. */
+    determiner: string | null;
+    verb: (typeof VERBS_EN)[number];
+    text: string;
+  }
+
+  /**
+   * **The teeth, labelled** (MUSE-109), because the labels are what makes the coverage a
+   * property rather than a hope. The old list was six sentences per locale, every Croatian
+   * one in the nominative or the accusative — so the needle set was green against a single
+   * inflection and nothing said so. The tests below read `form`, `order` and `verb` and
+   * require every case form, both word orders, each order with at least one oblique case,
+   * and every verb in the list to be exercised by some sentence.
+   *
+   * The first of each pair is what the site published; the rest are the rewordings a
+   * phrase-level guard let through — the two measured green on MUSE-84's branch, the
+   * inverted word order Croatian makes free, and the declined forms and verbs MUSE-109
+   * measured escaping.
+   */
+  const INSTRUCTIONS_HR: ToothHR[] = [
+    {
+      form: 'accusative',
+      order: 'verbFirst',
+      verb: 'ispun',
+      text: 'Ispuni obrazac i javljamo se s terminom koji ti odgovara.',
+    },
+    {
+      form: 'accusative',
+      order: 'verbFirst',
+      verb: 'pošalj',
+      text: 'Prijavi se na probni sat bachate u Zagrebu. Javi nam se i dogovaramo termin — pošalji obrazac na ovoj stranici.',
+    },
+    {
+      form: 'accusative',
+      order: 'objectFirst',
+      verb: 'ispun',
+      text: 'Obrazac ispuni i javljamo se s terminom.',
+    },
+    {
+      form: 'accusative',
+      order: 'verbFirst',
+      verb: 'popun',
+      text: 'Popunite obrazac i čekajte poziv.',
+    },
+    {
+      form: 'accusative',
+      order: 'verbFirst',
+      verb: 'prijav',
+      text: 'Prijavi se kroz obrazac.',
+    },
+    {
+      form: 'accusative',
+      order: 'verbFirst',
+      verb: 'koristi',
+      text: 'Koristi obrazac ispod.',
+    },
+    {
+      form: 'nominative',
+      order: 'objectFirst',
+      verb: 'poslat',
+      text: 'Obrazac se može poslati i kasnije.',
+    },
+    // The ticket's own failure scenario: a `page` description that the whole MUSE-84
+    // guard, replayed, passed.
+    {
+      form: 'genitive',
+      order: 'verbFirst',
+      verb: 'prijav',
+      text: 'Prijavi se na probni sat bachate u Zagrebu. Javi nam se ili se prijavi preko obrasca na ovoj stranici.',
+    },
+    {
+      form: 'genitive',
+      order: 'verbFirst',
+      verb: 'pošalj',
+      text: 'Prijavu nam pošalji putem obrasca.',
+    },
+    {
+      form: 'genitive',
+      order: 'objectFirst',
+      verb: 'pošalj',
+      text: 'Preko obrasca pošalji prijavu.',
+    },
+    {
+      form: 'dative',
+      order: 'verbFirst',
+      verb: 'predaj',
+      text: 'Prijavu predaj obrascu ispod.',
+    },
+    {
+      form: 'dative',
+      order: 'objectFirst',
+      verb: 'pošalj',
+      text: 'Vjeruj obrascu i pošalji prijavu.',
+    },
+    {
+      form: 'locative',
+      order: 'verbFirst',
+      verb: 'prijav',
+      text: 'Prijavi se u obrascu na ovoj stranici.',
+    },
+    {
+      form: 'locative',
+      order: 'verbFirst',
+      verb: 'predat',
+      text: 'Prijavu možeš predati u obrascu ispod.',
+    },
+    {
+      form: 'locative',
+      order: 'verbFirst',
+      verb: 'ostavi',
+      text: 'Svoje podatke ostavi u obrascu i zovemo te.',
+    },
+    {
+      form: 'locative',
+      order: 'verbFirst',
+      verb: 'piši',
+      text: 'Piši nam u obrascu ispod.',
+    },
+    {
+      form: 'locative',
+      order: 'objectFirst',
+      verb: 'ostavi',
+      text: 'U obrascu ispod ostavi svoje podatke.',
+    },
+    {
+      form: 'instrumental',
+      order: 'verbFirst',
+      verb: 'pošalj',
+      text: 'Prijavu pošalji obrascem na ovoj stranici.',
+    },
+    {
+      form: 'instrumental',
+      order: 'objectFirst',
+      verb: 'pošalj',
+      text: 'Obrascem ispod pošalji prijavu.',
+    },
+    {
+      form: 'plural',
+      order: 'objectFirst',
+      verb: 'ispun',
+      text: 'Obrasci ispod čekaju — ispuni oba.',
+    },
+    {
+      form: 'pluralGenitive',
+      order: 'verbFirst',
+      verb: 'javi',
+      text: 'Javi nam se putem obrazaca ispod.',
+    },
+    {
+      form: 'pluralAccusative',
+      order: 'verbFirst',
+      verb: 'pošalj',
+      text: 'Pošalji obrasce na ovoj stranici.',
+    },
+    {
+      form: 'pluralDative',
+      order: 'objectFirst',
+      verb: 'ostavi',
+      text: 'U obrascima ispod ostavi podatke.',
+    },
+  ];
+
+  const INSTRUCTIONS_EN: ToothEN[] = [
+    {
+      order: 'verbFirst',
+      determiner: 'the',
+      verb: 'fill',
+      text: 'Fill in the form and we will come back with a time that suits you.',
+    },
+    {
+      order: 'verbFirst',
+      determiner: 'the',
+      verb: 'submit',
+      text: 'Sign up for a bachata trial class in Zagreb. Get in touch and we will find a time — submit the form on this page.',
+    },
+    {
+      order: 'verbFirst',
+      determiner: 'the',
+      verb: 'send',
+      text: 'You can also send your request through the form below.',
+    },
+    {
+      order: 'objectFirst',
+      determiner: null,
+      verb: 'fill',
+      text: 'The form? Fill it in below and we will be in touch.',
+    },
+    {
+      order: 'verbFirst',
+      determiner: 'the',
+      verb: 'complete',
+      text: 'Complete the form and we will come back with a time.',
+    },
+    {
+      order: 'verbFirst',
+      determiner: 'the',
+      verb: 'use',
+      text: 'Use the form below.',
+    },
+    // MUSE-109's measured escape: four content words and a determiner is five slots.
+    {
+      order: 'verbFirst',
+      determiner: 'the',
+      verb: 'send',
+      text: 'Send us your request using the form below.',
+    },
+    {
+      order: 'verbFirst',
+      determiner: null,
+      verb: 'send',
+      text: 'Send us a request in form.',
+    },
+    {
+      order: 'verbFirst',
+      determiner: 'the',
+      verb: 'leave',
+      text: 'Leave your details in the form below.',
+    },
+    {
+      order: 'verbFirst',
+      determiner: 'the',
+      verb: 'sign',
+      text: 'Sign up through the form on this page.',
+    },
+    {
+      order: 'verbFirst',
+      determiner: 'the',
+      verb: 'tell',
+      text: 'Tell us in the form below and we will reply.',
+    },
+    {
+      order: 'verbFirst',
+      determiner: 'the',
+      verb: 'give',
+      text: 'Give us your details using the form below.',
+    },
+    {
+      order: 'verbFirst',
+      determiner: 'the',
+      verb: 'return',
+      text: 'Return the form to us.',
+    },
+    {
+      order: 'verbFirst',
+      determiner: 'the',
+      verb: 'post',
+      text: 'Post the form through this page.',
+    },
+  ];
 
   /**
    * **Prose that legitimately names the form, and must not match.** Each is asserted
@@ -987,33 +1423,82 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
    * MUSE-72 wrote and which says the same true thing one page over. Then
    * `page-privacy.description`, which is in `llms.txt` beside `/contact`'s and so inside
    * the scan.
+   *
+   * **`build` is which deploy state publishes the string, and MUSE-109 is why it exists.**
+   * Two of the entries below are the *configured* build's failure copy — „Tvoji odgovori
+   * su ostali u obrascu…", which MUSE-110 gated, so with no endpoint it is not on the page
+   * at all. Asserting it live against the shipping build would be asserting a string that
+   * is correctly absent, and dropping the live half would be pinning six words nobody can
+   * check. The three entries MUSE-109 added are the phrasings the widened object pattern
+   * brings into reach: the two „u obrascu" lines in `src/lib/forms.ts` and `/privacy`'s
+   * „upišeš u obrazac", which is the sentence that decides `upiš` may not join the verb
+   * list.
    */
   const INNOCENT_FORM_PROSE = [
-    { locale: 'hr', route: '/contact', text: 'Obrazac trenutačno ne možemo primiti' },
-    { locale: 'en', route: '/en/contact', text: 'We cannot receive the form at the moment' },
-    { locale: 'hr', route: '/contact', text: FORM_COPY.hr.noscript },
-    { locale: 'en', route: '/en/contact', text: FORM_COPY.en.noscript },
+    {
+      locale: 'hr',
+      route: '/contact',
+      build: 'unconfigured',
+      text: 'Obrazac trenutačno ne možemo primiti',
+    },
+    {
+      locale: 'en',
+      route: '/en/contact',
+      build: 'unconfigured',
+      text: 'We cannot receive the form at the moment',
+    },
+    { locale: 'hr', route: '/contact', build: 'unconfigured', text: FORM_COPY.hr.noscript },
+    { locale: 'en', route: '/en/contact', build: 'unconfigured', text: FORM_COPY.en.noscript },
     {
       locale: 'hr',
       route: '/privacy',
+      build: 'unconfigured',
       text: 'Zato ti obrazac, kad ga pokušaš poslati, umjesto potvrde ponudi našu e-mail adresu',
     },
     {
       locale: 'en',
       route: '/en/privacy',
+      build: 'unconfigured',
       text: 'That is why the form, when you try to send it, offers you our email address',
     },
     {
       locale: 'hr',
       route: '/privacy',
+      build: 'unconfigured',
       text: 'Što obrazac za probni sat prikuplja, zašto, kome se prenosi',
     },
     {
       locale: 'en',
       route: '/en/privacy',
+      build: 'unconfigured',
       text: 'What the trial-class form collects, why, who it is passed to',
     },
-  ] as const;
+    // MUSE-109. „upišeš u obrazac" is what the visitor does to the form, not what the
+    // page tells them to do with it; it is also the reason `upiš` is not a verb above.
+    {
+      locale: 'hr',
+      route: '/privacy',
+      build: 'unconfigured',
+      text: 'upišeš u obrazac za probni sat',
+    },
+    {
+      locale: 'en',
+      route: '/en/privacy',
+      build: 'unconfigured',
+      text: 'what you type into the trial-class form',
+    },
+    // MUSE-109. The configured build's failure copy: „your answers are still in the form"
+    // is a statement about where the input went, and „obrascu" is now inside the pattern.
+    { locale: 'hr', route: '/contact', build: 'configured', text: FORM_COPY.hr.failBody },
+    { locale: 'en', route: '/en/contact', build: 'configured', text: FORM_COPY.en.failBody },
+    { locale: 'hr', route: '/contact', build: 'configured', text: FORM_COPY.hr.failOffline },
+    { locale: 'en', route: '/en/contact', build: 'configured', text: FORM_COPY.en.failOffline },
+  ] as const satisfies readonly {
+    locale: 'hr' | 'en';
+    route: string;
+    build: 'configured' | 'unconfigured';
+    text: string;
+  }[];
 
   /**
    * The `page` description, which is one string for both states.
@@ -1049,12 +1534,6 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
       .trim();
   }
 
-  async function markup(preview: Preview, route: string): Promise<string> {
-    const response = await fetch(preview.url(route));
-    expect(response.status, `${route} did not build`).toBe(200);
-    return await response.text();
-  }
-
   /** The hero section's own text — not the whole page, which offers the inbox anyway. */
   function hero(html: string): string {
     const section = /<section[^>]*class="hero[^"]*"[^>]*>([\s\S]*?)<\/section>/.exec(html)?.[1];
@@ -1071,6 +1550,19 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
     return flat(content!);
   }
 
+  /**
+   * The other string the `page` document publishes, and ungatable for the same reason
+   * (MUSE-109): `<title>` is what a search result and a browser tab show, it comes out of
+   * Sanity beside the description, and a title reading „Ispuni obrazac — Muse by Mina"
+   * would have been outside every guard in this file.
+   */
+  function title(html: string): string {
+    const head = /<head\b[^>]*>([\s\S]*?)<\/head>/.exec(html)?.[1] ?? html;
+    const tag = /<title[^>]*>([\s\S]*?)<\/title>/.exec(head)?.[1];
+    expect(tag, 'no <title>').toBeDefined();
+    return flat(tag!);
+  }
+
   /** The address the page itself offers — read off the page, never written out here. */
   function inbox(html: string): string {
     const address = /mailto:([^"'?]+)/.exec(html)?.[1];
@@ -1081,7 +1573,7 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
   for (const build of BUILDS) {
     for (const { locale, route } of CONTACT) {
       it(`${locale}, ${build.label}: the hero offers the path that works`, async () => {
-        const html = await markup(build.preview(), route);
+        const html = await pageMarkup(build.preview(), route);
         const lede = hero(html);
         const expected = HERO[locale];
 
@@ -1127,7 +1619,7 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
        */
       if (!build.processor) {
         it(`${locale}: nothing in the hero instructs a submission this build cannot make`, async () => {
-          const lede = hero(await markup(build.preview(), route));
+          const lede = hero(await pageMarkup(build.preview(), route));
           expect(
             instructsSubmission(lede, locale),
             'the hero tells the visitor to submit a form that cannot send. With no ' +
@@ -1139,7 +1631,7 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
       }
 
       it(`${locale}, ${build.label}: the page description instructs no submission`, async () => {
-        const meta = description(await markup(build.preview(), route));
+        const meta = description(await pageMarkup(build.preview(), route));
 
         expect(
           instructsSubmission(meta, locale),
@@ -1150,6 +1642,16 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
         expect(meta, 'the description offers no way to reach the studio at all').toContain(
           DESCRIPTION[locale].reach,
         );
+      });
+
+      it(`${locale}, ${build.label}: the page title instructs no submission`, async () => {
+        const head = title(await pageMarkup(build.preview(), route));
+        expect(
+          instructsSubmission(head, locale),
+          'the `<title>` instructs a form submission. It is the second string the `page` ' +
+            'document publishes, so it has the description’s problem exactly — no branch ' +
+            'to sit in, and it has to be true in both states (MUSE-109)',
+        ).toEqual([]);
       });
     }
 
@@ -1173,26 +1675,198 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
   }
 
   /**
-   * **The needles have teeth** — every way of saying it that has been seen or measured,
-   * including the two rewordings that passed the phrase-level guard.
+   * **The scope: a named set of rendered surfaces, and here is what is not in it**
+   * (MUSE-109, fifth criterion).
+   *
+   * MUSE-84's needle read three strings — one section of `/contact`, that page's
+   * `<meta name="description">` and `llms.txt` — while its own first criterion was that
+   * *no page* instructs the visitor. The set is now:
+   *
+   * 1. `/contact`'s hero, both locales, in the state where the instruction cannot be true;
+   * 2. `/contact`'s `<meta name="description">` **and** its `<title>`, both builds —
+   *    the two strings the `page` document publishes and the two that cannot be gated;
+   * 3. `llms.txt`, both builds, which republishes the description for machines;
+   * 4. every `data-msg-*` attribute on every page that renders the form, derived from
+   *    `ROUTES` — the surface below, and MUSE-110's reach brought to this needle.
+   *
+   * **It is not every page, and it is not the whole of any page, and the reason is a
+   * measurement rather than a preference.** Asked of whole documents the needle fires on
+   * `/contact`'s second section — „Ako ti je obrazac prekomplicirano, piši nam…", caught
+   * in Croatian by `piši` and *not* in English, where "write to us" is not a submit verb.
+   * That sentence is MUSE-110's deliberate exclusion: it is a claim about the shape of the
+   * page rather than about the mechanism, it was given its own ticket, and
+   * `docs/decisions/pages.md` refuses a pinned literal for it by name. So a page-wide
+   * scope today would be either a red build on a sentence this ticket may not rewrite or
+   * exactly the phrase-level exemption that file keeps arguing against.
+   *
+   * **And it is a needle about rendered surfaces, not about source.** `test/
+   * offerclaims.test.ts` can scan `src/` because „free trial" appears nowhere in code;
+   * this needle's object is also an HTML element, a variable and a Studio field
+   * description — measured over `src/`, `sanity/` and the seed, thirteen lines fire and
+   * eleven of them are `form.addEventListener('submit'`, `PUBLIC_FORM_ENDPOINT`'s comment
+   * and „Ostavi prazno i prikazuje se obrazac za kontakt" in `offering.ts`. A source scan
+   * here would be eleven exemptions and one real finding.
+   *
+   * **Unwatched, so the next author knows:** `/contact`'s second section (above); `/` and
+   * `/pricing`'s prose around the form, which carries no caveat at all and is accepted
+   * until MUSE-12; `/privacy`'s notice beyond the four strings pinned in
+   * `INNOCENT_FORM_PROSE`; and every other page's prose, none of which names the form
+   * today. A page that starts instructing a submission tomorrow is caught only if it does
+   * it in `/contact`'s hero, in a `page` document or in a form message.
    */
-  for (const locale of ['hr', 'en'] as const) {
-    it(`${locale}: every known phrasing of the instruction is caught`, () => {
-      for (const sentence of INSTRUCTIONS[locale]) {
-        expect(
-          instructsSubmission(sentence, locale),
-          `no needle catches ${JSON.stringify(sentence)}, which instructs a submission`,
-        ).not.toEqual([]);
-      }
-    });
+  it('no form message on any page instructs a submission this build cannot make', async () => {
+    for (const { locale, route } of formPages) {
+      const messages = messagesIn(await pageMarkup(unconfigured, route));
+      expect(
+        messages.length,
+        `${route} renders no data-msg-* attributes — this guard is reading the wrong markup`,
+      ).toBeGreaterThan(0);
 
+      const instructing = messages
+        .filter((message) => instructsSubmission(message.value, locale).length > 0)
+        .map((message) => `data-msg-${message.name}: ${JSON.stringify(message.value)}`);
+
+      expect(
+        instructing,
+        `${route} tells the visitor to submit the form in a message the script can show, ` +
+          'on a build with no endpoint where no submission is transmitted. MUSE-110 put ' +
+          'every message inside a retry needle; a message reading „pošalji obrazac" ' +
+          'instructs a submission with no adverb in it, so it is outside that needle and ' +
+          'was outside this one too (MUSE-109)',
+      ).toEqual([]);
+    }
+  });
+
+  /**
+   * **The needles have teeth** — every way of saying it that has been seen or measured,
+   * including the two rewordings that passed the phrase-level guard and the declined forms
+   * and verbs MUSE-109 measured escaping.
+   */
+  it('hr: every known phrasing of the instruction is caught', () => {
+    for (const tooth of INSTRUCTIONS_HR) {
+      const firing = instructsSubmission(tooth.text, 'hr');
+      expect(
+        firing,
+        `no needle catches ${JSON.stringify(tooth.text)}, which instructs a submission`,
+      ).not.toEqual([]);
+      // Caught by the shape the tooth is *about*, so a sentence that happens to be
+      // readable in the other word order is not standing in for the one being tested.
+      expect(
+        firing.map((hit) => hit.split(':')[0]),
+        `${JSON.stringify(tooth.text)} is caught, but not by ${tooth.order}, which is ` +
+          'the word order it is here to exercise',
+      ).toContain(tooth.order);
+    }
+  });
+
+  it('en: every known phrasing of the instruction is caught', () => {
+    for (const tooth of INSTRUCTIONS_EN) {
+      const firing = instructsSubmission(tooth.text, 'en');
+      expect(
+        firing,
+        `no needle catches ${JSON.stringify(tooth.text)}, which instructs a submission`,
+      ).not.toEqual([]);
+      expect(
+        firing.map((hit) => hit.split(':')[0]),
+        `${JSON.stringify(tooth.text)} is caught, but not by ${tooth.order}, which is ` +
+          'the word order it is here to exercise',
+      ).toContain(tooth.order);
+    }
+  });
+
+  /**
+   * **And the teeth cover the needle rather than one corner of it** (MUSE-109).
+   *
+   * This is the criterion the ticket was filed on: MUSE-84's needle was green for a day
+   * while „obrazac" was matched in exactly one of its seven case forms, because every
+   * tooth in the set used the nominative or the accusative. A property over the labels
+   * is the only thing that notices that — a list of sentences cannot say what it is
+   * missing.
+   */
+  it('hr: a tooth exercises every case form of „obrazac" and both word orders', () => {
+    const covered = new Set(INSTRUCTIONS_HR.map((tooth) => tooth.form));
+    for (const form of SENTENCE_FORMS) {
+      expect(
+        covered,
+        `no tooth uses the ${form} („${OBRAZAC_HR[form]}"). The needle set would be ` +
+          'green against a single inflection again, which is MUSE-109 exactly',
+      ).toContain(form);
+    }
+
+    for (const order of ['verbFirst', 'objectFirst'] as const) {
+      const teeth = INSTRUCTIONS_HR.filter((tooth) => tooth.order === order);
+      expect(teeth.length, `no tooth exercises ${order}`).toBeGreaterThan(0);
+      // And with a declined form, not only with the one case the old needle covered:
+      // „Obrazac ispuni" would have passed this whole block on its own.
+      expect(
+        teeth.some((tooth) => !['nominative', 'accusative'].includes(tooth.form)),
+        `every ${order} tooth uses the nominative or the accusative, so that word order ` +
+          'is only tested against the case form MUSE-84 already covered',
+      ).toBe(true);
+    }
+  });
+
+  it('a tooth exercises every verb the needle knows', () => {
+    for (const verb of VERBS_HR) {
+      const tooth = INSTRUCTIONS_HR.find((candidate) => candidate.verb === verb);
+      expect(tooth, `no tooth exercises the Croatian verb “${verb}”`).toBeDefined();
+      expect(
+        new RegExp(verb, 'iu').test(tooth!.text),
+        `the tooth labelled “${verb}” does not contain it: ${JSON.stringify(tooth!.text)}`,
+      ).toBe(true);
+    }
+    for (const verb of VERBS_EN) {
+      const tooth = INSTRUCTIONS_EN.find((candidate) => candidate.verb === verb);
+      expect(tooth, `no tooth exercises the English verb “${verb}”`).toBeDefined();
+      expect(
+        new RegExp(`\\b${verb}\\b`, 'iu').test(tooth!.text),
+        `the tooth labelled “${verb}” does not contain it: ${JSON.stringify(tooth!.text)}`,
+      ).toBe(true);
+    }
+  });
+
+  /**
+   * **The object half, against the whole declension rather than against a sentence**
+   * (MUSE-109). A tooth proves the needle catches one sentence; this proves the pattern
+   * reaches every form of the word, including the ones no honest sentence would use, so
+   * narrowing it back to a stem is a red test and not a ticket in six months.
+   */
+  it('hr: the object pattern matches every form of „obrazac"', () => {
+    const object = new RegExp(`^${OBJECT_HR}$`, 'u');
+    for (const [form, spelling] of Object.entries(OBRAZAC_HR)) {
+      expect(
+        object.test(spelling),
+        `the needle's object does not match the ${form} („${spelling}"). „obrazac" ` +
+          'loses its z in every oblique case, which is what MUSE-109 was filed about',
+      ).toBe(true);
+    }
+  });
+
+  it('en: a tooth puts a determiner between the verb and “form”', () => {
+    expect(
+      INSTRUCTIONS_EN.filter((tooth) => tooth.order === 'verbFirst' && tooth.determiner).length,
+      'no tooth spends a gap slot on a determiner, which is the second thing MUSE-109 ' +
+        'measured: "Send us a request in form." was caught and "Send us your request ' +
+        'using the form below." escaped',
+    ).toBeGreaterThan(0);
+    for (const tooth of INSTRUCTIONS_EN) {
+      if (tooth.determiner === null) continue;
+      expect(
+        new RegExp(`\\b${tooth.determiner}\\b[^\\p{L}\\d]+forms?\\b`, 'iu').test(tooth.text),
+        `the tooth labelled “${tooth.determiner}” does not put it in front of “form”: ` +
+          JSON.stringify(tooth.text),
+      ).toBe(true);
+    }
+  });
+
+  for (const locale of ['hr', 'en'] as const) {
     it(`${locale}: prose that legitimately names the form is not caught`, () => {
       for (const innocent of INNOCENT_FORM_PROSE.filter((entry) => entry.locale === locale)) {
         expect(
           instructsSubmission(innocent.text, locale),
           `a needle reads ${JSON.stringify(innocent.text)} as an instruction. It is ` +
-            'true in every state and has to stay on the page — widen the gap or the verb ' +
-            'list rather than exempting it',
+            'true in the state that publishes it and has to stay on the page — widen the ' +
+            'gap or the verb list rather than exempting it',
         ).toEqual([]);
       }
     });
@@ -1200,15 +1874,23 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
 
   /**
    * And the innocent prose is still *live*, which is what keeps the boundary above a
-   * statement about this site rather than about six strings in a test file (`INNOCENT`'s
-   * reason, in `test/helpers/offer-claims.ts`).
+   * statement about this site rather than about fourteen strings in a test file
+   * (`INNOCENT`'s reason, in `test/helpers/offer-claims.ts`).
+   *
+   * Each entry names the build that publishes it, because MUSE-110 gated two of them: the
+   * „ostali u obrascu" pair is the *configured* build's failure copy and is correctly
+   * absent from the one this site deploys.
    */
   it('the prose the boundary is drawn around is still published', async () => {
-    for (const { route, text } of INNOCENT_FORM_PROSE) {
-      // The raw document rather than its text: two of these are a `<meta>` content
-      // attribute, which stripping tags would throw away.
-      const page = await markup(unconfigured, route);
-      expect(page, `${route} no longer says ${JSON.stringify(text)}`).toContain(text);
+    for (const { route, build, text } of INNOCENT_FORM_PROSE) {
+      // The raw document rather than its text: four of these are an attribute's value,
+      // which stripping tags would throw away.
+      const page = await pageMarkup(build === 'configured' ? configured : unconfigured, route);
+      expect(
+        page,
+        `${route} no longer says ${JSON.stringify(text)} in the build with ` +
+          `${build === 'configured' ? 'an endpoint' : 'no endpoint'} configured`,
+      ).toContain(text);
     }
   });
 });
@@ -1394,38 +2076,6 @@ describe('MUSE-110: the failure copy describes the form that was actually built'
     en: ['This form cannot be sent again.', 'Do not send it again.'],
   } as const;
 
-  /** `/schedule` → `/en/schedule`; `/` → `/en`. The spelling `preview.url` takes. */
-  const localeRoute = (route: string, locale: Locale): string =>
-    locale === DEFAULT_LOCALE ? route : route === '/' ? '/en' : `/${locale}${route}`;
-
-  interface Message {
-    /** The attribute's suffix: `fail-body` for `data-msg-fail-body`. */
-    name: string;
-    value: string;
-  }
-
-  /** Markup stripped, entities decoded, so a phrase split by a tag still reads. */
-  const decode = (text: string): string =>
-    text
-      .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)))
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&amp;/g, '&');
-
-  /**
-   * **Every message the browser can show, read off the page.**
-   *
-   * The copy reaches the script as `data-msg-*` and is invisible until something writes it
-   * into the alert, so the markup is the only place the whole set is observable at once —
-   * and reading the attributes rather than a list of names means a message added next year
-   * is inside this guard without anybody adding it.
-   */
-  const messagesIn = (html: string): Message[] =>
-    [...html.matchAll(/data-msg-([a-z-]+)="([^"]*)"/g)].map((match) => ({
-      name: match[1]!,
-      value: decode(match[2]!),
-    }));
-
   const valueOf = (messages: Message[], name: string): string => {
     const found = messages.filter((message) => message.name === name);
     expect(found.length, `the form renders no data-msg-${name}`).toBeGreaterThan(0);
@@ -1437,45 +2087,10 @@ describe('MUSE-110: the failure copy describes the form that was actually built'
     { label: 'no endpoint configured', processor: false, preview: () => unconfigured },
   ] as const;
 
-  async function markupOf(preview: Preview, route: string): Promise<string> {
-    const response = await fetch(preview.url(route));
-    expect(response.status, `${route} did not build`).toBe(200);
-    return await response.text();
-  }
-
-  /**
-   * **Which pages render the form — derived, both builds, with a floor.**
-   *
-   * Walked off `ROUTES` rather than listed, so the guard covers `/`, `/contact` and
-   * `/pricing` today because they carry the form and not because this file names them, and
-   * a fourth embedding joins on its own. The floor is what stops a renamed `data-trial-form`
-   * turning every assertion below into a loop over nothing.
-   */
-  const formPages: { locale: Locale; route: string }[] = [];
-
-  beforeAll(async () => {
-    for (const locale of ['hr', 'en'] as const) {
-      for (const { route } of ROUTES) {
-        const spelling = localeRoute(route, locale);
-        if ((await markupOf(unconfigured, spelling)).includes('data-trial-form')) {
-          formPages.push({ locale, route: spelling });
-        }
-      }
-    }
-  }, 60_000);
-
-  it('finds the pages that render the form', () => {
-    expect(
-      formPages.length,
-      'no page under ROUTES renders [data-trial-form] — has the form or the attribute ' +
-        'been renamed? Every assertion in this block loops over this list',
-    ).toBeGreaterThanOrEqual(6);
-  });
-
   for (const state of STATES) {
     it(`${state.label}: no message on any page says more than this build can do`, async () => {
       for (const { locale, route } of formPages) {
-        const messages = messagesIn(await markupOf(state.preview(), route));
+        const messages = messagesIn(await pageMarkup(state.preview(), route));
         expect(
           new Set(messages.map((message) => message.name)).size,
           `${route} renders ${messages.length} data-msg-* attributes, which is fewer than ` +
@@ -1509,7 +2124,7 @@ describe('MUSE-110: the failure copy describes the form that was actually built'
 
     it(`${state.label}: the failure body is the one the configuration allows`, async () => {
       for (const { locale, route } of formPages) {
-        const messages = messagesIn(await markupOf(state.preview(), route));
+        const messages = messagesIn(await pageMarkup(state.preview(), route));
         const copy = FORM_COPY[locale];
         const body = valueOf(messages, 'fail-body');
         const offline = valueOf(messages, 'fail-offline');
@@ -1561,9 +2176,9 @@ describe('MUSE-110: the failure copy describes the form that was actually built'
     { locale: 'en' as const, route: '/en/contact' },
   ]) {
     it(`${locale}: with no endpoint, every surface on /contact offers the one inbox`, async () => {
-      const html = await markupOf(unconfigured, route);
+      const html = await pageMarkup(unconfigured, route);
       const addresses = new Set(
-        [...html.matchAll(/mailto:([^"'?]+)/g)].map((match) => decode(match[1]!)),
+        [...html.matchAll(/mailto:([^"'?]+)/g)].map((match) => decodeEntities(match[1]!)),
       );
       expect(addresses.size, `/contact offers ${addresses.size} different addresses`).toBe(1);
 
@@ -1661,7 +2276,7 @@ describe('MUSE-110: the failure copy describes the form that was actually built'
 
   it('the prose the boundary is drawn around is still published', async () => {
     for (const { route, text } of INNOCENT_RETRY_PROSE) {
-      const page = await markupOf(unconfigured, route);
+      const page = await pageMarkup(unconfigured, route);
       expect(page, `${route} no longer says ${JSON.stringify(text)}`).toContain(text);
     }
   });
