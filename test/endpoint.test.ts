@@ -26,8 +26,18 @@ import { API_HOST, queryUrl, target } from '../scripts/seed-compare.mjs';
  * to the dataset, and there is no content-write token in this project on purpose
  * (MUSE-21 declined a GitHub PAT inside Sanity; MUSE-45 kept content away from
  * `SANITY_DEPLOY_TOKEN`), nor may this suite touch the network at all — it reads
- * `content/seed.ndjson` through `groq-js`. So the ticket's acceptance criterion was
- * verified by hand, against the live dataset, and is recorded on the ticket.
+ * `content/seed.ndjson` through `groq-js`.
+ *
+ * **So be exact about which of MUSE-81's criteria has been verified and how** (MUSE-90).
+ * The one about the *endpoint* — which host a build talks to — was established by hand,
+ * against the live dataset, by the falsification recorded below, and the one about the
+ * *log* is asserted here as a function and, since MUSE-90, off a real build's log in
+ * `test/content.test.ts`. The first — **publish, then build immediately, and read the
+ * published value — has never been verified by anybody.** It needs a write to the
+ * dataset; no agent may make one and this project holds no token that could. That the
+ * uncached host answers with the dataset as of the moment it is asked is Sanity's
+ * documented behaviour, taken on trust here and not a measurement anybody took. Nothing
+ * in this repository should be read as evidence for it.
  *
  * What is left for a test is the half that is *ours*, and it is the half that was wrong:
  * **which host the build talks to**. That is a property of this repository, it is
@@ -101,6 +111,28 @@ describe('the build reads the uncached host', () => {
     );
   });
 
+  it('asks for the same perspective the build asks for', () => {
+    /**
+     * **A second thing the two readers have to agree about, and did not** (MUSE-90).
+     *
+     * `CLIENT_CONFIG` sets `perspective: 'published'`, and the HTTP API's default with no
+     * `perspective` parameter is the **raw** one — drafts included. So `queryUrl` sent
+     * the `.mjs` readers at a different view of the dataset from the build's, which is
+     * invisible while no draft exists and wrong in the two places it would show:
+     * `npm run sanity:read` could report `OK` for a query the build answers as `EMPTY`,
+     * the single distinction that script exists to draw, and `npm run sanity:seed:check`
+     * would list a `drafts.`-prefixed document as something the seed has not got.
+     *
+     * The parameter is honoured rather than ignored, which is worth knowing because an
+     * ignored one would make this assertion decorative: the API answers an unknown
+     * perspective with HTTP 400 `validationError`, measured against the live dataset on
+     * 2026-10-16. The dataset held no `drafts.` document that day — `count(*[_id in
+     * path("drafts.**")])` was 0 — so this closes a hole rather than fixing a symptom.
+     */
+    const asked = new URL(queryUrl('*[_id == "siteSettings"]')).searchParams;
+    expect(asked.get('perspective')).toBe(source().perspective);
+  });
+
   it('reads the same dataset the scripts compare against', () => {
     // Two spellings of one address is the MUSE-9 shape, and a `.mjs` script cannot import
     // a `.ts` module, so the agreement has to be asserted rather than arranged.
@@ -120,6 +152,18 @@ describe('the build reads the uncached host', () => {
 /* ------------------------------------------------------------- 2. what the log says */
 
 describe('the build log names the endpoint', () => {
+  /**
+   * **These two are the function, not the log** (MUSE-90). `endpointNote` is pure and
+   * `contentEndpoint()` is a value, so both can be asserted here with no build — and for
+   * the life of MUSE-81 that was all anything asserted: QA deleted the line from
+   * `announce` in `src/lib/sanity/client.ts` and the entire run stayed green.
+   *
+   * That the *build* prints it is asserted in `test/content.test.ts`, off the log of the
+   * one build in the suite given no fixture, because that is the only build whose banner
+   * can carry this clause. It is not re-asserted here: a build of this suite's own would
+   * be an eleventh heavyweight operation, and `DECLARED` in
+   * `test/helpers/concurrency.ts` has no headroom.
+   */
   it('names the host and says the content is current', () => {
     const note = endpointNote(contentEndpoint());
     expect(note).toContain(`${source().projectId}.${API_HOST}`);
@@ -172,6 +216,13 @@ describe('the cached read host is named nowhere in the read surface', () => {
    * `test/` is deliberately outside the scan: the case above has to spell the hostname to
    * assert the warning, and `test/nojs.test.ts` keeps it as a marker string that must not
    * reach `dist`.
+   *
+   * **What this scan cannot see is a second client** (MUSE-90), because a client is given
+   * the host as a *boolean* and derives the name itself — so `useCdn: true` in a file that
+   * never spells the hostname passes everything here. That rule is the one-client rule,
+   * it lives in `test/sanity.test.ts`, and MUSE-90 widened it from `src/` to the scripts
+   * and the root configuration a build loads. It is not duplicated here: two guards for
+   * one rule is the shape MUSE-9 is about.
    */
   const CACHED_HOST = 'apicdn.sanity.io';
 

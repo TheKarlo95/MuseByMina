@@ -1151,13 +1151,142 @@ describe('every query goes through one module', () => {
     expect(outsideReadPath('*[')).toEqual([]);
   });
 
+  /**
+   * **Every file this repository's own build and checks load, outside the read path.**
+   *
+   * `sources()` above walks `src/` and takes `.ts`/`.astro`, which is the right scope for
+   * the GROQ rules: a query belongs to a page or a component. It is the wrong scope for
+   * the client, and MUSE-90 is where that was found. QA planted a second
+   * `createClient` — `useCdn: true`, which resolves to the *cached* read host MUSE-81
+   * exists to remove — in a `.mjs` file under `scripts/`, and the whole suite stayed
+   * green. Three guards look like they cover that and none does:
+   *
+   *   - `test/endpoint.test.ts`'s scan needles the cached **hostname**, which a second
+   *     client never spells: the client derives the host from a boolean.
+   *   - `SanitySource.useCdn`'s literal `false` binds `CLIENT_CONFIG`, one object in one
+   *     module, and says nothing about a second client's configuration.
+   *   - this assertion, which walked `src/` only.
+   *
+   * So the scope is the code that actually runs here: everything under `src/` and
+   * `scripts/`, with **no extension filter** — MUSE-42's stance, since a skip list is how
+   * a scan acquires a blind spot, and a font decoded as text cannot match either needle —
+   * plus the root-level `.ts` and `.mjs` files, because `astro.config.mjs` and
+   * `vitest.config.ts` are loaded by a build and a test run as surely as anything under
+   * `src/`. The root is the one place an extension filter is needed rather than
+   * preferred: `package.json` and `package-lock.json` name the dependency, which is how
+   * the one legitimate client gets installed.
+   *
+   * **Where it stops.** `test/` is outside it, because a suite has to be able to spell
+   * both needles to assert about them, and this file is the worked example. So is
+   * `sanity/` with `sanity.config.ts`'s schema and structure, whose client is the
+   * Studio's: it runs in a browser, against a dataset Mina is editing, and freshness
+   * there is Sanity's problem rather than this build's — the rule is about a *reader* a
+   * deploy depends on. Neither exclusion is a skip list in the scan; they are simply not
+   * in the scope, which is what makes the list of offences nameable.
+   */
+  function clientSurface(): string[] {
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = join(dir, entry.name);
+        return entry.isDirectory() ? walk(full) : [full];
+      });
+    const root = readdirSync(ROOT, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && /\.(ts|mjs)$/.test(entry.name))
+      .map((entry) => join(ROOT, entry.name));
+    return [...walk(join(ROOT, 'src')), ...walk(join(ROOT, 'scripts')), ...root]
+      .map((file) => relative(ROOT, file).replace(/\\/g, '/'))
+      .sort();
+  }
+
+  /**
+   * What a second client looks like, as **forms rather than mentions**.
+   *
+   * The package is matched quoted, so the prose in `src/lib/sanity/index.ts`,
+   * `decode.ts`, `params.ts` and `sanity.cli.ts` — all of which name it in backticks,
+   * and have to, because that is where the rule is explained — is not an offence. The
+   * factory is matched with its opening parenthesis for the same reason: `client.ts`
+   * discusses `createClient` by name a dozen lines above calling it.
+   *
+   * Two needles rather than one because they fail independently: a re-export would hide
+   * the specifier, and a vendored copy of the package would hide neither but be reached
+   * through a path the first needle does not spell.
+   */
+  const SECOND_CLIENT: { what: string; pattern: RegExp }[] = [
+    {
+      what: `imports @sanity/${'client'}`,
+      pattern: new RegExp(`['"]@sanity/${'client'}(/[^'"]*)?['"]`),
+    },
+    { what: 'calls createClient(', pattern: /\bcreateClient\s*\(/ },
+  ];
+
+  /** Every line of `files` that is one of the forms above, as `file:line what`. */
+  function clientOffences(files: string[]): string[] {
+    const found: string[] = [];
+    for (const file of files) {
+      readFileSync(join(ROOT, file), 'utf8')
+        .split('\n')
+        .forEach((line, index) => {
+          for (const { what, pattern } of SECOND_CLIENT) {
+            if (pattern.test(line)) found.push(`${file}:${index + 1} ${what}`);
+          }
+        });
+    }
+    return found;
+  }
+
   it('lets one module hold the Sanity client', () => {
     expect(outsideReadPath(`@sanity/${'client'}`)).toEqual([]);
+
+    const offences = clientOffences(
+      clientSurface().filter((file) => !file.startsWith('src/lib/sanity/')),
+    );
+    expect(
+      offences,
+      `a second Sanity client at ${offences.join(', ')}. The host a client reads is a ` +
+        `*boolean* in its configuration, so a second one can resolve to the cached, ` +
+        `eventually-consistent host without naming it — which is the failure MUSE-81 ` +
+        `removed and MUSE-90 found unguarded. Read content through \`src/lib/sanity\`, ` +
+        `and a dataset from a script through \`queryUrl\` in \`scripts/seed-compare.mjs\`.`,
+    ).toEqual([]);
+
     // And inside the read path, exactly one module imports it.
     const importers = sources().filter((file) =>
       /^import .*from '@sanity\/client'/m.test(readFileSync(join(ROOT, file), 'utf8')),
     );
     expect(importers).toEqual(['src/lib/sanity/client.ts']);
+  });
+
+  it('finds the one client there is, which is what makes an empty list mean something', () => {
+    // The positive control. A scan whose needles match nothing anywhere passes whatever
+    // the tree holds, and both needles have to be live rather than one: see `SECOND_CLIENT`.
+    const found = clientOffences(
+      clientSurface().filter((file) => file.startsWith('src/lib/sanity/')),
+    );
+    expect([...new Set(found.map((offence) => offence.split(':')[0]))]).toEqual([
+      'src/lib/sanity/client.ts',
+    ]);
+    for (const { what } of SECOND_CLIENT) {
+      expect(found.filter((offence) => offence.endsWith(what)).length, what).toBeGreaterThan(0);
+    }
+  });
+
+  it('looks at the scripts and the configuration a build loads, not only at `src/`', () => {
+    // The reach, asserted: the planted file was a `.mjs` under `scripts/`, and a scan
+    // that walked the wrong tree is the whole of MUSE-90's second half.
+    const surface = clientSurface();
+    for (const file of [
+      'src/lib/sanity/client.ts',
+      'scripts/seed-compare.mjs',
+      'scripts/sanity-read-check.mjs',
+      'astro.config.mjs',
+      'vitest.config.ts',
+    ]) {
+      expect(surface, file).toContain(file);
+    }
+    // And where it stops, so the exclusions are a decision rather than an accident.
+    expect(surface.filter((file) => file.startsWith('test/'))).toEqual([]);
+    expect(surface.filter((file) => file.startsWith('sanity/'))).toEqual([]);
+    expect(surface).not.toContain('package.json');
   });
 
   it('never puts the client where a browser could reach it', () => {

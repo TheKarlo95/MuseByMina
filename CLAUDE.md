@@ -240,7 +240,9 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
 - **It reads the *uncached* host, and that is a correctness setting, not a tuning one**
   (MUSE-81). `useCdn: false`, pinned as the literal type `false`. The cached host is
   eventually consistent, so a build inside the refresh window publishes the previous
-  revision with every gate green. The `[content]` line names the host. → `content-model.md`
+  revision with every gate green. The `[content]` line names the host, and a **real
+  build's log** is read for it (MUSE-90) — a unit call cannot see it deleted. Every script
+  reads the same host **and the same perspective** through `queryUrl`. → `content-model.md`
 - **The seed lives in `content/`, not in `sanity/`, and that is load-bearing** (MUSE-45).
   Everything under `sanity/` is schema source and is fingerprinted with no extension
   filter. **Do not fix the next instance by teaching the walk to skip something** — move
@@ -296,8 +298,11 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
 - **A page imports `src/lib/sanity` and nothing deeper.** The index is what decodes; a
   module from inside the read path hands back raw rows with silent nulls. Both halves are
   tests. → `content-model.md`
-- **One read module.** All GROQ lives in `src/lib/sanity/queries.ts`. A query string or
-  `@sanity/client` anywhere else under `src/` is a red test. → `content-model.md`
+- **One read module, and one client.** All GROQ lives in `src/lib/sanity/queries.ts`; a
+  query string anywhere else under `src/` is a red test. A **second client** — the package
+  or `createClient(` — is a red test under `src/`, `scripts/` **and** the root config
+  (MUSE-90): a client takes its host as a boolean, so it reaches the cached one without
+  naming it. → `content-model.md`
 - **Content is fetched at build time and no Sanity code ships to the visitor.** The output
   contains **zero `.js` files**. The client reads config off `process.env`, never
   `import.meta.env`. → `content-model.md`

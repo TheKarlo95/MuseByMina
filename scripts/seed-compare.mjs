@@ -150,9 +150,27 @@ export const target = () => ({
  */
 export const API_HOST = 'api.sanity.io';
 
+/**
+ * **The view of the dataset every reader here takes, and the one the build takes.**
+ *
+ * `CLIENT_CONFIG` in `src/lib/sanity/client.ts` sets `perspective: 'published'`, and the
+ * HTTP API's default with no `perspective` parameter is the **raw** one — drafts
+ * included. So until MUSE-90 the scripts queried a dataset the build does not read:
+ * `npm run sanity:read` could report `OK` for a query the build answers as `EMPTY`,
+ * which is the single distinction that script exists to draw, and
+ * `npm run sanity:seed:check` would list a `drafts.`-prefixed document as something the
+ * dataset holds and the seed has not got. Neither was observable — the dataset held no
+ * draft — which is why it reached QA of MUSE-81 rather than a run.
+ *
+ * A literal here and the real client's setting there, checked against each other by
+ * `test/endpoint.test.ts`, for the reason `API_HOST` above gives: a `.mjs` script cannot
+ * import a `.ts` module, so the two cannot share one spelling and are compared instead.
+ */
+export const PERSPECTIVE = 'published';
+
 /** A GROQ query and its parameters, as a URL against the uncached host. */
 export function queryUrl(/** @type {string} */ query, params = {}, where = target()) {
-  const search = new URLSearchParams({ query });
+  const search = new URLSearchParams({ query, perspective: PERSPECTIVE });
   for (const [key, value] of Object.entries(params)) {
     search.set(`$${key}`, JSON.stringify(value));
   }
