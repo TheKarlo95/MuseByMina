@@ -1,10 +1,13 @@
-import { writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+import ts from 'typescript';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   APEX_DEPLOY,
+  basePath,
   buildSite,
   canonicalOf,
   PAGES_DEPLOY,
@@ -12,7 +15,7 @@ import {
 } from './helpers/build';
 import { claimOutDir } from './helpers/scratch';
 import { seedDocs, type SeedDoc } from './helpers/seed';
-import { servePages, type Host } from './helpers/serve';
+import { resolveRequest, servePages, type Host } from './helpers/serve';
 
 /**
  * **MUSE-31 — the studio's own details, published once, in machine-readable form.**
@@ -44,45 +47,177 @@ import { servePages, type Host } from './helpers/serve';
 const LOCALES = ['hr', 'en'] as const;
 type Locale = (typeof LOCALES)[number];
 
+/* --------------------------------------------------------- which pages are asserted on */
+
 /**
- * The route → output file mapping, spelled out rather than imported from
- * `src/lib/i18n.ts`, for the reason `test/seo.test.ts` and `test/content.test.ts` both
- * give: an assertion about URLs that computes its expectations with the code under test
- * agrees with that code by construction.
+ * **The page set is the build's own, derived rather than written down** (MUSE-100).
+ *
+ * It was four routes per locale, listed, with a comment citing `test/seo.test.ts` as the
+ * precedent for listing them. The citation was backwards: that suite reads its page list
+ * off `src/pages/` with `readdirSync`, which is the filesystem and the opposite of a
+ * literal. Meanwhile the build emits twenty-three `.html` files, so `/gallery`,
+ * `/pricing`, `/events`, `/events/archive`, `/aboutus`, `/blog` and `/whatisbachata` —
+ * each in both locales, two thirds of the site — sat outside every assertion in this
+ * file, the per-page block count included. A second JSON-LD block on any of them
+ * published with the suite green.
+ *
+ * So the set comes off the output, the way `auditTargets` walks `dist` for
+ * `npm run a11y` (MUSE-55) and `test/routes.test.ts` anchors on the filesystem
+ * (MUSE-46): there is no list to extend, and a page routed tomorrow is asserted on the
+ * day it builds.
+ *
+ * The locale is the only thing still named here, and it is named as URL shape — which
+ * prefix the output path carries — not as a route list.
  */
-const PAGE_FILES: Record<Locale, string[]> = {
-  hr: ['index.html', 'schedule/index.html', 'contact/index.html', 'privacy/index.html'],
-  en: [
-    'en/index.html',
-    'en/schedule/index.html',
-    'en/contact/index.html',
-    'en/privacy/index.html',
-  ],
-};
+/** The locale published at the deploy root, with no prefix of its own. */
+const DEFAULT_LOCALE: Locale = 'hr';
+
+/** One built page, with the locale its URL publishes it in. */
+interface Page {
+  file: string;
+  locale: Locale;
+  html: string;
+}
+
+/** Every `.html` file a build emits, split into the pages and the error page. */
+interface Partition {
+  pages: Page[];
+  /** The file the host hands back for a path nothing answers. */
+  errorPage: string;
+}
+
+/**
+ * The locale an output path publishes a page in: `en/schedule/index.html` is `en`.
+ *
+ * Read off the path rather than off the page's own `<html lang>`, which is a claim the
+ * suite tests (AC4) and so may not also be the thing it groups by. The two are held to
+ * each other instead, in the first test below.
+ */
+function localeOfOutput(file: string): Locale {
+  const first = file.split('/')[0];
+  const prefixed = LOCALES.find((locale) => locale !== DEFAULT_LOCALE && locale === first);
+  return prefixed ?? DEFAULT_LOCALE;
+}
+
+/**
+ * The error page, identified by the role it plays rather than by its name.
+ *
+ * `resolveRequest` is this repository's model of GitHub Pages, and MUSE-38's rule is that
+ * the host serves the error page's *body* for an unknown path inside the deploy prefix.
+ * So "which page has no URL of its own" is a question the host answers, and the one page
+ * this suite excludes from the block count is excluded for a reason it can state.
+ */
+function errorPageFile(build: Build): string {
+  const base = basePath(build);
+  const probe = resolveRequest(build.outDir, base, `${base}no-such-path-muse-100`);
+  const body = probe.status === 404 ? probe.file : undefined;
+  if (body === undefined) {
+    throw new Error(
+      `The host model answers an unknown path with ${probe.status} and ` +
+        `${body ?? 'no body'}; MUSE-38 says it serves the error page's body, and ` +
+        'that is how this suite knows which page carries no block.',
+    );
+  }
+  return body;
+}
+
+/** Computed once per build: two dozen page reads, and every test below wants them. */
+const partitions = new WeakMap<Build, Partition>();
+
+/**
+ * Every page of a build, derived from the output.
+ *
+ * Deliberately a *partition* rather than a filter: each `.html` file the build emits is
+ * either a page this suite asserts a block on, or the error page it asserts the absence
+ * of, and nothing is quietly neither. A page the build starts emitting tomorrow lands in
+ * the first set the day it builds, which is the whole point of not writing the set down.
+ */
+function pagePartition(build: Build): Partition {
+  const cached = partitions.get(build);
+  if (cached) return cached;
+
+  const errorPage = errorPageFile(build);
+  const files = build.htmlFiles();
+  if (!files.includes(errorPage)) {
+    throw new Error(`The output has no ${errorPage}, which the host model asks for.`);
+  }
+  const pages = files
+    .filter((file) => file !== errorPage)
+    .map((file) => ({ file, locale: localeOfOutput(file), html: build.read(file) }));
+  if (pages.length === 0) {
+    throw new Error(
+      'The build emitted no pages besides the error page. Every assertion below is ' +
+        'vacuous over an empty page set, so this is a failure rather than a clean run.',
+    );
+  }
+
+  const partition: Partition = { pages, errorPage };
+  partitions.set(build, partition);
+  return partition;
+}
 
 /** Every indexable page of a build, with the locale it is published in. */
-function indexablePages(build: Build): { file: string; locale: Locale; html: string }[] {
-  return LOCALES.flatMap((locale) =>
-    PAGE_FILES[locale].map((file) => ({ file, locale, html: build.read(file) })),
-  );
+function indexablePages(build: Build): Page[] {
+  return pagePartition(build).pages;
 }
 
 /* --------------------------------------------------------------- reading the output */
 
+/** The mime type a JSON-LD block declares. */
+const JSON_LD_MIME = 'application/ld+json';
+
+/** Every `<script …>` opening tag on a page, as its attribute text. */
+function scriptAttributes(html: string): string[] {
+  return [...html.matchAll(/<script\b([^>]*)>/gi)].map((match) => match[1]!);
+}
+
 /**
- * The raw text of every `<script type="application/ld+json">` block on a page.
+ * The `type` an opening tag declares, quoted either way or not at all.
+ *
+ * Case-folded, because an HTML attribute name is case-insensitive and so is the mime
+ * comparison a browser makes: `TYPE='Application/LD+JSON'` is a JSON-LD block to every
+ * crawler that reads it, and a check that disagrees is a check that can be spelled around.
+ */
+function declaredType(attributes: string): string | undefined {
+  const match = /\btype\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>=`]+))/i.exec(attributes);
+  if (!match) return undefined;
+  return (match[1] ?? match[2] ?? match[3])!.trim().toLowerCase();
+}
+
+function isJsonLdScript(attributes: string): boolean {
+  return declaredType(attributes) === JSON_LD_MIME;
+}
+
+/**
+ * How many JSON-LD blocks a page publishes, counted off its opening tags.
+ *
+ * Counted separately from `jsonLdBlocks` because the count *is* the claim — exactly one —
+ * and reading it off the opening tags means nothing about how the element is closed can
+ * drop a tag out of the total. The two are compared, so a disagreement is loud.
+ */
+function jsonLdTagCount(html: string): number {
+  return scriptAttributes(html).filter(isJsonLdScript).length;
+}
+
+/**
+ * The raw text of every JSON-LD block on a page.
  *
  * Deliberately **not** parsed here. "Does it parse" is one of the claims under test — a
  * trailing comma in hand-assembled JSON-LD is the classic break and it is silent, since
  * a crawler simply ignores a block it cannot read — so the extractor hands back text and
  * the assertion does the parsing.
+ *
+ * The `type` attribute is **read**, not matched against a literal (MUSE-100). The old
+ * extractor required the exact bytes `type="application/ld+json"` in the markup, and a
+ * computed attribute — `const LD_MIME = 'application/ld' + '+json'` in a component's
+ * frontmatter, then `type={LD_MIME}` — puts exactly that attribute in the output while
+ * matching nothing in the source. The rendered tag is what a crawler reads, so the
+ * rendered tag is what is read here, however it came to be written.
  */
 function jsonLdBlocks(html: string): string[] {
-  return [
-    ...html.matchAll(
-      /<script[^>]*\btype=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/g,
-    ),
-  ].map((match) => match[1]!);
+  return [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
+    .filter((match) => isJsonLdScript(match[1]!))
+    .map((match) => match[2]!);
 }
 
 /** The one JSON-LD document a page publishes, parsed. Fails if there is not exactly one. */
@@ -251,16 +386,91 @@ const TARGETS: [string, () => Build][] = [
 /* -------------------------------------------------------------------- the block */
 
 /**
+ * The page set itself, asserted (MUSE-100). A derivation that quietly returns eight pages
+ * of twenty-two, or none at all, makes every test below pass while covering nothing — so
+ * what it derived is a claim in its own right, and it is the first one.
+ */
+describe('the page set is the build’s own', () => {
+  for (const [name, build] of TARGETS) {
+    it(`accounts for every .html file the build emits (${name})`, () => {
+      const { pages, errorPage } = pagePartition(build());
+      expect(
+        [...pages.map((page) => page.file), errorPage].sort(),
+        'every built page is either asserted on or the error page — nothing is neither',
+      ).toEqual(build().htmlFiles());
+    });
+
+    it(`covers every locale the build publishes in (${name})`, () => {
+      const { pages } = pagePartition(build());
+      for (const locale of LOCALES) {
+        expect(
+          pages.filter((page) => page.locale === locale).map((page) => page.file),
+          `${locale}: pages asserted on`,
+        ).not.toEqual([]);
+      }
+    });
+
+    /**
+     * The locale is derived from the output path, so the path and the page's own
+     * `<html lang>` have to agree about it — otherwise a page published under `/en/` in
+     * Croatian would be grouped as English and compared against the English copy, and
+     * AC4's per-locale assertions would be reading the wrong pages.
+     */
+    it(`publishes each page in the language its path claims (${name})`, () => {
+      const wrong = indexablePages(build())
+        .filter(({ locale, html }) => !new RegExp(`^${locale}\\b`).test(htmlLang(html) ?? ''))
+        .map(({ file, locale, html }) => `${file}: /${locale} but lang=${htmlLang(html)}`);
+      expect(wrong).toEqual([]);
+    });
+
+    /**
+     * The guard against the whole file going quiet again. The retired list named eight
+     * files; the build emits twenty-three, and every route added since went uncovered.
+     * This is not a floor on the page count — the partition above already says the set is
+     * the output's — it is the one assertion that a reviewer can read as "the defect
+     * MUSE-100 was filed for is not back", and it goes red if the set ever shrinks to what
+     * the literal used to name.
+     */
+    it(`asserts on the pages outside the four routes this file used to name (${name})`, () => {
+      const named = ['', 'schedule/', 'contact/', 'privacy/'].flatMap((route) => [
+        `${route}index.html`,
+        `en/${route}index.html`,
+      ]);
+      const beyond = indexablePages(build())
+        .map((page) => page.file)
+        .filter((file) => !named.includes(file));
+      expect(beyond, 'pages the old literal list left uncovered').not.toEqual([]);
+    });
+  }
+});
+
+/**
  * AC1 — Given any page, then it carries an organisation block with name, address,
  * email, social profiles and URL.
  */
 describe('AC1: every page carries the studio block', () => {
   for (const [name, build] of TARGETS) {
+    /**
+     * **The honest instrument for "one emission site" is the output** (MUSE-100): it
+     * cannot lie about how many tags a page carries and it is immune to every spelling of
+     * the `type` attribute and to whichever file produced the markup. The source scan
+     * below is kept for the better message, not for the coverage.
+     */
     it(`publishes exactly one JSON-LD document per page (${name})`, () => {
-      const missing = indexablePages(build())
-        .filter(({ html }) => jsonLdBlocks(html).length !== 1)
-        .map(({ file, html }) => `${file}: ${jsonLdBlocks(html).length} block(s)`);
-      expect(missing).toEqual([]);
+      const wrong = indexablePages(build())
+        .map(({ file, html }) => ({
+          file,
+          tags: jsonLdTagCount(html),
+          blocks: jsonLdBlocks(html).length,
+        }))
+        .filter(({ tags, blocks }) => tags !== 1 || blocks !== 1)
+        .map(
+          ({ file, tags, blocks }) => `${file}: ${tags} tag(s), ${blocks} readable block(s)`,
+        );
+      expect(
+        wrong,
+        'a second block on a page is a second answer to "does the markup agree with it"',
+      ).toEqual([]);
     });
 
     it(`names the studio, its address, its email and its profiles (${name})`, () => {
@@ -296,8 +506,10 @@ describe('AC1: every page carries the studio block', () => {
    * about a page that does not exist. Structured data rides with having a URL.
    */
   it('publishes none on the error page, which has no URL of its own', () => {
-    const html = pages.read('404.html');
-    expect(canonicalOf(html), 'the 404 declares a canonical').toBeUndefined();
+    const errorPage = pagePartition(pages).errorPage;
+    const html = pages.read(errorPage);
+    expect(canonicalOf(html), `${errorPage} declares a canonical`).toBeUndefined();
+    expect(jsonLdTagCount(html), `${errorPage}: JSON-LD tags`).toBe(0);
     expect(jsonLdBlocks(html)).toEqual([]);
   });
 });
@@ -653,46 +865,279 @@ describe('AC7: the block is the shape a validator accepts', () => {
   });
 });
 
+/* ------------------------------------------------- the source scan: for the message */
+
+const SRC = fileURLToPath(new URL('../src', import.meta.url));
+
+/**
+ * How each extension under `src/` is read, and **every extension present must be
+ * classified** — the rule `test/helpers/source-guard.ts` states for `test/`, for the same
+ * reason: a file nothing reads is a blind spot rather than a clean result, and a skip list
+ * nobody maintains is how MUSE-34's second hole stayed open.
+ *
+ * `code` is parsed and its string and template literals are read. `markup` is an `.astro`
+ * component: the frontmatter gets the `code` treatment and the template is read as text.
+ * `inert` cannot produce an element on a page under any circumstances.
+ *
+ * Each list holds only what the tree actually has — a declared extension that is no
+ * longer present is a failure too, because an entry nothing exercises reads as coverage
+ * and is not. The day a `.mjs` lands under `src/`, the completeness check asks for the
+ * decision rather than guessing it.
+ */
+const CODE_EXTENSIONS = ['.ts'] as const;
+const MARKUP_EXTENSIONS = ['.astro'] as const;
+const INERT_EXTENSIONS = ['.css', '.png', '.woff2'] as const;
+
+type Kind = 'code' | 'markup' | 'inert';
+
+function kindOf(file: string): Kind | undefined {
+  if (MARKUP_EXTENSIONS.some((ext) => file.endsWith(ext))) return 'markup';
+  if (CODE_EXTENSIONS.some((ext) => file.endsWith(ext))) return 'code';
+  if (INERT_EXTENSIONS.some((ext) => file.endsWith(ext))) return 'inert';
+  return undefined;
+}
+
+/** Every file under `src/`, whatever it is, as `src/`-relative paths. */
+function srcFiles(): string[] {
+  const walk = (dir: string): string[] =>
+    readdirSync(dir).flatMap((entry) => {
+      const path = join(dir, entry);
+      return statSync(path).isDirectory() ? walk(path) : [path];
+    });
+  return walk(SRC)
+    .map((path) => path.slice(SRC.length + 1).replace(/\\/g, '/'))
+    .sort();
+}
+
+/**
+ * A `<script>` opening tag declaring the JSON-LD mime, as *text*.
+ *
+ * Loose about the attribute order so `<script is:inline type="application/ld+json">` is
+ * the same finding as the other order, and anchored on `<script` so the mime string on
+ * its own — in a `const`, in a comparison, in this file's own prose — is not one.
+ */
+const WRITES_TAG = /<script\b[^>]{0,200}?application\/ld\+json/i;
+
+/** The frontmatter of an `.astro` component, and its template, separately. */
+function astroHalves(text: string): { frontmatter: string; template: string } {
+  const fence = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!fence) return { frontmatter: '', template: text };
+  return { frontmatter: fence[1]!, template: text.slice(fence.index + fence[0].length) };
+}
+
+/** Every string literal and every template-literal text span in a chunk of TypeScript. */
+function literalsIn(file: string, code: string): string[] {
+  const tree = ts.createSourceFile(
+    file,
+    code,
+    ts.ScriptTarget.ESNext,
+    /* setParentNodes */ false,
+    file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  const found: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isStringLiteral(node) ||
+      ts.isNoSubstitutionTemplateLiteral(node) ||
+      ts.isTemplateHead(node) ||
+      ts.isTemplateMiddle(node) ||
+      ts.isTemplateTail(node)
+    ) {
+      found.push(node.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(tree);
+  return found;
+}
+
+/**
+ * Does this file's **code** write a JSON-LD `<script>` tag?
+ *
+ * Takes the text as an argument so the rule can be tested *as a rule*, against the two
+ * escapes MUSE-100 recorded, rather than by planting a tag in the tree and remembering to
+ * take it out again.
+ *
+ * **It reads code, not prose, and that is the reason the narrowing needs.** The old scan
+ * looked at `.astro` files only, and said a `.ts` module could not emit a tag — it can:
+ * export the tag as a string and write `<Fragment set:html={EXTRA_LD} />`, and no `.astro`
+ * file contains the literal. So every file that can execute is read now, and what is read
+ * is its string literals and its markup, with comments left out by construction — which
+ * is what lets `src/lib/structured-data.ts` and `BaseLayout.astro` go on *documenting* the
+ * tag in a doc comment. A guard that cannot survive the thing it guards being documented
+ * is a guard that gets deleted.
+ *
+ * **What it cannot see is a computed attribute**, and `does not see a computed type` below
+ * asserts that rather than leaving it to be discovered: `'application/ld' + '+json'` is in
+ * no literal, and a template span splits either side of its `${}`. No text scan can close
+ * that, which is why this one is the second check and the per-page count over the built
+ * output is the first.
+ */
+function writesJsonLdTag(file: string, text: string): boolean {
+  const kind = kindOf(file);
+  if (kind === 'inert' || kind === undefined) return false;
+  if (kind === 'code') {
+    return literalsIn(file, text).some((value) => WRITES_TAG.test(value));
+  }
+  const { frontmatter, template } = astroHalves(text);
+  const blanked = template
+    .replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ');
+  return (
+    WRITES_TAG.test(blanked) ||
+    literalsIn(`${file}.ts`, frontmatter).some((value) => WRITES_TAG.test(value))
+  );
+}
+
 /**
  * The structural rule the ticket asks for: one module, not a `<script>` tag per
- * component. Asserted on the source tree rather than left as a note, because the natural
- * way to add `Event` markup later is a tag in the events component — and once there are
- * two emission sites, "the block agrees with the page" has two answers.
+ * component. Asserted on the source tree as well as on the output, because the natural
+ * way to add `Event` markup later is a tag in the events component — and a failure that
+ * names the file beats one that names the page it reached.
  */
 describe('the emission lives in one place', () => {
-  it('writes a `<script type="application/ld+json">` tag in exactly one file', async () => {
-    const { readFileSync, readdirSync, statSync } = await import('node:fs');
-    const { fileURLToPath } = await import('node:url');
-    const root = fileURLToPath(new URL('../src', import.meta.url));
-
-    const walk = (dir: string): string[] =>
-      readdirSync(dir).flatMap((entry) => {
-        const path = join(dir, entry);
-        return statSync(path).isDirectory() ? walk(path) : [path];
-      });
-
-    /**
-     * `.astro` only, and the mime string only inside a `<script>` tag.
-     *
-     * Both narrowings are the rule stated accurately rather than loosely. What must not
-     * spread is the *element* — a second `<script type="application/ld+json">` is what
-     * puts a second block on a page — and markup only reaches a page from a component or
-     * a layout. A `.ts` module under `src/lib/` cannot emit one; the convention here is
-     * already that a module exports script *content* and an `.astro` file writes the tag
-     * around it (`src/lib/theme.ts`, `src/lib/lang.ts`).
-     *
-     * Written loosely, this check fails on `src/lib/structured-data.ts` naming the tag in
-     * its own doc comment — a guard that cannot survive the thing it guards being
-     * documented is a guard that gets deleted.
-     */
-    const tag = /<script[^>]*\btype=["']application\/ld\+json["']/;
-    const emitters = walk(root)
-      .filter((path) => path.endsWith('.astro'))
-      .filter((path) => tag.test(readFileSync(path, 'utf8')))
-      .map((path) => path.slice(root.length + 1));
-
-    expect(emitters, 'one emission site, or "agrees with the page" has two answers').toEqual(
-      ['layouts/BaseLayout.astro'],
+  it('writes a JSON-LD `<script>` tag in exactly one file under `src/`', () => {
+    const emitters = srcFiles().filter((file) =>
+      writesJsonLdTag(file, readFileSync(join(SRC, file), 'utf8')),
     );
+    expect(emitters, 'one emission site, or "agrees with the page" has two answers').toEqual([
+      'layouts/BaseLayout.astro',
+    ]);
+  });
+
+  it('classifies every extension present under `src/`', () => {
+    const unread = srcFiles().filter((file) => kindOf(file) === undefined);
+    expect(
+      unread,
+      'an extension nothing knows how to read is a blind spot, not a pass',
+    ).toEqual([]);
+  });
+
+  /** Each declared extension is asserted still live, so the table cannot rot into fiction. */
+  it('declares no extension that is no longer in the tree', () => {
+    const files = srcFiles();
+    for (const ext of [...CODE_EXTENSIONS, ...MARKUP_EXTENSIONS, ...INERT_EXTENSIONS]) {
+      expect(
+        files.some((file) => file.endsWith(ext)),
+        `${ext} is classified above and nothing under src/ has it any more`,
+      ).toBe(true);
+    }
+  });
+});
+
+/**
+ * The scan's own behaviour, against the forms MUSE-100 demonstrated.
+ *
+ * Each is a source string rather than a file: a fixture under `src/` that deliberately
+ * breaks the rule would be a second emission site shipped to the deploy, which is a worse
+ * problem than the one it solves (`source-guard.ts` takes the same position for `test/`).
+ */
+describe('the source scan reads code, not prose', () => {
+  it('finds the tag in an `.astro` template', () => {
+    const component = [
+      '---',
+      'const x = 1;',
+      '---',
+      '',
+      '<script type="application/ld+json">{}</script>',
+    ].join('\n');
+    expect(writesJsonLdTag('components/Qa.astro', component)).toBe(true);
+  });
+
+  /**
+   * MUSE-100's second escape. The old scan read `.astro` files only and gave as its reason
+   * that a `.ts` module cannot emit a tag; this is the module that did, through
+   * `<Fragment set:html={EXTRA_LD} />` in a component containing no literal of its own.
+   */
+  it('finds the tag in a `.ts` module that exports it as a string', () => {
+    const module = [
+      'export const EXTRA_LD =',
+      `  '<script type="application/ld+json">{"@type":"ImageGallery"}</script>';`,
+    ].join('\n');
+    expect(writesJsonLdTag('lib/qa-extra-ld.ts', module)).toBe(true);
+  });
+
+  it('finds it in a template literal too', () => {
+    const module = 'export const LD = `<script type="application/ld+json">${body}</script>`;';
+    expect(writesJsonLdTag('lib/qa-extra-ld.ts', module)).toBe(true);
+  });
+
+  it('does not report the tag named in a doc comment', () => {
+    const module = [
+      '/** Serialised for a `<script type="application/ld+json">`. */',
+      'export function jsonLd(x: unknown): string {',
+      '  return JSON.stringify(x);',
+      '}',
+    ].join('\n');
+    expect(writesJsonLdTag('lib/structured-data.ts', module)).toBe(false);
+  });
+
+  it('does not report the tag named in an `.astro` template comment', () => {
+    const component = [
+      '---',
+      'const x = 1;',
+      '---',
+      '',
+      "{/* The site's only `application/ld+json` tag lives in BaseLayout. */}",
+      '<p>{x}</p>',
+    ].join('\n');
+    expect(writesJsonLdTag('components/Qa.astro', component)).toBe(false);
+  });
+
+  it('does not report the mime type on its own, outside a tag', () => {
+    expect(writesJsonLdTag('lib/qa.ts', `const MIME = 'application/ld+json';`)).toBe(false);
+  });
+
+  /**
+   * **The hole, asserted.** MUSE-100's first escape computes the attribute, so the mime
+   * string is in no literal and in no template span. The scan says `false` here and is
+   * right to: there is nothing in the text to find. The per-page count over the built
+   * output is what catches this form, which is why that check is the primary one and this
+   * one may not be the only one. If this test ever goes red because somebody taught the
+   * scan to follow a concatenation, that is fine — delete it and say so.
+   */
+  it('does not see a computed `type`, which is why the output count is the first check', () => {
+    const component = [
+      '---',
+      `const LD_MIME = 'application/ld' + '+json';`,
+      '---',
+      '',
+      '<script type={LD_MIME} is:inline set:html={payload} />',
+    ].join('\n');
+    expect(writesJsonLdTag('components/Qa.astro', component)).toBe(false);
+  });
+});
+
+/**
+ * And the extractor's own behaviour, since it is now the primary check. Every spelling
+ * below is one tag to a browser, so every one of them has to be one tag here.
+ */
+describe('the output count sees a block however the tag is spelled', () => {
+  it('counts a computed, a single-quoted and an upper-case attribute alike', () => {
+    const html = [
+      '<script type="application/ld+json">{"a":1}</script>',
+      `<script is:inline type='application/ld+json'>{"b":2}</script>`,
+      '<script TYPE="Application/LD+JSON">{"c":3}</script>',
+      '<script type=application/ld+json>{"d":4}</script>',
+      '<script type="application/ld+json" >{"e":5}</script>',
+    ].join('\n');
+    expect(jsonLdTagCount(html)).toBe(5);
+    expect(jsonLdBlocks(html).map((raw) => JSON.parse(raw) as unknown)).toEqual([
+      { a: 1 },
+      { b: 2 },
+      { c: 3 },
+      { d: 4 },
+      { e: 5 },
+    ]);
+  });
+
+  it('counts no ordinary script and no mention of the mime in text', () => {
+    const html = [
+      '<script type="module">const t = "application/ld+json";</script>',
+      '<p>application/ld+json</p>',
+      '<script>console.log(1);</script>',
+    ].join('\n');
+    expect(jsonLdTagCount(html)).toBe(0);
+    expect(jsonLdBlocks(html)).toEqual([]);
   });
 });

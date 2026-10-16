@@ -150,10 +150,11 @@ interface Props {
    * The article this page *is*, if it is one — for the JSON-LD block and nothing else.
    *
    * It goes through `src/lib/structured-data.ts` like everything else, because
-   * `test/structured-data.test.ts` fails if a second `.astro` file writes an
-   * `application/ld+json` tag: two emission sites are two answers to "does the markup
-   * agree with the page" (MUSE-31). So a post hands its own facts *up* rather than
-   * emitting a block of its own, and the one `<script>` below carries both nodes.
+   * `test/structured-data.test.ts` fails if a second file under `src/` writes an
+   * `application/ld+json` tag, and fails again if any built page carries two: two
+   * emission sites are two answers to "does the markup agree with the page" (MUSE-31,
+   * MUSE-100). So a post hands its own facts *up* rather than emitting a block of its
+   * own, and the one `<script>` below carries both nodes.
    */
   article?: ArticleInput;
 }
