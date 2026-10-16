@@ -4,8 +4,21 @@ import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { LOCALE_HTML_LANG } from '../src/lib/i18n';
+import { getPosts, type Post } from '../src/lib/sanity';
+import { FIXTURE_ENV } from '../src/lib/sanity/fixture';
+// MUSE-87: the two wordings and the selector between them, imported rather than retyped —
+// `INERT_ROUTE_WARNING`'s reason in `src/lib/pages.ts`. A test spelling a published
+// sentence again is a test that passes while the build has gone quiet in a slightly
+// different wording. What is pinned here is which claim the build makes, not its prose.
+import { LOCALE_CLAIMS, localeClaims } from '../src/pages/llms.txt';
 import { claimOutDir } from './helpers/scratch';
 import { resolveRequest } from './helpers/serve';
+import {
+  POST_NOW,
+  POST_ONE_LOCALE,
+  fixtureOf,
+  type FixtureDoc,
+} from './helpers/structural-content';
 import {
   alternates,
   APEX_DEPLOY,
@@ -145,25 +158,34 @@ describe('the page list these tests are built from', () => {
 });
 
 /**
+ * Every `<url>` block the sitemap index reaches, keyed by its `<loc>`.
+ *
+ * At module scope rather than inside AC1's block because MUSE-87 reads it too: the claim
+ * `llms.txt` makes about locale coverage is checked against the set of pages the build
+ * actually published, and this is the only enumeration of that set which includes the
+ * content-keyed pages — `ROUTES` is read off `src/pages/` and so holds the *templates*
+ * `/blog/[slug]` and `/events/[slug]`, never the pages they produce.
+ */
+function allUrlEntries(build: Build): Map<string, string> {
+  const index = build.read('sitemap-index.xml');
+  const children = locs(index);
+  expect(children.length).toBeGreaterThan(0);
+
+  const merged = new Map<string, string>();
+  for (const child of children) {
+    // Child sitemaps are referenced by absolute URL; read them off disk.
+    const file = child.slice(build.origin.length).replace(/^\//, '');
+    expect(build.has(file)).toBe(true);
+    for (const [loc, block] of urlEntries(build.read(file))) merged.set(loc, block);
+  }
+  return merged;
+}
+
+/**
  * AC1 — Given the site is built, when I fetch `/sitemap-index.xml`, then it lists
  * every page in both locales with correct `hreflang` alternates.
  */
 describe('AC1: /sitemap-index.xml', () => {
-  function allUrlEntries(build: Build): Map<string, string> {
-    const index = build.read('sitemap-index.xml');
-    const children = locs(index);
-    expect(children.length).toBeGreaterThan(0);
-
-    const merged = new Map<string, string>();
-    for (const child of children) {
-      // Child sitemaps are referenced by absolute URL; read them off disk.
-      const file = child.slice(build.origin.length).replace(/^\//, '');
-      expect(build.has(file)).toBe(true);
-      for (const [loc, block] of urlEntries(build.read(file))) merged.set(loc, block);
-    }
-    return merged;
-  }
-
   it('exists at the site root', () => {
     expect(pages.has('sitemap-index.xml')).toBe(true);
   });
@@ -419,6 +441,143 @@ describe('AC3: /llms.txt', () => {
         .toEqual([]);
 
       expect(new Set(listed).size, 'llms.txt lists a page more than once').toBe(listed.length);
+    }
+  });
+});
+
+/**
+ * **MUSE-87 — the file told crawlers something its own content model contradicts.**
+ *
+ * Two sentences, both written by MUSE-5 (`git log -S` names `07fe496` for each): line 6,
+ * „Every page exists in both locales with the same slug.", and the sitemap index's own
+ * description, „every page in both locales, with hreflang alternates." Both were true the
+ * day they were written and **MUSE-26 made them false on purpose**: a `post` carries up to
+ * two `postTranslation` objects, „published in Croatian" is „`post.hr` exists", and a
+ * one-locale post gets no URL, no `hreflang` cluster and no switcher in the other language.
+ * `llms.txt` is published *for machines*, including this project's own QA agents, so a
+ * false statement in it is followed rather than ignored — the same reasoning MUSE-46 used
+ * about a dead link in the same file, one layer in.
+ *
+ * **The fix derives both sentences and this is what makes them checkable.**
+ * `LOCALE_CLAIMS` in `src/pages/llms.txt.ts` holds the two wordings and `localeClaims`
+ * picks between them from the posts the build is publishing. So there are two assertions
+ * here and they do different work:
+ *
+ *   - The **selector** is run against real decoded posts from a fixture holding a
+ *     Croatian-only one. That is the condition the seed cannot reach (`content/seed.ndjson`
+ *     has no `post`, deliberately — `docs/decisions/pages.md`), and it costs no build:
+ *     `getPosts` is the build's own read path and `MUSE_CONTENT_FIXTURE` is all it needs.
+ *   - The **emitted file** is compared against the locale coverage of `dist` — read off
+ *     the sitemap, which is the one enumeration that holds the content-keyed pages. That
+ *     is deliberately a *different* surface from the one the sentence was derived from, so
+ *     this is not the query agreeing with itself (MUSE-44): a future content type that can
+ *     be monolingual and that `localeClaims` is not handed would publish an unpaired
+ *     sitemap entry while the file still claimed universality, and this fails.
+ */
+describe('MUSE-87: what llms.txt says about locales is what the build published', () => {
+  /** Posts as the build reads them, from a dataset holding exactly `docs`. */
+  async function postsFrom(docs: FixtureDoc[], hint: string): Promise<Post[]> {
+    const previous = process.env[FIXTURE_ENV];
+    process.env[FIXTURE_ENV] = fixtureOf(docs, hint);
+    try {
+      // `minimum: 0` is what `/blog` passes: no post is a real state of this studio.
+      return await getPosts({ minimum: 0 });
+    } finally {
+      if (previous === undefined) delete process.env[FIXTURE_ENV];
+      else process.env[FIXTURE_ENV] = previous;
+    }
+  }
+
+  /** The hreflang tags a fully mirrored page carries, as the site spells them. */
+  const TAGS = (['hr', 'en'] as const).map((locale) => LOCALE_HTML_LANG[locale]);
+
+  /** Does every page this build published carry an alternate for both locales? */
+  function everyPageIsMirrored(build: Build): boolean {
+    const entries = allUrlEntries(build);
+    // The positive control: an empty sitemap makes every claim below vacuously true.
+    expect(entries.size, `${build.deploy.SITE} published no sitemap entries`).toBeGreaterThan(
+      0,
+    );
+
+    return [...entries.values()].every((block) => {
+      const alts = alternates(block);
+      return TAGS.every((tag) => alts.has(tag));
+    });
+  }
+
+  it('has two claims to choose between, and they are different sentences', () => {
+    // Without this every assertion below is satisfiable by one claim under two names.
+    expect(LOCALE_CLAIMS.perLanguage.index).not.toBe(LOCALE_CLAIMS.mirrored.index);
+    expect(LOCALE_CLAIMS.perLanguage.sitemap).not.toBe(LOCALE_CLAIMS.mirrored.sitemap);
+    // And neither is a substring of the other, which is what `toContain` below rests on.
+    for (const [a, b] of [
+      [LOCALE_CLAIMS.mirrored, LOCALE_CLAIMS.perLanguage],
+      [LOCALE_CLAIMS.perLanguage, LOCALE_CLAIMS.mirrored],
+    ] as const) {
+      expect(a.index).not.toContain(b.index);
+      expect(a.sitemap).not.toContain(b.sitemap);
+    }
+  });
+
+  it('claims a twin for every page when every post has one', async () => {
+    const posts = await postsFrom([POST_NOW], 'muse-87-bilingual');
+    expect(posts).toHaveLength(1);
+    expect(localeClaims(posts)).toBe(LOCALE_CLAIMS.mirrored);
+  });
+
+  /**
+   * AC1 and AC3 of the ticket, and the only assertion here that reaches the condition the
+   * seed cannot hold.
+   *
+   * `POST_ONE_LOCALE` is written in Croatian and not in English — the row MUSE-26's
+   * hardest question turns on. With it in the dataset the universal is untrue, so the
+   * file may not print it, and nothing it does print may claim that page has a twin.
+   */
+  it('claims no twin for anybody once one post is written in one language', async () => {
+    const posts = await postsFrom([POST_NOW, POST_ONE_LOCALE], 'muse-87-one-locale');
+    expect(posts).toHaveLength(2);
+
+    const claim = localeClaims(posts);
+    expect(claim).toBe(LOCALE_CLAIMS.perLanguage);
+    expect(claim.index).not.toContain(LOCALE_CLAIMS.mirrored.index);
+    expect(claim.sitemap).not.toContain(LOCALE_CLAIMS.mirrored.sitemap);
+  });
+
+  it('says of each build exactly what that build published', () => {
+    for (const build of [pages, apex]) {
+      const mirrored = everyPageIsMirrored(build);
+      const said = mirrored ? LOCALE_CLAIMS.mirrored : LOCALE_CLAIMS.perLanguage;
+      const other = mirrored ? LOCALE_CLAIMS.perLanguage : LOCALE_CLAIMS.mirrored;
+      const txt = build.read('llms.txt');
+      const where = `${build.deploy.SITE} (every sitemap page mirrored: ${mirrored})`;
+
+      expect(
+        txt,
+        `llms.txt does not state the locale rule this build published — ${where}`,
+      ).toContain(said.index);
+      expect(txt, `the sitemap line does not state it either — ${where}`).toContain(
+        said.sitemap,
+      );
+      expect(
+        txt,
+        `llms.txt states the locale rule of a different build — ${where}`,
+      ).not.toContain(other.index);
+      expect(txt, `the sitemap line states it — ${where}`).not.toContain(other.sitemap);
+    }
+  });
+
+  it('publishes neither universal MUSE-5 wrote', () => {
+    // Pinned as the retired wording, the shape MUSE-71 uses: the sentences are gone from
+    // the output, so reinstating either one is a red test rather than a human re-reading
+    // the file. Both are claims about *every* page, which is what MUSE-26 made untrue.
+    for (const build of [pages, apex]) {
+      const txt = build.read('llms.txt');
+      expect(txt, build.deploy.SITE).not.toContain(
+        'Every page exists in both locales with the same slug.',
+      );
+      expect(txt, build.deploy.SITE).not.toContain(
+        'every page in both locales, with hreflang alternates.',
+      );
     }
   });
 });
