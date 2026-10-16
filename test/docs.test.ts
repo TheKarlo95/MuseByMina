@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { inspectedFiles } from './helpers/source-guard';
+
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 /**
@@ -65,9 +67,11 @@ describe('the instruction file an agent cannot skip (MUSE-115)', () => {
     for (const m of claude.matchAll(/→ `([a-z-]+\.md)`/g)) cited.add(m[1]);
 
     // A pointer to a document that is not there is MUSE-80's defect — a citation the
-    // next author trusts rather than opening the file — and MUSE-111 is the open
-    // instance of it. An *orphaned* document is the other direction and is just as bad:
-    // an argument nobody is sent to is an argument nobody reads.
+    // next author trusts rather than opening the file — and a fabricated one is a ticket
+    // when somebody finds it (MUSE-111 was one). Which ticket is *open* belongs in no
+    // sentence here: that is a claim about status, and the guard at the foot of this file
+    // is what refuses it. An *orphaned* document is the other direction and is just as
+    // bad: an argument nobody is sent to is an argument nobody reads.
     expect([...cited].sort()).toEqual(present);
   });
 
@@ -158,5 +162,103 @@ describe('what the rules claim about the suite flaking (MUSE-91)', () => {
     // And it is stated as an exception. A retry recorded without that word reads as
     // permission for the next one.
     expect(rule).toMatch(/exception/);
+  });
+});
+
+/**
+ * **MUSE-114 — naming the ticket that is open is a claim about status, and status is the
+ * one thing a document cannot keep true.**
+ *
+ * Every document under `docs/decisions/` ended its preamble by pointing at whichever
+ * ticket was filed at the time as the one to follow, and the first `it` in this file
+ * carried the same shape about a fabricated citation. Both were right the day they were
+ * written and wrong the day that ticket merged — which is the defect those documents
+ * exist to argue against, inside the sentences that argue it. Naming a successor moves
+ * the staleness to the next close rather than removing it, so no passage names a ticket
+ * for its *status*; a reference saying where a passage **came from** stays true forever
+ * and stays.
+ *
+ * It runs over the decision documents **and over the suite**, because this file was
+ * itself the second instance. `test/helpers/source-guard.ts` owns the walk of `test/`
+ * (MUSE-113), so the file list comes from `inspectedFiles()` rather than from a second
+ * walk opened here.
+ *
+ * **A line break inside the claim is the thing this finds, so the text is flattened
+ * first.** These files are hand-wrapped and the claim in this very file straddled one,
+ * which is why `grep "open instance" test/` answered nothing while that claim was live
+ * and two people were looking straight at it. A line-oriented needle is exactly the hole
+ * this one is shaped to cover.
+ *
+ * Flattening is **two** steps, and the second was found by planting a wrapped claim in a
+ * code comment and watching this pass: collapsing whitespace alone leaves
+ * `MUSE-200 is the open // instance of it` — the continuation line's own comment marker,
+ * sitting inside the phrase. So a leading `//`, `*`, `#` or `>` comes off each line
+ * before the collapse. `[^.]` then holds the window inside one sentence, so a reference
+ * in the next sentence is not read as part of this one.
+ *
+ * **Claim-shaped rather than mention-shaped**: the ticket and the words have to be joined
+ * by `is`, `was`, `remains` or a comma. MUSE-91's prose guard above is built the same way
+ * and for the same reason — one that fired on the retraction, or on the paragraph
+ * explaining the defect, would be turned off rather than obeyed. The cost is that this
+ * passage cannot spell the retired sentence out, which is MUSE-71's ruling on retired
+ * copy applied one tree over: the verbatim is in this commit's diff, and a diff is not
+ * scanned.
+ *
+ * **What it does not see, written down rather than left implied.** „instance" and no
+ * synonym, so „the open example" would pass; „next instance" and „live instance" are
+ * deliberately out, because both are live prose in `content-model.md` meaning an
+ * occurrence of a defect, which is what these documents are made of. Inert fixtures under
+ * `test/` are not read — `inspectedFiles()` drops them — because a string in an
+ * expected-output file is data rather than something an author will trust.
+ *
+ * The provenance floor below is **per document and deliberately not per suite file**: a
+ * decision document citing no ticket at all has had its provenance stripped, which is how
+ * a guard phrased as "name no ticket" eventually gets satisfied, while a test file citing
+ * none is just a test file. A floor there would be noise, and a guard that reddens correct
+ * code is a guard somebody turns off.
+ */
+describe('nothing names a ticket as the one that is open (MUSE-114)', () => {
+  const DECISIONS = 'docs/decisions';
+  const documents = readdirSync(join(ROOT, DECISIONS))
+    .filter((f) => f.endsWith('.md'))
+    .map((f) => `${DECISIONS}/${f}`)
+    .sort();
+  const surfaces = [...documents, ...inspectedFiles()];
+
+  const STATUS =
+    /MUSE-\d+\s*(?:is|was|remains|,)\s+the\s+(?:open|current|outstanding)\s+instance|(?:open|current|outstanding)\s+instance[^.]{0,40}?(?:is|was|remains|,)\s+MUSE-\d+/i;
+
+  const flat = (file: string) =>
+    readFileSync(join(ROOT, file), 'utf8')
+      .replace(/^[ \t]*(?:\/\/+|\*+|#+|>)[ \t]?/gm, '')
+      .replace(/\s+/g, ' ');
+
+  it('reads every decision document and every file the suite rules read', () => {
+    // Measured 2026-10-16: five documents and 62 files under `test/`. The floor is what
+    // makes the test below mean anything — a walk that came back empty, or short, would
+    // pass it in silence, which is MUSE-35's lesson about a ceiling with no floor.
+    expect(surfaces.length).toBeGreaterThan(60);
+    expect(surfaces).toContain('docs/decisions/testing.md');
+    expect(surfaces).toContain('test/docs.test.ts');
+    expect(surfaces).toContain('test/helpers/source-guard.ts');
+  });
+
+  it('names no ticket as the open one, on any surface', () => {
+    // Every offender at once, with what matched beside it: a guard over 67 files that
+    // reports the first one found sends the next author back for a second run.
+    const claims = surfaces.flatMap((file) => {
+      const hit = STATUS.exec(flat(file))?.[0];
+      return hit ? [`${file}: ${hit}`] : [];
+    });
+    expect(claims).toEqual([]);
+  });
+
+  it('keeps the ticket a passage came from, which is the opposite claim', () => {
+    // Measured 2026-10-16: 23, 32, 77, 77 and 83 references across the five. The floor is
+    // ten, which no document is near and a stripped one would fail.
+    const stripped = documents.filter(
+      (file) => (readFileSync(join(ROOT, file), 'utf8').match(/MUSE-\d+/g) ?? []).length <= 10,
+    );
+    expect(stripped).toEqual([]);
   });
 });
