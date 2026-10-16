@@ -263,7 +263,9 @@ ticket (MUSE-114 is the open instance).
   slack — `logo/README.md` has the arithmetic and why 500 rather than the 521 §12 allows.
   **`npm run budget` structurally cannot see any of this** and reporting nothing is not
   evidence: no page element references an `og:image`, so headless Chromium never fetches
-  one. `test/share.test.ts` weighs the committed file instead (23,745 bytes) and
+  one. `test/share.test.ts` weighs the committed file instead — it holds a **ceiling of 40 KB**
+  (the committed file is 23,745 bytes today, so it can grow by about 70% before anything
+  goes red) — and
   re-measures its pixels against `muse-lockup-white.png` by **column *and* row** ink
   profile — a mirrored copy scores 0.22 on columns and 0.9999 on rows, so one axis alone
   passes it. `assetRefs` reads a `<meta>` image now, which is what gets the card resolved
