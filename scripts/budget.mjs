@@ -35,6 +35,11 @@ import {
  *   - **how many font faces the page actually requests**, measured with the preload tags
  *     stripped out of the document first
  *
+ * …each of them **at every width in `VIEWPORTS`**, and that list is a decision rather than
+ * a default (MUSE-104): a budget cannot weigh a request the browser never makes, so an
+ * image painted only outside the measured width used to be free. The accounting is beside
+ * the list.
+ *
  * A timing *is* collected, and `advisory` is the field it lands in. It is printed and
  * never compared — see `measurePage`.
  *
@@ -378,6 +383,203 @@ export const BUDGET = {
   fonts: { min: 1, max: 6 },
 };
 
+/**
+ * **The widths every measurement is taken at — and they are a choice now** (MUSE-104).
+ *
+ * Nothing set a viewport until this ticket, so every number above was measured at
+ * Playwright's default 1280 × 720, **by default rather than by decision** — and the hole
+ * that left is the shape of a hero image. QA painted a 750,623-byte raster behind
+ * `@media (min-width: 1400px)` on every page and `npm run budget` reported `image 12.7 KB`,
+ * unchanged headroom and „All 22 pages within budget". The browser never laid a page out at
+ * a width where the rule applied, so the request never happened, so there were no bytes to
+ * weigh; and because a CSS background costs no markup, `imagesIn` did not raise the
+ * per-`<img>` allowance either, so no column moved at all. The one check in the repository
+ * that caught it was `test/nojs.test.ts`'s rule about unregistered PNGs — which the same
+ * file as `.webp`, `.avif` or `.jpg` walks straight past. Reproduced here at 777,646 bytes
+ * before the fix (every column unmoved, „All 22 pages within budget") and again after it,
+ * where the same file fails — and a `max-width: 639px` copy of it, which was free as well
+ * and which only the phone width catches.
+ *
+ * **Two widths, and both are the repository's own rather than round numbers.** 390 × 844 and
+ * 1280 × 900 are what `scripts/a11y.mjs`, `scripts/screenshot-themes.mjs`,
+ * `test/gallery.test.ts`, `test/numerals.test.ts` and `test/contact.test.ts` already measure
+ * at, so a geometry claim in any of them means the same thing here. And 1280 is not a
+ * preference: it is the site's **widest declared breakpoint** — `src/` declares 640, 768,
+ * 900, 1024 and 1280 and nothing above — so it is the first width in the top band rather
+ * than a point somebody liked. 390 is in the bottom band, which the old default could not
+ * see at all: a phone-only background is this same defect read from the other end, and it is
+ * the likelier one to ship.
+ *
+ * **The cost is linear in the number of widths, which is why there are two and not six.**
+ * Each width is a full measurement of every page — two browser contexts each, because the
+ * font count is measured again with the preloads stripped — so the five breakpoints' six
+ * bands would be three times the browser work in a gate that already performs two builds and
+ * a browser. Measured: `npm run budget` 18 s → 34 s, `test/budget.test.ts` 41 s → 74 s, and
+ * **no new heavyweight operation** (`test/helpers/concurrency.ts` counts browsers launched,
+ * and a viewport is another context on the browser already open), so the run's total stays
+ * where it was.
+ *
+ * **What makes two widths honest rather than lucky is `uncoveredWidthRules`.** A
+ * width-conditional rule that *no* measured viewport satisfies is a failure naming the rule,
+ * so this list does not have to guess what the next stylesheet declares: a
+ * `min-width: 1400px`, a `max-width: 320px` or a band between two measured widths is red,
+ * and the fix is either to add the width here — with a sentence saying what it was measured
+ * at — or to not write the rule. That is the half that keeps this from becoming the per-route
+ * list this repository has had to delete seven times: it can only say „that width is
+ * unmeasured", never „that width does not matter".
+ *
+ * `deviceScaleFactor` is **1**. That was a Playwright default too, and it is written down
+ * for MUSE-64's reason: the lockup ships one 320px WebP with no `srcset`, so a 2× entry
+ * would budget a file almost nobody fetches. The heights are not decoration either —
+ * `loading="lazy"` fetches what is inside the viewport, so a taller window is a heavier
+ * `/gallery`; 844 and 900 are the heights the checks named above already use, measured on a
+ * page whose lazy tiles are the first row.
+ */
+export const VIEWPORTS = [
+  { name: 'phone', width: 390, height: 844, deviceScaleFactor: 1 },
+  { name: 'desktop', width: 1280, height: 900, deviceScaleFactor: 1 },
+];
+
+/**
+ * Every `@media` condition in a stylesheet, as written.
+ *
+ * Text rather than a parse, for `renderBlocking`'s reason: the thing being read is the
+ * output, and a condition is a string in it. The companion in `measurePage` asks the
+ * browser's own CSSOM for the same set, so a page that loads a stylesheet from somewhere
+ * this scan never looked is still covered — MUSE-42's two instruments, applied to widths.
+ *
+ * @param {string} css
+ * @returns {string[]}
+ */
+export function widthConditionsIn(css) {
+  return [...css.matchAll(/@media\s*([^{]+)\{/g)].map(([, condition]) => condition.trim());
+}
+
+/** A width feature this can evaluate, in `px` — the classic form and the range form. */
+const WIDTH_FEATURE =
+  /\(\s*(min-width|max-width|width)\s*:\s*(\d+(?:\.\d+)?)px\s*\)|\(\s*width\s*(<=|>=|<|>|=)\s*(\d+(?:\.\d+)?)px\s*\)/g;
+
+/** `(width >= 768px)` says what `(min-width: 768px)` says. */
+const RANGE_FEATURE = {
+  '>=': 'min-width',
+  '>': 'over',
+  '<=': 'max-width',
+  '<': 'under',
+  '=': 'width',
+};
+
+/** Anything that mentions a width at all, including the forms above. */
+const MENTIONS_WIDTH = /width/i;
+
+/**
+ * **What widths a media condition applies at, and whether that could be read at all.**
+ *
+ * The three outcomes are different on purpose, which is MUSE-104's own lesson one layer in:
+ *
+ *   - **no width feature** — `(prefers-color-scheme: dark)`, `(hover: none)`. Every viewport
+ *     exercises it, so it is not a width contract and `satisfiedBy` is true.
+ *   - **width features this can evaluate** — the condition is satisfied by a width when
+ *     every one of them is.
+ *   - **a width this cannot evaluate** — `(min-width: 40em)`, `(min-device-width: 768px)`,
+ *     a container query's `inline-size`. `readable` is false and `satisfiedBy` is **false**
+ *     for every width, so it is reported rather than skipped. A condition silently treated
+ *     as width-free is exactly how an unmeasured width becomes free bytes, and a unit this
+ *     cannot resolve without a root font size is a decision for whoever wrote it.
+ *
+ * @param {string} condition
+ * @returns {{
+ *   condition: string,
+ *   readable: boolean,
+ *   constraints: { feature: string, px: number }[],
+ *   satisfiedBy: (width: number) => boolean,
+ * }}
+ */
+export function widthConstraints(condition) {
+  /** @type {{ feature: string, px: number }[]} */
+  const constraints = [];
+  let rest = condition;
+
+  for (const match of condition.matchAll(WIDTH_FEATURE)) {
+    const [whole, feature, px, operator, bound] = match;
+    rest = rest.replace(whole, ' ');
+    constraints.push(
+      feature === undefined
+        ? { feature: RANGE_FEATURE[operator], px: Number(bound) }
+        : { feature, px: Number(px) },
+    );
+  }
+
+  // What is left over may not mention a width: if it does, there is a width here that was
+  // not read, and reporting none of it is the failure.
+  const readable = !MENTIONS_WIDTH.test(rest);
+
+  const satisfiedBy = (width) => {
+    if (!readable) return false;
+    return constraints.every(({ feature, px }) => {
+      if (feature === 'min-width') return width >= px;
+      if (feature === 'max-width') return width <= px;
+      if (feature === 'over') return width > px;
+      if (feature === 'under') return width < px;
+      return width === px;
+    });
+  };
+
+  return { condition, readable, constraints, satisfiedBy };
+}
+
+/**
+ * **A width-conditional rule that no measured viewport satisfies.**
+ *
+ * The other half of the viewport decision (MUSE-104). Two widths cannot cover every width a
+ * visitor has, and no finite set can — so instead of guessing, this reports the rules the
+ * set does not reach. The bytes such a rule fetches are invisible to every number in
+ * `BUDGET`, which is the defect this ticket is about: a budget cannot weigh a request the
+ * browser never makes.
+ *
+ * Judged over the whole run rather than inside `checkBudget`, because it is a claim about
+ * the **viewport contract** and not about one page's weight — and because the shared
+ * `BaseLayout` chunk is on every page, so one bad rule would otherwise print forty-four
+ * times. One line per rule, naming how many measurements carry it.
+ *
+ * Typed on the two fields it reads rather than on `Measurement`: this asks nothing about
+ * what a page weighed, so a caller does not have to weigh one to ask.
+ *
+ * @param {{ route: string, widthRules?: string[] }[]} measurements
+ * @param {typeof VIEWPORTS} [viewports]
+ * @returns {string[]}
+ */
+export function uncoveredWidthRules(measurements, viewports = VIEWPORTS) {
+  const widths = viewports.map((viewport) => viewport.width);
+  /** @type {Map<string, { routes: Set<string>, count: number, readable: boolean }>} */
+  const uncovered = new Map();
+
+  for (const page of measurements) {
+    for (const condition of page.widthRules ?? []) {
+      const read = widthConstraints(condition);
+      if (widths.some((width) => read.satisfiedBy(width))) continue;
+      const seen = uncovered.get(condition) ?? {
+        routes: new Set(),
+        count: 0,
+        readable: read.readable,
+      };
+      seen.routes.add(page.route);
+      seen.count += 1;
+      uncovered.set(condition, seen);
+    }
+  }
+
+  return [...uncovered].map(
+    ([condition, { routes, count, readable }]) =>
+      `${[...routes].sort()[0]}  viewport  ${
+        readable ? 'no measured width satisfies' : 'cannot read the width in'
+      } @media ${condition}  (on ${count} measurement(s) of ${routes.size} page(s); measured ` +
+      `${widths.join('px, ')}px. Anything that rule fetches is invisible to every number ` +
+      'here, because the browser never makes the request — which is MUSE-104. Add the ' +
+      'width to VIEWPORTS in scripts/budget.mjs, with a sentence saying what it was ' +
+      'measured at, or do not declare a rule at a width nothing measures)',
+  );
+}
+
 /** `<link rel="preload">`, as emitted. Stripped before the browser parses the document. */
 const PRELOAD_TAG = /<link\b[^>]*\brel="preload"[^>]*>/g;
 
@@ -447,6 +649,89 @@ export function formatBytes(bytes) {
 }
 
 /**
+ * The Playwright context options one viewport means.
+ *
+ * One place, so the measurement and the preload-stripped font count cannot be taken at two
+ * different widths — which would make the `faces` column a measurement of a page nothing
+ * else here weighed.
+ *
+ * @param {{ width: number, height: number, deviceScaleFactor: number }} viewport
+ * @returns {import('playwright').BrowserContextOptions}
+ */
+function contextFor({ width, height, deviceScaleFactor }) {
+  return { viewport: { width, height }, deviceScaleFactor };
+}
+
+/**
+ * The page was laid out at the width it was asked for.
+ *
+ * `assertDocumentIsItself`'s shape, for the other half of „measure the thing you named"
+ * (MUSE-104): a viewport option that is dropped, overridden or misspelled leaves every
+ * number below a measurement of some other width, with nothing in the output saying so.
+ * `window.innerWidth` includes the scrollbar, so it is the viewport Playwright set rather
+ * than the content box.
+ *
+ * @param {string} route
+ * @param {{ name: string, width: number }} viewport
+ * @param {number} innerWidth
+ */
+function assertLaidOutAt(route, viewport, innerWidth) {
+  if (innerWidth === viewport.width) return;
+  throw new Error(
+    `Budgeting ${route} at the ${viewport.name} width: asked for ${viewport.width}px and ` +
+      `the browser laid the page out at ${innerWidth}px. Every number for this page would ` +
+      'have been recorded against a width nobody chose, which is MUSE-104 — see VIEWPORTS ' +
+      'in scripts/budget.mjs.',
+  );
+}
+
+/**
+ * **Every `@media` condition the page's own stylesheets declare.**
+ *
+ * Asked of the browser rather than of `dist`, because what matters is the CSS the page
+ * really loaded: an inline `<style>`, a component chunk, a sheet from somewhere nobody
+ * scanned. `test/budget.test.ts` runs the textual twin over the build as well, which names
+ * the *file* — MUSE-42's pair of instruments, applied to widths.
+ *
+ * A sheet whose rules cannot be read — a cross-origin stylesheet — is skipped here and
+ * cannot be read by the scan either; this site loads none, and `test/assets.test.ts` owns
+ * „every reference resolves to our own output".
+ *
+ * @param {import('playwright').Page} page
+ * @returns {Promise<string[]>}
+ */
+function mediaConditions(page) {
+  return page.evaluate(() => {
+    /** @type {Set<string>} */
+    const found = new Set();
+
+    /** @param {CSSRuleList} rules */
+    const walk = (rules) => {
+      for (const rule of rules) {
+        // `media` is what makes it a `@media` rule: `@supports` carries a `conditionText`
+        // too, and a `@container` query is about an element's box rather than the window,
+        // so neither is a statement about the width the page is being measured at.
+        const condition = /** @type {CSSMediaRule} */ (rule).conditionText;
+        const isMedia = /** @type {CSSMediaRule} */ (rule).media !== undefined;
+        if (isMedia && typeof condition === 'string' && condition !== '') found.add(condition);
+        const nested = /** @type {CSSGroupingRule} */ (rule).cssRules;
+        if (nested !== undefined && nested !== null) walk(nested);
+      }
+    };
+
+    for (const sheet of document.styleSheets) {
+      try {
+        walk(sheet.cssRules);
+      } catch {
+        // A sheet the document may not read is not this measurement's finding.
+      }
+    }
+
+    return [...found];
+  });
+}
+
+/**
  * **What one page weighs, and what it asked for.**
  *
  * Every response the browser received, with its decompressed length. Decompressed and not
@@ -460,16 +745,27 @@ export function formatBytes(bytes) {
  * `test/assets.test.ts` is where "every reference resolves" is already asserted against
  * `dist`. Reporting them keeps a 404 from reading as a page that got lighter.
  *
+ * ## At one named width, never at whatever the harness defaults to
+ *
+ * MUSE-104. The viewport is an argument with no default, so a caller cannot measure a page
+ * without saying at what width — and the width is recorded on the measurement, because every
+ * route is now weighed more than once and „which page" is half an answer without it. The
+ * browser is then asked what it actually laid out: a viewport that did not arrive would make
+ * every number below a measurement of some other width, silently, which is the whole of this
+ * ticket in miniature.
+ *
  * @param {import('playwright').Browser} browser
  * @param {{ url: (route: string) => string }} site
  * @param {string} route
+ * @param {{ name: string, width: number, height: number, deviceScaleFactor: number }} viewport
  * @returns {Promise<Measurement>}
  */
-export async function measurePage(browser, site, route) {
+export async function measurePage(browser, site, route, viewport) {
   /** @type {Promise<{ url: string, status: number, kind: string, bytes: number }>[]} */
   const collecting = [];
 
   const { page, close, measured } = await openCheckPage(browser, site, route, {
+    context: contextFor(viewport),
     prepare: (opened) => {
       opened.on('response', (response) => {
         collecting.push(
@@ -495,8 +791,10 @@ export async function measurePage(browser, site, route) {
   try {
     const html = await page.content();
     assertDocumentIsItself(route, measured.url, html);
+    assertLaidOutAt(route, viewport, await page.evaluate(() => window.innerWidth));
     const blocking = renderBlocking(html);
     const images = imagesIn(html);
+    const widthRules = await mediaConditions(page);
     // The condition, not a duration: every face the page has text for has either loaded
     // or failed by the time this resolves, so the request log below is complete.
     await page.evaluate(() => document.fonts.ready);
@@ -533,6 +831,8 @@ export async function measurePage(browser, site, route) {
     return {
       route,
       measured,
+      viewport,
+      widthRules,
       bytes,
       total: served.reduce((sum, response) => sum + response.bytes, 0),
       requests: served.length,
@@ -545,7 +845,7 @@ export async function measurePage(browser, site, route) {
       missing: responses
         .filter((response) => response.status !== 200)
         .map((response) => `${response.status} ${response.url}`),
-      fonts: await fontsRequested(browser, site, route),
+      fonts: await fontsRequested(browser, site, route, viewport),
       advisory,
     };
   } finally {
@@ -599,17 +899,29 @@ export function imagesIn(html) {
  * `npm run budget` prints them under the page, so "requested six, served none" reads as
  * what it is rather than as a page that got lighter.
  *
+ * ## At the same width as the weight beside it
+ *
+ * The faces a page asks for are the faces its *laid-out* text needs, so this **can** be a
+ * different answer at a different width: a navigation bar that is `display: none` lays out no
+ * text and pulls in no face, and `src/lib/fonts.ts` records that `/pricing/` carries „Što je
+ * bachata" in exactly that position. On today's content it is not — all 22 pages report the
+ * same count at 390 as at 1280, measured — which is why the viewport is handed down rather
+ * than defaulted: the day the two differ, the `faces` column has to belong to the row it is
+ * printed on rather than to whichever width ran last (MUSE-104).
+ *
  * @param {import('playwright').Browser} browser
  * @param {{ url: (route: string) => string }} site
  * @param {string} route
+ * @param {{ name: string, width: number, height: number, deviceScaleFactor: number }} viewport
  * @returns {Promise<string[]>}
  */
-export async function fontsRequested(browser, site, route) {
+export async function fontsRequested(browser, site, route, viewport) {
   /** @type {Set<string>} */
   const served = new Set();
 
   const { page, close, measured } = await openCheckPage(browser, site, route, {
     waitUntil: 'load',
+    context: contextFor(viewport),
     prepare: async (opened, url) => {
       await opened.route(url, async (interception) => {
         const response = await interception.fetch();
@@ -699,9 +1011,20 @@ export function assertDocumentIsItself(route, landed, html) {
 export function checkBudget(page) {
   /** @type {string[]} */
   const problems = [];
+
+  /**
+   * Which measurement this is — the page **and the width** (MUSE-104).
+   *
+   * Every route is weighed once per viewport now, so a failure naming only the route sends
+   * the reader to two measurements and says nothing about which one was over. „Over at one
+   * width and not the other" is this ticket's own defect in the failure message.
+   */
+  const where =
+    page.viewport === undefined ? page.route : `${page.route} @${page.viewport.width}`;
+
   const over = (kind, actual, budget, unit = 'bytes') =>
     problems.push(
-      `${page.route}  ${kind}  budget ${
+      `${where}  ${kind}  budget ${
         unit === 'bytes' ? formatBytes(budget) : budget
       }  actual ${unit === 'bytes' ? formatBytes(actual) : actual}  (over by ${
         unit === 'bytes' ? formatBytes(actual - budget) : actual - budget
@@ -709,13 +1032,56 @@ export function checkBudget(page) {
     );
 
   /**
+   * **A ceiling, or a problem in the same shape as every other** (MUSE-104).
+   *
+   * `BUDGET.total`, `BUDGET.requests` and the rest used to be read without asking whether
+   * they were there. A deleted key then did not fail the line it was supposed to judge:
+   * `actual > undefined` is `false`, so the line quietly stopped having an opinion, while
+   * `BUDGET.fonts` deleted threw a `TypeError` out of the gate with no route in it at all.
+   * Both are MUSE-77's complaint — a guard whose failure sends the reader nowhere.
+   *
+   * @param {string} kind What the reader calls this line.
+   * @param {string} path Where the number lives, for the message.
+   * @param {number} actual
+   * @returns {number | null} `null` when there is nothing to compare against.
+   */
+  const ceiling = (kind, path, actual) => {
+    const value = path
+      .split('.')
+      .reduce(
+        (node, key) => (node === undefined || node === null ? undefined : node[key]),
+        BUDGET,
+      );
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    problems.push(
+      `${where}  ${kind}  budget — none declared —  actual ${actual}  (BUDGET.${path} in ` +
+        `scripts/budget.mjs is ${String(value)}, so this line compared nothing. Declare it, ` +
+        'with a sentence saying what it was measured at)',
+    );
+    return null;
+  };
+
+  /**
    * A per-page ceiling plus whatever the document's images are allowed to add (MUSE-25).
    *
    * `page.images` is counted off the markup, so the allowance is the same number on an
    * idle runner and a melting one — and it is one rule for every page rather than a list
    * of routes that may be heavier. The accounting is beside `BUDGET.perImage`.
+   *
+   * A kind with **no** entry gets no allowance and that is correct — only `html`, `total`
+   * and `requests` have one. A `perImage` that is not an object at all is a different thing
+   * and is reported, because every line below would then silently tighten (MUSE-104).
    */
-  const allowed = (kind, base) => base + (BUDGET.perImage[kind] ?? 0) * page.images;
+  const allowed = (kind, base) => base + (BUDGET.perImage?.[kind] ?? 0) * page.images;
+
+  if (typeof BUDGET.perImage !== 'object' || BUDGET.perImage === null) {
+    problems.push(
+      `${where}  perImage  budget — none declared —  actual ${page.images} <img>  ` +
+        '(BUDGET.perImage in scripts/budget.mjs is gone, so html, total and requests are ' +
+        'being judged with no per-image allowance at all — which is the trap MUSE-25 ' +
+        'replaced: the gate stays green until an editor publishes photographs)',
+    );
+  }
 
   for (const [kind, actual] of Object.entries(page.bytes).sort()) {
     // Photography is budgeted per response rather than summed — see `BUDGET.imageResponse`.
@@ -727,7 +1093,7 @@ export function checkBudget(page) {
     const budget = BUDGET.bytes[kind];
     if (budget === undefined) {
       problems.push(
-        `${page.route}  ${kind}  budget — none declared —  actual ${formatBytes(actual)}  ` +
+        `${where}  ${kind}  budget — none declared —  actual ${formatBytes(actual)}  ` +
           `(no budget exists for ${kind}; declare one in BUDGET.bytes in ` +
           'scripts/budget.mjs, with a sentence saying what it was measured at)',
       );
@@ -744,11 +1110,13 @@ export function checkBudget(page) {
    * 300 KB", which is a sentence about something somebody can fix — and it fires on every
    * page, not only the one with a grid on it.
    */
-  for (const image of page.imageResponses ?? []) {
-    if (image.bytes <= BUDGET.imageResponse) continue;
+  const heaviest = Math.max(0, ...(page.imageResponses ?? []).map((image) => image.bytes));
+  const perResponse = ceiling('image response', 'imageResponse', formatBytes(heaviest));
+  for (const image of perResponse === null ? [] : (page.imageResponses ?? [])) {
+    if (image.bytes <= perResponse) continue;
     problems.push(
-      `${page.route}  image response  budget ${formatBytes(BUDGET.imageResponse)}  actual ` +
-        `${formatBytes(image.bytes)}  (over by ${formatBytes(image.bytes - BUDGET.imageResponse)}` +
+      `${where}  image response  budget ${formatBytes(perResponse)}  actual ` +
+        `${formatBytes(image.bytes)}  (over by ${formatBytes(image.bytes - perResponse)}` +
         ` — ${image.url.slice(image.url.lastIndexOf('/') + 1)}. One file, not the page's ` +
         'total: how many photographs a page shows is an editorial decision and is not ' +
         'budgeted, how big each one is, is ours. Ask the CDN for a width the layout can ' +
@@ -759,18 +1127,25 @@ export function checkBudget(page) {
   // Photography out of the total, for the reason written beside `BUDGET.total`: with it in,
   // this number is a function of how many pictures are published.
   const unphotographed = page.total - (page.bytes.image ?? 0);
-  if (unphotographed > allowed('total', BUDGET.total))
-    over('total', unphotographed, allowed('total', BUDGET.total));
-  if (page.requests > allowed('requests', BUDGET.requests))
-    over('requests', page.requests, allowed('requests', BUDGET.requests), 'count');
-  if (page.renderBlocking > BUDGET.renderBlocking)
-    over('render-blocking', page.renderBlocking, BUDGET.renderBlocking, 'count');
+  const everything = ceiling('total', 'total', formatBytes(unphotographed));
+  if (everything !== null && unphotographed > allowed('total', everything))
+    over('total', unphotographed, allowed('total', everything));
+
+  const fetches = ceiling('requests', 'requests', page.requests);
+  if (fetches !== null && page.requests > allowed('requests', fetches))
+    over('requests', page.requests, allowed('requests', fetches), 'count');
+
+  const blocking = ceiling('render-blocking', 'renderBlocking', page.renderBlocking);
+  if (blocking !== null && page.renderBlocking > blocking)
+    over('render-blocking', page.renderBlocking, blocking, 'count');
 
   // Both ends, and the floor is the one that matters: MUSE-35's page requested zero.
   const faces = page.fonts.length;
-  if (faces < BUDGET.fonts.min) {
+  const fewest = ceiling('font faces', 'fonts.min', faces);
+  const most = ceiling('font faces', 'fonts.max', faces);
+  if (fewest !== null && faces < fewest) {
     problems.push(
-      `${page.route}  font faces  budget at least ${BUDGET.fonts.min}  actual ${faces}  ` +
+      `${where}  font faces  budget at least ${fewest}  actual ${faces}  ` +
         '(with the preloads stripped, the host served this page no webfont at all — which ' +
         'is exactly what MUSE-35 looked like for the life of the project: all six faces ' +
         'requested, all six 404ing, every page silently set in Georgia, and MUSE-14 ' +
@@ -778,12 +1153,12 @@ export function checkBudget(page) {
         'above the table: requested-and-404ed and never-requested are different bugs)',
     );
   }
-  if (faces > BUDGET.fonts.max) {
+  if (most !== null && faces > most) {
     // Filenames rather than URLs: seven absolute URLs is a paragraph, and the content hash
     // in each one is the part that tells two copies of a face apart.
     const names = page.fonts.map((url) => url.slice(url.lastIndexOf('/') + 1));
     problems.push(
-      `${page.route}  font faces  budget at most ${BUDGET.fonts.max}  actual ${faces}  ` +
+      `${where}  font faces  budget at most ${most}  actual ${faces}  ` +
         `(${names.join(', ')} — more faces than src/styles/fonts.css declares means a ` +
         'face is declared twice or a second copy of a file is in the output)',
     );
@@ -815,7 +1190,7 @@ export function report(pages) {
    * the next ticket reads its room off here rather than discovering it by going red.
    */
   const mostImages = pages.length === 0 ? 0 : widest((page) => page.images ?? 0);
-  const allowance = (kind, base) => base + (BUDGET.perImage[kind] ?? 0) * mostImages;
+  const allowance = (kind, base) => base + (BUDGET.perImage?.[kind] ?? 0) * mostImages;
 
   /** What `total` is compared against: the page without its photography. */
   const unphotographed = (page) => page.total - (page.bytes.image ?? 0);
@@ -828,15 +1203,24 @@ export function report(pages) {
 
   /** One line of the table: a label, the byte columns, then the counts. */
   const row = (label, cells, counts) =>
-    `${label.padEnd(22)}${cells.map((cell) => String(cell).padStart(11)).join('')}` +
+    `${label.padEnd(28)}${cells.map((cell) => String(cell).padStart(11)).join('')}` +
     counts.map((count) => String(count).padStart(7)).join('');
+
+  /**
+   * The width goes in the label, because the row is one measurement and not one page
+   * (MUSE-104). Two rows per route, and the `faces` and `image` cells can honestly differ
+   * between them — a face is pulled in by text that is laid out, and a background is
+   * fetched at the width its rule applies at.
+   */
+  const label = (page) =>
+    page.viewport === undefined ? page.route : `${page.route} @${page.viewport.width}`;
 
   const lines = [row('page', columns, ['imgs', 'reqs', 'block', 'faces', 'load*'])];
 
   for (const page of pages) {
     lines.push(
       row(
-        page.route,
+        label(page),
         columns.map((kind) => formatBytes(bytesOf(page, kind))),
         [
           page.images ?? 0,
@@ -917,9 +1301,16 @@ export function report(pages) {
       `photography: how many pictures a page shows is an editorial decision, how big each ` +
       `one is, is ours (MUSE-25). The page row shows each page's real figures; budget and ` +
       `headroom show what the gate compares. html, total and requests additionally allow ` +
-      `${formatBytes(BUDGET.perImage.html)}, ${formatBytes(BUDGET.perImage.total)} and ` +
-      `${BUDGET.perImage.requests} per <img> \u2014 shown here at the worst page's ` +
+      `${formatBytes(BUDGET.perImage?.html ?? 0)}, ${formatBytes(BUDGET.perImage?.total ?? 0)} ` +
+      `and ${BUDGET.perImage?.requests ?? 0} per <img> \u2014 shown here at the worst page's ` +
       `${mostImages}.`,
+  );
+  lines.push(
+    `\u2021 every page is measured once per viewport: ${VIEWPORTS.map(
+      (viewport) => `${viewport.name} ${viewport.width}\u00d7${viewport.height}`,
+    ).join(', ')} at ${VIEWPORTS[0].deviceScaleFactor}\u00d7 density. The width is in each ` +
+      'row label, and the budget is the same number at every one of them \u2014 an image ' +
+      'painted only outside the measured widths used to cost nothing at all (MUSE-104).',
   );
 
   return lines;
@@ -959,6 +1350,8 @@ export function budgetedPages(targets) {
  * @typedef {object} Measurement
  * @property {string} route
  * @property {{ url: string, locale: string, lang: string | null }} measured
+ * @property {{ name: string, width: number, height: number, deviceScaleFactor: number }} viewport The width this was measured at (MUSE-104).
+ * @property {string[]} widthRules Every `@media` condition the page's stylesheets declare.
  * @property {Record<string, number>} bytes Decompressed bytes by resource kind.
  * @property {number} images How many `<img>` the document holds — `BUDGET.perImage`'s multiplier.
  * @property {{ url: string, bytes: number }[]} imageResponses Every image the host served, one by one.
@@ -977,7 +1370,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const site = await openSiteOrExit({ routes: pages });
   const browser = await launchChecks();
 
-  console.log(`pages   ${pages.length} from the build at ${base}`);
+  console.log(
+    `pages   ${pages.length} from the build at ${base}, each at ${VIEWPORTS.length} ` +
+      `viewport(s): ${VIEWPORTS.map((viewport) => `${viewport.width}×${viewport.height}`).join(', ')}`,
+  );
   if (skipped.length > 0) {
     console.log(
       `skipped ${skipped.map((target) => target.path).join(' ')}  ` +
@@ -991,15 +1387,24 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const problems = [];
 
   for (const target of pages) {
-    const page = await measurePage(browser, site.at(target.path), target.route);
-    measured.push(page);
-    problems.push(...checkBudget(page));
-    // The page that was measured, not the route that was asked for (MUSE-48).
-    console.log(`        ${describeMeasured(page.measured)}`);
-    if (page.missing.length > 0) {
-      console.log(`        not served: ${page.missing.join(', ')}`);
+    for (const viewport of VIEWPORTS) {
+      const page = await measurePage(browser, site.at(target.path), target.route, viewport);
+      measured.push(page);
+      problems.push(...checkBudget(page));
+      // The page that was measured, not the route that was asked for (MUSE-48) — and the
+      // width it was measured at, which is the other half of the same claim (MUSE-104).
+      console.log(
+        `        ${describeMeasured(page.measured)}  ${viewport.width}×${viewport.height}`,
+      );
+      if (page.missing.length > 0) {
+        console.log(`        not served: ${page.missing.join(', ')}`);
+      }
     }
   }
+
+  // A rule at a width nothing here measures, which is what makes two widths a contract
+  // rather than a guess (MUSE-104).
+  problems.push(...uncoveredWidthRules(measured));
 
   await browser.close();
   await site.close();
@@ -1011,7 +1416,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.error(
       `\n${problems.length} budget overrun(s) across ${
         new Set(problems.map((problem) => problem.split('  ')[0])).size
-      } page(s):\n`,
+      } measurement(s):\n`,
     );
     for (const problem of problems) console.error(`  ${problem}`);
     console.error(
@@ -1020,5 +1425,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     );
     process.exit(1);
   }
-  console.log(`\nAll ${measured.length} pages within budget.`);
+  console.log(
+    `\nAll ${pages.length} pages within budget, at ${VIEWPORTS.length} viewport(s) each.`,
+  );
 }

@@ -16,9 +16,20 @@ import {
   measurePage,
   renderBlocking,
   report,
+  uncoveredWidthRules,
+  VIEWPORTS,
+  widthConditionsIn,
+  widthConstraints,
 } from '../scripts/budget.mjs';
 import { auditTargets, pagePath } from '../scripts/dist-origin.mjs';
-import { APEX_DEPLOY, basePath, buildSite, PAGES_DEPLOY, type Build } from './helpers/build';
+import {
+  APEX_DEPLOY,
+  basePath,
+  buildSite,
+  PAGES_DEPLOY,
+  styleBlocks,
+  type Build,
+} from './helpers/build';
 import { assertMeasuredPage } from './helpers/measured';
 import { servePages, type Host } from './helpers/serve';
 
@@ -136,10 +147,47 @@ describe('MUSE-63: every page of both deploy targets is within budget', () => {
       expect(target.pages.length, `${target.name}: no pages to budget`).toBeGreaterThan(4);
 
       for (const page of target.pages) {
-        const measurement = await measurePage(browser, at(target.host, page.path), page.route);
-        measured.push({ target: target.name, measurement });
-        problems.push(...checkBudget(measurement).map((line) => `${target.name}: ${line}`));
+        // **Every page at every width** (MUSE-104). The loop is the fix: with one implicit
+        // width, anything a page fetches only outside it was free — reproduced with a
+        // 777,646-byte raster behind `@media (min-width: 1400px)`, and again behind
+        // `@media (max-width: 639px)`, neither of which moved a single column.
+        for (const viewport of VIEWPORTS) {
+          const measurement = await measurePage(
+            browser,
+            at(target.host, page.path),
+            page.route,
+            viewport,
+          );
+          measured.push({ target: target.name, measurement });
+          problems.push(...checkBudget(measurement).map((line) => `${target.name}: ${line}`));
+        }
       }
+
+      // The loop above, asserted rather than trusted: a viewport quietly dropped from
+      // `VIEWPORTS` leaves this file green and the hole back, because every *remaining*
+      // measurement still passes. `measurePage` additionally refuses a page the browser
+      // did not lay out at the width it was asked for.
+      expect(
+        measured.filter((row) => row.target === target.name).length,
+        `${target.name}: every page, at every viewport`,
+      ).toBe(target.pages.length * VIEWPORTS.length);
+    }
+
+    // **A width-conditional rule no measured viewport satisfies** (MUSE-104). Two widths
+    // are honest because of this, not because two is enough: the bytes a rule outside them
+    // fetches are invisible, so the rule is the failure. It is judged over the whole set of
+    // measurements rather than inside `checkBudget`, because it is a claim about the
+    // viewport contract and not about one page's weight.
+    problems.push(...uncoveredWidthRules(measured.map((row) => row.measurement)));
+
+    // And the collection is not vacuously empty: every page of this site loads the shared
+    // `BaseLayout` chunk, which declares width breakpoints. A guard that finds nothing
+    // passes.
+    for (const row of measured) {
+      expect(
+        row.measurement.widthRules.length,
+        `${row.target}: ${row.measurement.route} collected no @media width conditions`,
+      ).toBeGreaterThan(0);
     }
 
     // The numbers, in the log, every run. MUSE-63's second criterion is that the headroom
@@ -232,6 +280,8 @@ describe('MUSE-63: a page over budget names itself', () => {
   const lean = () => ({
     route: '/schedule/',
     measured: { url: 'http://127.0.0.1/MuseByMina/schedule/', locale: 'hr', lang: 'hr-HR' },
+    viewport: VIEWPORTS[1],
+    widthRules: ['(min-width: 768px)'],
     bytes: { html: 22_000, css: 25_000, font: 215_000, image: 12_956 },
     total: 274_956,
     requests: 8,
@@ -249,6 +299,56 @@ describe('MUSE-63: a page over budget names itself', () => {
 
   it('passes the page it was calibrated against', () => {
     expect(checkBudget(lean())).toEqual([]);
+  });
+
+  /**
+   * **The width is part of „which page"** (MUSE-104).
+   *
+   * Every route is now measured once per viewport, so a failure saying only `/schedule/`
+   * names half of what the reader has to reproduce — and „over at one width and not the
+   * other" is the shape of this ticket's whole defect.
+   */
+  it('names the width the measurement was taken at', () => {
+    const page = lean();
+    const heavy = { bytes: { ...page.bytes, css: 90 * 1024 } };
+
+    const [wide] = checkBudget({ ...page, ...heavy, viewport: VIEWPORTS[1] });
+    const [narrow] = checkBudget({ ...page, ...heavy, viewport: VIEWPORTS[0] });
+
+    expect(wide).toContain(`/schedule/ @${VIEWPORTS[1].width}`);
+    expect(narrow).toContain(`/schedule/ @${VIEWPORTS[0].width}`);
+    // Still the shape AC1 asks for, in that order: which page, what about it, what we
+    // agreed, what it is.
+    expect(wide).toContain('css  budget 40.0 KB  actual 90.0 KB');
+  });
+
+  /**
+   * **A CSS `background-image` is weighed like any other image** (MUSE-104's AC2).
+   *
+   * It costs no markup, so `imagesIn` does not see it and it buys **no** per-`<img>`
+   * allowance — the stricter direction, and the right one: the allowance exists because a
+   * responsive ladder is paid in the document, and a background has no ladder. What it may
+   * not do is make the bytes vanish, which is exactly what happened while the measurement
+   * had no viewport: the response was never made at all.
+   */
+  it('budgets a background image, which buys no per-image allowance', () => {
+    const page = lean();
+    const hero = { url: 'http://h/_astro/qa-wide-hero.abc.webp', bytes: 750_623 };
+
+    const [problem, ...rest] = checkBudget({
+      ...page,
+      // The document is unchanged — a background adds no `<img>` — so `images` stays 2.
+      bytes: { ...page.bytes, image: 12_956 + hero.bytes },
+      total: page.total + hero.bytes,
+      imageResponses: [...page.imageResponses, hero],
+      requests: 9,
+    });
+
+    expect(rest).toEqual([]);
+    expect(problem).toContain('image response');
+    expect(problem).toContain('budget 32.0 KB');
+    expect(problem).toContain('actual 733.0 KB');
+    expect(problem).toContain('qa-wide-hero');
   });
 
   /**
@@ -520,6 +620,8 @@ describe('MUSE-63: what the measurement calls things', () => {
       {
         route: '/schedule/',
         measured: { url: 'http://h/', locale: 'hr', lang: 'hr-HR' },
+        viewport: VIEWPORTS[1],
+        widthRules: ['(min-width: 768px)'],
         bytes: { html: 22_000, css: 25_000, font: 215_000, image: 11_356 },
         total: 273_356,
         requests: 8,
@@ -550,6 +652,269 @@ describe('MUSE-63: what the measurement calls things', () => {
     expect(budgetRow).toContain('32.0 KB ea');
     // And the footnote that says why those two cells are not simple sums.
     expect(lines.join('\n')).toContain('editorial decision');
+    // The row is one measurement, so the table says which width it was taken at and names
+    // the whole set — the decision is in the output a person reads, not only in the source
+    // (MUSE-104).
+    expect(lines.join('\n')).toContain('once per viewport');
+    for (const viewport of VIEWPORTS) {
+      expect(lines.join('\n')).toContain(`${viewport.width}×${viewport.height}`);
+    }
+    expect(lines.some((line) => line.startsWith(`/schedule/ @${VIEWPORTS[1].width}`))).toBe(
+      true,
+    );
+  });
+});
+
+/**
+ * **MUSE-104 — the widths the measurement is taken at, and the proof that they cover the
+ * site.**
+ *
+ * No `viewport` was set anywhere in `scripts/budget.mjs` or `scripts/browser-checks.mjs`,
+ * so every number was measured at Playwright's default 1280 × 720 **by default rather than
+ * by decision** — and an image painted only outside that width cost nothing, because the
+ * browser never made the request. QA proved it with a 750,623-byte raster behind
+ * `@media (min-width: 1400px)`: `npm run budget` reported `image 12.7 KB` on every page,
+ * unchanged headroom and „All 22 pages within budget."
+ *
+ * Two things are asserted here and they are different claims. The **viewports** are a
+ * decision, so they are held to the site's own breakpoints rather than to round numbers:
+ * the widest measures the top band and the narrowest is below the lowest breakpoint, which
+ * is the half the old default could not see at all. The **cover** is what makes two widths
+ * honest rather than lucky: a width-conditional rule that no measured viewport satisfies is
+ * a failure naming the rule, so the next `min-width` nobody measures is red instead of
+ * free. Both instruments, for MUSE-42's reason — the `dist` scan names the *file*, which a
+ * browser measurement cannot, and the browser sees what a page really loads, which a scan
+ * of the output cannot.
+ */
+describe('MUSE-104: the budget measures widths it chose', () => {
+  /** Every `@media` condition in the build, with the file that declares it. */
+  const declaredConditions = (): { where: string; condition: string }[] => {
+    const found: { where: string; condition: string }[] = [];
+
+    for (const file of pagesBuild.allFiles().filter((name) => name.endsWith('.css'))) {
+      for (const condition of widthConditionsIn(pagesBuild.read(file))) {
+        found.push({ where: file, condition });
+      }
+    }
+    // Inline `<style>` too: `src/lib/theme.ts` and the components' scoped blocks can both
+    // land in the document, and a scan that reads only the emitted stylesheets would miss
+    // a breakpoint declared there.
+    for (const file of pagesBuild.htmlFiles()) {
+      for (const block of styleBlocks(pagesBuild.read(file))) {
+        for (const condition of widthConditionsIn(block))
+          found.push({ where: file, condition });
+      }
+    }
+
+    return found;
+  };
+
+  it('declares at least one viewport, each a full measurement condition', () => {
+    expect(VIEWPORTS.length).toBeGreaterThan(0);
+    for (const viewport of VIEWPORTS) {
+      expect(viewport.width, viewport.name).toBeGreaterThan(0);
+      expect(viewport.height, viewport.name).toBeGreaterThan(0);
+      // MUSE-64's argument, now written down rather than inherited from Playwright: the
+      // lockup ships one 320px WebP with no `srcset`, so a 2× entry would budget a file
+      // almost nobody fetches.
+      expect(viewport.deviceScaleFactor, viewport.name).toBe(1);
+    }
+    expect(new Set(VIEWPORTS.map((viewport) => viewport.width)).size).toBe(VIEWPORTS.length);
+  });
+
+  /**
+   * The `dist` half of the cover, which names the file.
+   *
+   * There is no list of stylesheets here and no list of breakpoints: both are read off the
+   * build, so a component that lands tomorrow is covered the day it builds.
+   */
+  it('measures a width inside every band the built CSS declares', () => {
+    const conditions = declaredConditions();
+    // A scan that finds nothing passes. This site declares five breakpoints.
+    expect(conditions.length).toBeGreaterThan(0);
+
+    const uncovered = conditions.filter(
+      ({ condition }) =>
+        !VIEWPORTS.some((viewport) => widthConstraints(condition).satisfiedBy(viewport.width)),
+    );
+    expect(uncovered.map(({ where, condition }) => `${where}: ${condition}`)).toEqual([]);
+  });
+
+  /**
+   * **The bottom band is measured, which the cover alone does not say.**
+   *
+   * Every rule on this site is a `min-width`, so two viewports both sitting in the top band
+   * would satisfy the check above and leave a phone-only hero free — the same defect read
+   * from the other end. So the narrowest viewport has to be below the lowest breakpoint the
+   * CSS declares, and the widest at or above the highest.
+   */
+  it('measures below the lowest breakpoint and at or above the highest', () => {
+    const boundaries = declaredConditions().flatMap(({ condition }) =>
+      widthConstraints(condition).constraints.map((constraint) => constraint.px),
+    );
+    expect(boundaries.length).toBeGreaterThan(0);
+
+    const widths = VIEWPORTS.map((viewport) => viewport.width);
+    expect(Math.min(...widths)).toBeLessThan(Math.min(...boundaries));
+    expect(Math.max(...widths)).toBeGreaterThanOrEqual(Math.max(...boundaries));
+  });
+
+  it.each([
+    { condition: '(min-width: 768px)', px: [768], readable: true },
+    { condition: 'screen and (min-width: 900px)', px: [900], readable: true },
+    { condition: '(max-width: 639px)', px: [639], readable: true },
+    { condition: '(min-width: 400px) and (max-width: 600px)', px: [400, 600], readable: true },
+    { condition: '(width >= 768px)', px: [768], readable: true },
+    // No width feature at all: any viewport exercises it, so it is not this check's
+    // business — and saying so is what keeps the check from firing on every theme query.
+    { condition: '(prefers-color-scheme: dark)', px: [], readable: true },
+    { condition: '(hover: none)', px: [], readable: true },
+    // Names a width this cannot evaluate. **Unreadable is a failure, not a skip**: a
+    // condition silently treated as width-free is the hole this ticket is about, one layer
+    // in.
+    { condition: '(min-width: 40em)', px: [], readable: false },
+    { condition: '(min-device-width: 768px)', px: [], readable: false },
+  ])('reads $condition', ({ condition, px, readable }) => {
+    const read = widthConstraints(condition);
+    expect(read.readable).toBe(readable);
+    expect(read.constraints.map((constraint) => constraint.px)).toEqual(px);
+  });
+
+  it('pulls the conditions out of raw CSS, nested ones included', () => {
+    expect(
+      widthConditionsIn(
+        '.a{color:red}@media (min-width: 768px){.b{color:blue}}' +
+          '@supports (display:grid){@media screen and (max-width:639px){.c{color:green}}}',
+      ),
+    ).toEqual(['(min-width: 768px)', 'screen and (max-width:639px)']);
+  });
+
+  /** A measurement, as thin as the coverage check needs it. */
+  const measuredWith = (widthRules: string[]) => ({
+    route: '/schedule/',
+    viewport: VIEWPORTS[0],
+    widthRules,
+  });
+
+  it.each([
+    {
+      what: 'a breakpoint above every measured width',
+      rules: ['(min-width: 1400px)'],
+      says: '(min-width: 1400px)',
+    },
+    {
+      what: 'a ceiling below every measured width',
+      rules: ['(max-width: 320px)'],
+      says: '(max-width: 320px)',
+    },
+    {
+      what: 'a band with no measured width in it',
+      rules: ['(min-width: 500px) and (max-width: 700px)'],
+      says: '(min-width: 500px) and (max-width: 700px)',
+    },
+    {
+      what: 'a width it cannot read',
+      rules: ['(min-width: 40em)'],
+      says: '(min-width: 40em)',
+    },
+  ])('fails on $what', ({ rules, says }) => {
+    const [problem, ...rest] = uncoveredWidthRules([measuredWith(rules)]);
+
+    expect(rest).toEqual([]);
+    expect(problem).toContain('/schedule/');
+    expect(problem).toContain(says);
+    // Where the decision is made, and what the two choices are.
+    expect(problem).toContain('scripts/budget.mjs');
+    for (const viewport of VIEWPORTS) expect(problem).toContain(String(viewport.width));
+  });
+
+  it('passes a rule some measured width satisfies, and says so once per rule', () => {
+    expect(
+      uncoveredWidthRules([
+        measuredWith([
+          '(min-width: 768px)',
+          '(max-width: 639px)',
+          '(prefers-color-scheme: dark)',
+        ]),
+      ]),
+    ).toEqual([]);
+
+    // The same bad rule on every page of the site is one decision, so it is one line —
+    // naming how many pages carry it rather than printing forty-four of them.
+    const everywhere = Array.from({ length: 4 }, () => measuredWith(['(min-width: 1400px)']));
+    const problems = uncoveredWidthRules(everywhere);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('4');
+  });
+});
+
+/**
+ * **MUSE-104 — a budget key that is not there names itself.**
+ *
+ * `checkBudget` read `BUDGET.total`, `BUDGET.requests` and `BUDGET.fonts.min` without
+ * asking whether they were numbers. Deleting one did not fail the page it was supposed to
+ * judge: `actual > undefined` is `false`, so the line simply stopped having an opinion, and
+ * `BUDGET.fonts` deleted threw a `TypeError` out of the gate instead. Both are the same
+ * defect as MUSE-77's — a guard whose failure sends the reader nowhere.
+ *
+ * So every ceiling is read through one accessor that reports a problem in the same shape as
+ * every other: the route, the width, the kind, and what is missing.
+ */
+describe('MUSE-104: a missing budget key is a failure, not a silence', () => {
+  /** Delete a key for one assertion and put it back, whatever the assertion does. */
+  const without = (path: string, run: () => void): void => {
+    const keys = path.split('.');
+    const last = keys.pop()!;
+    const owner = keys.reduce<Record<string, unknown>>(
+      (node, key) => node[key] as Record<string, unknown>,
+      BUDGET as unknown as Record<string, unknown>,
+    );
+    const had = owner[last];
+    delete owner[last];
+    try {
+      run();
+    } finally {
+      owner[last] = had;
+    }
+  };
+
+  const lean = () => ({
+    route: '/schedule/',
+    measured: { url: 'http://127.0.0.1/MuseByMina/schedule/', locale: 'hr', lang: 'hr-HR' },
+    viewport: VIEWPORTS[1],
+    widthRules: ['(min-width: 768px)'],
+    bytes: { html: 22_000, css: 25_000, font: 215_000, image: 12_956 },
+    total: 274_956,
+    requests: 8,
+    images: 2,
+    imageResponses: [{ url: 'http://h/_astro/muse-lockup-white.abc.webp', bytes: 11_356 }],
+    renderBlocking: 2,
+    blocking: [],
+    missing: [],
+    fonts: ['a.woff2', 'b.woff2'],
+    advisory: { loadMs: 50, firstPaintMs: 30 },
+  });
+
+  it.each([
+    { path: 'bytes.css', kind: 'css' },
+    { path: 'total', kind: 'total' },
+    { path: 'requests', kind: 'requests' },
+    { path: 'renderBlocking', kind: 'render-blocking' },
+    { path: 'imageResponse', kind: 'image response' },
+    { path: 'fonts', kind: 'font faces' },
+    { path: 'fonts.min', kind: 'font faces' },
+    { path: 'fonts.max', kind: 'font faces' },
+    { path: 'perImage', kind: 'perImage' },
+  ])('names the route, the width and $kind when BUDGET.$path is gone', ({ path, kind }) => {
+    without(path, () => {
+      const problems = checkBudget(lean());
+      const problem = problems.find((line) => line.includes(kind));
+
+      expect(problem, `nothing named ${kind}; got ${JSON.stringify(problems)}`).toBeDefined();
+      expect(problem).toContain(`/schedule/ @${VIEWPORTS[1].width}`);
+      // And it says where to fix it, rather than printing `NaN` and carrying on.
+      expect(problem).toContain('scripts/budget.mjs');
+    });
   });
 });
 
@@ -621,7 +986,8 @@ describe('MUSE-63: the budget cannot be fooled about which page it weighed', () 
 });
 
 /**
- * **Every number in the budget has a sentence beside it.**
+ * **Every number in the budget has a sentence beside it, and the sentence names the
+ * number.**
  *
  * MUSE-63's constraint, as a rule rather than as a request: "a number nobody can account
  * for is a number the next person quietly raises." The rule reads **syntax** — the
@@ -629,25 +995,63 @@ describe('MUSE-63: the budget cannot be fooled about which page it weighed', () 
  * reason `test/helpers/source-guard.ts` writes out at length: a substring scan over source
  * reports prose and misses code.
  *
- * The walk descends until it finds an account, so a group of numbers may be accounted for
- * together (`fonts`'s floor and ceiling are one decision and one paragraph) while a number
- * on its own may not. A node with neither an account nor children is the failure.
+ * **It was a length check until MUSE-104, which is not the rule CLAUDE.md describes.** The
+ * assertion was `comment.trim().length >= ACCOUNTED`, so it never read the number and could
+ * not relate the two: raising `bytes.html` from `48 * 1024` to `480 * 1024` left the
+ * sentence saying „48 KB is ~1.55× the worst page, 17.1 KB of headroom" and left this file
+ * green. The promised outcome did hold — the fixtures above hand-transcribe every current
+ * number, and `budget 50.5 KB` is a stronger guard than any prose rule — but crediting a
+ * guarantee to the wrong mechanism is how it gets deleted in a tidy-up, and the transcribed
+ * fixtures have no completeness check of their own.
  *
- * It cannot check that the sentence is *true*. What it can do is make raising a number
- * without saying anything about it impossible, which is the move this is aimed at — and the
- * exact-list assertion below means a **new** number forces the decision either way.
+ * So the account must **contain the number as the source writes it**: `48 * 1024` is
+ * accounted for by a sentence that says 48, `1280` by one that says 1,280. Thousands
+ * separators are normalised away and the match is on digit boundaries, so „1,023 bytes per
+ * `<img>`" cannot stand in for a 10 and „110 KB" cannot stand in for a 10 either.
+ *
+ * **And the walk descends to the numbers, not to the first node with a long enough
+ * comment.** That was the second finding: `fonts` and `perImage` both carry long blocks, so
+ * they were leaves and their children had no accounting requirement at all —
+ * `perImage: { html: 1280, total: 1280, requests: 1, css: 1000000 }` raised every page's
+ * CSS ceiling by about 1.95 MB with both assertions green and the path reported as
+ * `perImage`. A number may still be accounted for by the paragraph *above* it, because
+ * `fonts`'s floor and ceiling are one decision and one paragraph; what it may not be is
+ * invisible.
+ *
+ * Two limits, stated rather than discovered. It cannot check that a sentence is **true**.
+ * And on a one-digit number it is nearly vacuous — any paragraph mentioning a 1 accounts
+ * for `fonts.min: 1` — which is why the proof below mutates every number by a factor of ten
+ * rather than by one: what this rule is aimed at is the realistic raise, and the realistic
+ * raise is an order of magnitude.
  */
 describe('MUSE-63: the budget is accounted for, number by number', () => {
   /** Long enough to be an account rather than a label. `/** Bytes. *\/` is not a reason. */
   const ACCOUNTED = 120;
 
-  /** Every number in `BUDGET`, or the group that accounts for it, with its comment. */
-  function declaredNumbers(): { path: string; comment: string }[] {
-    const file = join(ROOT, 'scripts/budget.mjs');
-    const text = readFileSync(file, 'utf8');
-    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  /** One number in the source, with everything that may account for it. */
+  interface Declared {
+    /** `BUDGET.bytes.html`, `VIEWPORTS[0].width`. */
+    path: string;
+    /** Its own JSDoc and every enclosing one. */
+    comments: string[];
+    /** The initializer exactly as the source writes it — `48 * 1024`. */
+    valueText: string;
+    /** What that evaluates to, or `null` when this check cannot read it. */
+    value: number | null;
+    start: number;
+    end: number;
+  }
 
-    const found: { path: string; comment: string }[] = [];
+  const file = join(ROOT, 'scripts/budget.mjs');
+  const budgetSource = () => readFileSync(file, 'utf8');
+
+  /** The objects whose numbers have to be accounted for. Both are measurement decisions. */
+  const DECIDED = ['BUDGET', 'VIEWPORTS'];
+
+  /** Every number under `DECIDED`, found by parsing rather than by matching text. */
+  function declaredNumbers(text: string = budgetSource()): Declared[] {
+    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+    const found: Declared[] = [];
 
     const leadingComment = (node: ts.Node): string =>
       (ts.getLeadingCommentRanges(text, node.getFullStart()) ?? [])
@@ -655,33 +1059,51 @@ describe('MUSE-63: the budget is accounted for, number by number', () => {
         .filter((comment) => comment.startsWith('/**'))
         .join('\n');
 
-    const accounts = (comment: string): boolean =>
-      comment.replace(/[*/\s]+/g, ' ').trim().length >= ACCOUNTED;
+    /** `48 * 1024` → 49152; anything this cannot read is reported rather than skipped. */
+    const valueOf = (expression: string): number | null => {
+      const product = /^(\d+(?:\.\d+)?)\s*\*\s*(\d+(?:\.\d+)?)$/.exec(expression.trim());
+      if (product !== null) return Number(product[1]) * Number(product[2]);
+      return /^\d+(?:\.\d+)?$/.test(expression.trim()) ? Number(expression.trim()) : null;
+    };
 
-    const walk = (object: ts.ObjectLiteralExpression, prefix: string): void => {
-      for (const property of object.properties) {
-        if (!ts.isPropertyAssignment(property)) continue;
-        const path =
-          prefix === ''
-            ? property.name.getText(source)
-            : `${prefix}.${property.name.getText(source)}`;
-        const comment = leadingComment(property);
-        if (!accounts(comment) && ts.isObjectLiteralExpression(property.initializer)) {
-          walk(property.initializer, path);
-          continue;
+    const walk = (node: ts.Node, path: string, comments: string[]): void => {
+      if (ts.isObjectLiteralExpression(node)) {
+        for (const property of node.properties) {
+          if (!ts.isPropertyAssignment(property)) continue;
+          walk(property.initializer, `${path}.${property.name.getText(source)}`, [
+            ...comments,
+            leadingComment(property),
+          ]);
         }
-        found.push({ path, comment });
+        return;
       }
+      if (ts.isArrayLiteralExpression(node)) {
+        node.elements.forEach((element, index) =>
+          walk(element, `${path}[${index}]`, [...comments, leadingComment(element)]),
+        );
+        return;
+      }
+      // A string is a label, not a number — `VIEWPORTS[0].name` is `'phone'`.
+      if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return;
+
+      const valueText = node.getText(source);
+      found.push({
+        path,
+        comments,
+        valueText,
+        value: valueOf(valueText),
+        start: node.getStart(source),
+        end: node.getEnd(),
+      });
     };
 
     const visit = (node: ts.Node): void => {
       if (
         ts.isVariableDeclaration(node) &&
-        node.name.getText(source) === 'BUDGET' &&
-        node.initializer !== undefined &&
-        ts.isObjectLiteralExpression(node.initializer)
+        DECIDED.includes(node.name.getText(source)) &&
+        node.initializer !== undefined
       ) {
-        walk(node.initializer, '');
+        walk(node.initializer, node.name.getText(source), [leadingComment(node.parent.parent)]);
       }
       ts.forEachChild(node, visit);
     };
@@ -690,38 +1112,148 @@ describe('MUSE-63: the budget is accounted for, number by number', () => {
     return found;
   }
 
-  it('finds the budget in the source at all', () => {
-    // The loop below is a loop over this list. A discovery that silently stops matching
-    // does not fail it — it makes it pass over nothing, which is the shape of "a check
+  const accounts = (comment: string): boolean =>
+    comment.replace(/[*/\s]+/g, ' ').trim().length >= ACCOUNTED;
+
+  /**
+   * The figures a sentence has to say to account for a number.
+   *
+   * `48 * 1024` is written about as „48 KB", never as 49,152 — so the factor of 1024 is a
+   * unit and the operand is the figure. Anything else is quoted as the source writes it.
+   */
+  const figuresFor = (valueText: string): string[] => {
+    const product = /^(\d+(?:\.\d+)?)\s*\*\s*1024$/.exec(valueText.trim());
+    return [product === null ? valueText.trim() : product[1]];
+  };
+
+  /** Does any accounting paragraph actually say this figure? */
+  const says = (comments: string[], figure: string): boolean => {
+    // „1,280 bytes" is the same number as `1280`; the separator is typography.
+    const prose = comments.join('\n').replace(/(?<=\d),(?=\d)/g, '');
+    return new RegExp(`(?<![\\d.,])${figure.replace(/\./g, '\\.')}(?![\\d.,])`).test(prose);
+  };
+
+  /** Every number that is unaccounted for, or whose account does not name it. */
+  function accountingProblems(text: string = budgetSource()): string[] {
+    const problems: string[] = [];
+
+    for (const entry of declaredNumbers(text)) {
+      if (entry.value === null) {
+        problems.push(
+          `${entry.path}: this check cannot read \`${entry.valueText}\` as a number`,
+        );
+        continue;
+      }
+      const accounted = entry.comments.filter((comment) => accounts(comment));
+      if (accounted.length === 0) {
+        problems.push(`${entry.path}: no JSDoc beside it or above it says where it came from`);
+        continue;
+      }
+      for (const figure of figuresFor(entry.valueText)) {
+        if (!says(accounted, figure)) {
+          problems.push(
+            `${entry.path}: the account beside it never says ${figure} — it is ` +
+              `\`${entry.valueText}\` now, and the sentence is about some other number`,
+          );
+        }
+      }
+    }
+
+    return problems;
+  }
+
+  it('finds every number in the budget and in the viewports', () => {
+    // The loops below are loops over this list. A discovery that silently stops matching
+    // does not fail them — it makes them pass over nothing, which is the shape of "a check
     // that confirms the wrong thing" this repository has re-filed seven times. Spelled out
     // rather than counted, so a number that arrives has to be acknowledged here as well as
-    // explained there.
+    // explained there — **including one under `fonts` or `perImage`**, which carry long
+    // blocks and used to end the walk (MUSE-104).
     expect(
       declaredNumbers()
         .map((entry) => entry.path)
         .sort(),
     ).toEqual([
-      'bytes.css',
-      'bytes.font',
-      'bytes.html',
-      'fonts',
+      'BUDGET.bytes.css',
+      'BUDGET.bytes.font',
+      'BUDGET.bytes.html',
+      'BUDGET.fonts.max',
+      'BUDGET.fonts.min',
       // MUSE-25. `bytes.image` was here and is gone: photography is budgeted per response
       // rather than summed per page, and the per-`<img>` allowances are what keep the three
       // content-sensitive lines from being traps that fire on an editor's upload.
-      'imageResponse',
-      'perImage',
-      'renderBlocking',
-      'requests',
-      'total',
+      'BUDGET.imageResponse',
+      'BUDGET.perImage.html',
+      'BUDGET.perImage.requests',
+      'BUDGET.perImage.total',
+      'BUDGET.renderBlocking',
+      'BUDGET.requests',
+      'BUDGET.total',
+      // MUSE-104. A viewport is a number the measurement depends on, so it is held to the
+      // same rule as a ceiling — there is no third place a number may live.
+      'VIEWPORTS[0].deviceScaleFactor',
+      'VIEWPORTS[0].height',
+      'VIEWPORTS[0].width',
+      'VIEWPORTS[1].deviceScaleFactor',
+      'VIEWPORTS[1].height',
+      'VIEWPORTS[1].width',
     ]);
   });
 
-  it('gives every one of them a sentence saying where it came from', () => {
-    const unaccounted = declaredNumbers()
-      .filter((entry) => entry.comment.replace(/[*/\s]+/g, ' ').trim().length < ACCOUNTED)
-      .map((entry) => entry.path);
+  /**
+   * The parse agrees with the object the gate actually uses.
+   *
+   * Everything above reads the source as text. If the walk and the runtime value ever
+   * disagree, the accounting is about a file nobody imports — so each path is resolved
+   * against the real `BUDGET` and `VIEWPORTS` and the values compared.
+   */
+  it('reads the same numbers the gate compares against', () => {
+    const live: Record<string, unknown> = { BUDGET, VIEWPORTS };
 
-    expect(unaccounted).toEqual([]);
+    for (const entry of declaredNumbers()) {
+      const value = entry.path
+        .split(/\.|\[|\]/)
+        .filter(Boolean)
+        .reduce<unknown>(
+          (node, key) => (node as Record<string, unknown>)[key],
+          live as unknown as Record<string, unknown>,
+        );
+      expect(value, entry.path).toBe(entry.value);
+    }
+  });
+
+  it('gives every one of them a sentence that says where it came from', () => {
+    expect(accountingProblems()).toEqual([]);
+  });
+
+  /**
+   * **The proof that the rule has teeth, run over the real numbers.**
+   *
+   * Every number in the file is raised by a factor of ten with its comment untouched, and
+   * every one of them has to be caught by name. This is the mutation MUSE-104 landed on
+   * `bytes.html` and three others, as a test rather than as a transcript.
+   */
+  it('catches every number raised tenfold while its sentence stays the same', () => {
+    const text = budgetSource();
+    const survived: string[] = [];
+
+    for (const entry of declaredNumbers(text)) {
+      expect(entry.value, entry.path).not.toBeNull();
+      // The *form* is kept — `48 * 1024` becomes `480 * 1024` — because that is how the
+      // raise would really be written, and the figure the sentence has to name is the
+      // operand rather than the product.
+      const raised = entry.valueText.replace(/\d+(?:\.\d+)?/, (first) =>
+        String(Number(first) * 10),
+      );
+      const problems = accountingProblems(
+        text.slice(0, entry.start) + raised + text.slice(entry.end),
+      );
+      if (!problems.some((problem) => problem.startsWith(`${entry.path}:`))) {
+        survived.push(`${entry.path}: ${entry.valueText} → ${raised} went unnoticed`);
+      }
+    }
+
+    expect(survived).toEqual([]);
   });
 
   it('keeps the numbers themselves in one place', () => {
@@ -729,11 +1261,13 @@ describe('MUSE-63: the budget is accounted for, number by number', () => {
     // answers to "what did we agree", and the looser one would be the one that stopped
     // noticing.
     const suite = readFileSync(join(ROOT, 'test/budget.test.ts'), 'utf8');
-    const script = readFileSync(join(ROOT, 'scripts/budget.mjs'), 'utf8');
+    const script = budgetSource();
 
     expect(suite).toContain("from '../scripts/budget.mjs'");
     expect(script).toMatch(/^export const BUDGET = \{$/m);
-    // Nothing may declare a second budget object beside it.
+    expect(script).toMatch(/^export const VIEWPORTS = \[$/m);
+    // Nothing may declare a second budget object, or a second set of widths, beside them.
     expect(script.match(/^export const BUDGET = /gm)).toHaveLength(1);
+    expect(script.match(/^export const VIEWPORTS = /gm)).toHaveLength(1);
   });
 });
