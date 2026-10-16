@@ -245,9 +245,8 @@ ticket (MUSE-114 is the open instance).
   it is worth reading rather than glancing at.
 
 - **Editing content in a branch is two steps and the order is the whole of it: import,
-  then merge** (MUSE-78). An *added* document is safe by accident — the build refuses to
-  run without it, so the deploy cannot publish stale content. An **edit to a document
-  that already exists publishes the old value successfully**, and had no signal anywhere:
+  then merge** (MUSE-78). An **edit to a document that already exists publishes the old
+  value successfully**, and had no signal anywhere:
   green PR, green suite, the new text in the diff, the old text on the page. So, for a
   branch that touches `content/seed.ndjson`:
 
@@ -282,6 +281,83 @@ ticket (MUSE-114 is the open instance).
   structurally read-only: **auto-seeding on merge was rejected**, because it needs a
   content-write token in CI and MUSE-21 and MUSE-45 both exist to keep one from
   appearing. Do not add one.
+
+- **The build is not the second guard MUSE-78 thought it was: it catches a missing `page`
+  or `prosePage` and nothing else** (MUSE-83). MUSE-78's reasoning, its pull request and
+  the paragraph that went into `CLAUDE.md` all said an *added* document was safe by
+  accident — the build refuses to run without it, so the deploy cannot publish stale
+  content. That is true of two document types. The real matrix, measured rather than
+  reasoned:
+
+  | the seed change | `npm run build` | what the deploy publishes |
+  | --- | --- | --- |
+  | adds a `page` / `prosePage` | **fails**, naming the route | — |
+  | adds any other document type | passes | the page without it |
+  | edits any document | passes | the old value — MUSE-78's subject |
+  | removes any document | passes | the document, still |
+
+  `page` and `prosePage` are looked up **by route** — `getPage(route)`,
+  `getProsePage(route)` — and `ROUTES` is code, so a route whose document is missing has
+  no substitute and the build says which route. Both readers pass `minimum: 0` precisely
+  because counting is the wrong instrument for a lookup that knows which document it
+  wants. Every other reader counts, `minimum` defaults to 1, and **one existing document
+  satisfies it** — so a fourth `pricingTier` in the seed against three in the dataset
+  builds green and publishes three cards. Those two types are the ones every previous
+  seed addition happened to involve — MUSE-59, MUSE-60, MUSE-65 — which is why the
+  protection looked general.
+
+  Proven offline, each row, by pointing a build at a fixture standing in for the
+  un-imported dataset (`MUSE_CONTENT_FIXTURE`, which is what every test build reads):
+  the seed minus `page-pricing` exits 1 inside `getPage`; minus `prose-whatisbachata`
+  exits 1 inside `getProsePage`; minus `pricing-dropin` exits **0**, builds 23 pages and
+  publishes two rate cards where the branch's seed has three; with `page-home.description`
+  held at its old value it exits 0 and that old sentence is the `<meta name="description">`
+  in `dist`.
+
+  **Do not close the gap by lowering a `minimum` elsewhere, or by making an empty
+  collection fatal.** `getEvents` deliberately supports zero results, MUSE-51 established
+  that the count check is the wrong instrument for a broken query, and MUSE-24 built a
+  page whose correct behaviour with no documents is to say so. The build is behaving
+  properly; the claim about it was wrong. The gate is where the three unguarded rows are
+  named, and it already blocks on all three — an added document reaches `pending` by
+  `absent: true`, and its message now says, per type, whether the build is going to fail
+  as well or whether this is the only thing that will ever mention it.
+
+- **A removal is checked against the dataset and blocks, because no import can perform
+  it** (MUSE-83). MUSE-78 printed "Dropped from `content/seed.ndjson`: … those documents
+  are still in the dataset" and **asserted** it: `removed` was the base seed minus the
+  head seed, derived from git alone, and the dropped `_id` was then *excluded* from the
+  live fetch, because the query is `*[_id in $ids]` over head-seed ids. Three
+  consequences, and MUSE-73 — the first ticket to delete a seed document — hit all of
+  them: the paragraph printed identically before and after the delete, so re-running the
+  gate could not confirm it; and it did not block, because `blocked` was
+  `pending.length > 0` and a removal never reached `pending`. So the one operation that
+  genuinely needs a second human command had the weakest signal in the file.
+
+  `idsToCheck({ base, head })` is the fix — the union of both seeds' ids — and a dropped
+  id that comes back from the dataset is `stillLive: true` and **blocks**; one that does
+  not is reported as done. **This does not reopen MUSE-45.** A removal can only come from
+  the diff against the merge base, so only a branch authors one; nothing Mina does in the
+  Studio drops a line from a committed file, and `sanity:seed:check` beside the gate is
+  still `continue-on-error`.
+
+  The sequence it prints is **delete first, then import**, which is MUSE-73's:
+
+  1. `npx sanity documents delete <id> --dataset production`
+  2. `npm run sanity:seed`
+
+  Between the two writes the dataset is inconsistent whichever way round they go, and
+  MUSE-21's cron can rebuild inside that window. Import-first would have published four
+  cards including the retired rate; delete-first publishes a truthful page one rate short.
+  As with the import, **an agent runs neither command.**
+
+  What the gate still cannot see, stated rather than left to be rediscovered: a document
+  that is in the dataset and in **neither** seed. Both scripts fetch by `_id` from the
+  seed, so a document created in the Studio, or dropped from the seed by some earlier
+  branch and never deleted, is invisible to the comparison entirely — MUSE-60's unseeded
+  `studioStory` was exactly that. Finding those needs a query for everything the dataset
+  holds rather than for named ids, it belongs in `npm run sanity:seed:check` where it
+  cannot block, and it is not in MUSE-83.
 
 - **An optional field is a decision, not laziness.** `instructor.portrait`,
   `instructor.instagram`, `instructor.bio`, `class.description`, `class.image`,

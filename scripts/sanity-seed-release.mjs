@@ -6,15 +6,29 @@
  * (`MUSE_CONTENT_FIXTURE`, MUSE-20). So a change to the seed behaves in two completely
  * different ways depending on whether it adds a document or edits one:
  *
- * | the branch | tests | CI | the live site |
+ * | the branch | tests | the build | the live site |
  * | -- | -- | -- | -- |
- * | **adds** a document | pass — the fixture has it | **red** — the build names the missing document | — |
+ * | **adds** a `page` or `prosePage` | pass — the fixture has it | **red** — no document for the route | — |
+ * | **adds** any other document type | pass | **green** | published without it |
  * | **edits** a document | pass | **green** | **unchanged** |
+ * | **removes** a document | pass | **green** | still published |
  *
- * The adding case is safe by accident: the build cannot publish content it refuses to
- * build against, so somebody imports and CI goes green. The editing case had **no signal
- * at all** — a green pull request, a suite asserting the new text, a reviewer reading the
- * new text in the diff, and a deployed page still serving the old one.
+ * MUSE-78 wrote that table with two rows and read the first as "the adding case is safe
+ * by accident: the build cannot publish content it refuses to build against". **That is
+ * true of two document types and false of the rest** — MUSE-83. `page` and `prosePage`
+ * are looked up *by route*, and a route with no document has no substitute; every other
+ * type is read as a collection whose `minimum` the documents already in the dataset
+ * satisfy. Measured on MUSE-73's branch: a fourth `pricingTier` in the seed and three in
+ * the dataset, `npm run build` exit 0, three cards published. The same holds for a new
+ * `class`, `scheduleSlot`, `instructor` or `event`. **Do not fix that by lowering a
+ * `minimum` or making an empty collection fatal** — MUSE-51 established that counting is
+ * the wrong instrument, and MUSE-24 built a page whose correct behaviour with no
+ * documents is to say so. The build is behaving properly; the claim about it was wrong,
+ * so three of those four rows have no guard but this one.
+ *
+ * The editing case had **no signal at all** — a green pull request, a suite asserting the
+ * new text, a reviewer reading the new text in the diff, and a deployed page still
+ * serving the old one.
  *
  * ## The timeline this exists because of
  *
@@ -117,6 +131,59 @@ import {
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
+/**
+ * The document types a build genuinely cannot publish without — and the reason the
+ * message about an added document is two paragraphs rather than one (MUSE-83).
+ *
+ * Read off `src/lib/sanity/index.ts`, where both of these are
+ * `requireDocuments(rows, '<type>', decode, 0)` followed by a lookup keyed on `route`.
+ * The literal `0` is the marker and both readers explain it the same way: the count is
+ * the wrong instrument for a reader that knows which document it wants, so the shortfall
+ * is reported per route instead. Every other type is counted, one existing document
+ * satisfies the count, and the deploy publishes without the new one.
+ *
+ * `test/seedrelease.test.ts` derives the same set from that source and compares, so a
+ * third route-looked-up type — or either of these turned into a counted collection —
+ * fails rather than quietly making this message wrong again.
+ */
+export const ROUTE_LOOKED_UP = new Set(['page', 'prosePage']);
+
+/**
+ * A document as the seed and the dataset both hold one: an `_id`, a `_type`, content.
+ *
+ * Annotated rather than inferred because MUSE-121 turned `checkJs` on for `scripts/`
+ * and suppressed this file over sixteen pre-existing implicit `any`s. A suppression at
+ * the top of a file silently covers whatever is written under it, so the functions this
+ * ticket adds carry their types now and are already clean when it is lifted.
+ *
+ * @typedef {{ _id: string, _type: string } & Record<string, unknown>} SeedDocument
+ */
+
+/**
+ * A document this branch dropped from the seed, and whether the dataset still holds it.
+ *
+ * `stillLive` is three-valued on purpose: `true` is "the delete has not been run", `false`
+ * is "done", and `null` is "the dataset could not be read", which must not block.
+ *
+ * @typedef {{ id: string, type: string, stillLive: boolean | null }} Removal
+ */
+
+/**
+ * Which documents to ask the dataset about: every `_id` in **either** seed.
+ *
+ * The head ids alone were MUSE-83's first finding. A document this branch drops is in the
+ * base seed and not in the head one, so a fetch over head ids never mentions it — and the
+ * gate then reported "those documents are still in the dataset" about rows it had
+ * excluded from the query. Asking about the union is the whole of the fix: a dropped id
+ * that comes back is still live and needs a delete, and one that does not is done.
+ *
+ * @param {{ base: SeedDocument[], head: SeedDocument[] }} seeds
+ * @returns {string[]} every `_id`, de-duplicated and sorted.
+ */
+export function idsToCheck({ base, head }) {
+  return [...new Set([...base, ...head].map((doc) => doc._id))].sort();
+}
+
 /* ------------------------------------------------------------------ the verdict */
 
 /**
@@ -129,7 +196,10 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
  *
  * @param base  the seed as it stood at the merge base, parsed. `[]` if the file is new.
  * @param head  the seed on this branch, parsed.
- * @param live  the matching documents from the dataset, or `null` if it could not be read.
+ * @param live  the dataset rows for every `_id` in **either** seed — `idsToCheck` is
+ *              what the command passes `fetchLive` — or `null` if it could not be read.
+ *              Rows for the head ids alone would read every removal as already deleted,
+ *              which is MUSE-83's finding stated as a false pass.
  */
 export function releaseVerdict({ base, head, live }) {
   const baseById = new Map(base.map((doc) => [doc._id, doc]));
@@ -144,11 +214,17 @@ export function releaseVerdict({ base, head, live }) {
   const imported = [];
   /** The dataset is ahead here and this branch did not author it. Never blocks. */
   const collateral = [];
-  /** Dropped from the seed. An import never deletes, so the document is still live. */
+  /**
+   * Dropped from the seed, and whether the dataset still holds it: `true` — the delete
+   * has not been run and the site still reads it; `false` — done; `null` — the dataset
+   * could not be read, so unknown.
+   */
   const removed = [];
 
   for (const [id, before] of baseById) {
-    if (!headById.has(id)) removed.push({ id, type: before._type });
+    if (headById.has(id)) continue;
+    const stillLive = liveById === null ? null : liveById.has(id);
+    removed.push({ id, type: before._type, stillLive });
   }
 
   for (const [id, doc] of headById) {
@@ -213,8 +289,20 @@ export function releaseVerdict({ base, head, live }) {
     removed,
     conflicts,
     unreadable: liveById === null,
-    /** The one bit CI reads. Nothing else in here may fail a run. */
-    blocked: pending.length > 0,
+    /**
+     * The one bit CI reads. Nothing else in here may fail a run.
+     *
+     * A still-live removal blocks for the reason a pending edit does and then some: an
+     * import cannot perform it. `--replace` is keyed on `_id` and only ever writes, so
+     * the document stays and the site keeps reading it until somebody runs
+     * `npx sanity documents delete`. MUSE-78 reported it and passed, which made the one
+     * operation needing a second human command the one with no gate (MUSE-83).
+     *
+     * This does not reopen MUSE-45. A removal comes from the diff against the merge base,
+     * so only a branch can author one; nothing done in the Studio drops a line from a
+     * committed file, and a branch that does not touch the seed has nothing here.
+     */
+    blocked: pending.length > 0 || removed.some(({ stillLive }) => stillLive === true),
   };
 }
 
@@ -242,7 +330,7 @@ const bullet = (field) =>
  * rebuild — is the one that gets forgotten, because the first one succeeds and looks like
  * the end of the job. That is the MUSE-71 timeline exactly.
  */
-export function report(verdict, { merged = false } = {}) {
+export function report(verdict, { merged = false, dataset = target().dataset } = {}) {
   const lines = [];
 
   if (verdict.unreadable) {
@@ -292,14 +380,20 @@ export function report(verdict, { merged = false } = {}) {
     }
   }
 
-  if (verdict.pending.length === 0) {
+  const stillLive = /** @type {Removal[]} */ (
+    verdict.removed.filter(
+      /** @param {Removal} entry */ (entry) => entry.stillLive === true,
+    )
+  );
+
+  if (verdict.pending.length === 0 && stillLive.length === 0) {
     lines.push(
       '',
       'Every content change on this branch is already in the dataset. Merging publishes it:',
       'the deploy that fires on merge is a build, and a build is the only thing that reads',
       'the dataset.',
     );
-  } else {
+  } else if (verdict.pending.length > 0) {
     const consequence = merged
       ? 'The deploy for this commit has already published the old values.'
       : 'Merging now would publish the old values.';
@@ -310,10 +404,18 @@ export function report(verdict, { merged = false } = {}) {
     );
     for (const entry of verdict.pending) {
       lines.push(`    ${entry.id} (${entry.type})`);
-      if (entry.absent) {
+      if (entry.absent && ROUTE_LOOKED_UP.has(entry.type)) {
         lines.push(
-          '      the dataset has no such document — this is the *adding* case, which the',
-          '      build refuses to publish past, so it cannot reach a visitor silently',
+          `      the dataset has no such document. A \`${entry.type}\` is looked up by route,`,
+          '      so the build fails naming the route as well and this cannot reach a visitor',
+          '      silently. Importing before the merge is still the cheaper order.',
+        );
+      } else if (entry.absent) {
+        lines.push(
+          '      the dataset has no such document, and the build will not fail —',
+          `      \`${entry.type}\` is read as a collection whose \`minimum\` the documents`,
+          '      already in the dataset satisfy, so the deploy would publish the page without',
+          '      it (MUSE-83). This check is the only thing that names it before the merge.',
         );
       } else {
         for (const field of entry.fields) lines.push(...bullet(field));
@@ -352,13 +454,25 @@ export function report(verdict, { merged = false } = {}) {
     }
   }
 
-  if (verdict.removed.length > 0) {
+  const deleted = /** @type {Removal[]} */ (
+    verdict.removed.filter(
+      /** @param {Removal} entry */ (entry) => entry.stillLive === false,
+    )
+  );
+
+  if (deleted.length > 0) {
     lines.push(
       '',
-      `Dropped from ${SEED_PATH}: ${verdict.removed.map(({ id }) => id).join(', ')}. An import`,
-      'never deletes, so those documents are still in the dataset and the site still reads',
-      'them. Delete them in the Studio if that was the intent.',
+      `Dropped from ${SEED_PATH} and no longer in the dataset — the delete has been run:`,
+      `  ${deleted.map(({ id, type }) => `${id} (${type})`).join(', ')}`,
     );
+  }
+
+  if (stillLive.length > 0) {
+    lines.push('', `STILL IN THE DATASET — ${stillLive.length} document(s) this branch dropped`);
+    lines.push(`from ${SEED_PATH} are still there, so the site still reads them:`, '');
+    for (const { id, type } of stillLive) lines.push(`    ${id} (${type})`);
+    lines.push('', ...deletionSequence(stillLive, { dataset }));
   }
 
   if (verdict.pending.length > 0) lines.push('', ...sequence({ merged }));
@@ -410,6 +524,40 @@ export function sequence({ merged = false } = {}) {
     'for this commit has already run. Without it the fix waits for the next scheduled',
     'rebuild — up to `MAX_WAIT_HOURS` (src/lib/rebuild.ts). Next time, import before',
     'merging: one step and no stale window.',
+  ];
+}
+
+/**
+ * Removing a document is two writes and the order is the finding (MUSE-83).
+ *
+ * `npm run sanity:seed` is `sanity dataset import --replace`: keyed on `_id` and
+ * write-only. It **cannot** delete, so an import on its own leaves the retired document
+ * live and the page rendering it. The delete is a second command, and between the two
+ * writes the dataset is inconsistent whichever way round they go — MUSE-21's cron can
+ * rebuild inside that window. Delete-first publishes a page one document short, which is
+ * true; import-first republishes the document the branch retired, which is the thing the
+ * branch exists to stop. That is MUSE-73's actual sequence, and the reason it is written
+ * down: it is not derivable from "run the import".
+ *
+ * As with everything else here, **this prints the commands and runs neither.** The gate
+ * is structurally read-only and an agent does not run either one.
+ *
+ * @param {Removal[]} removed  the dropped documents the dataset still holds.
+ * @param {{ dataset?: string }} [options]  the dataset the delete has to name.
+ * @returns {string[]} the report, as lines.
+ */
+export function deletionSequence(removed, { dataset = target().dataset } = {}) {
+  return [
+    'THE SEQUENCE — delete first, then import:',
+    '',
+    ...removed.map(({ id }) => `    npx sanity documents delete ${id} --dataset ${dataset}`),
+    '    npm run sanity:seed',
+    '',
+    '`--replace` only ever writes, so the import cannot finish this on its own. The two',
+    'writes leave the dataset inconsistent either way for as long as they are apart, and a',
+    'scheduled rebuild can land in that window: importing first republishes the document',
+    'this branch retired, deleting first publishes a page one document short — which is',
+    'true. Then re-run this check; it goes green once the dataset agrees.',
   ];
 }
 
@@ -493,16 +641,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   let live = null;
   try {
-    live = await fetchLive(
-      head.map((doc) => doc._id),
-      where,
-    );
+    live = await fetchLive(idsToCheck({ base, head }), where);
   } catch (error) {
     console.warn(`${error.message}\n`);
   }
 
   const verdict = releaseVerdict({ base, head, live });
-  const lines = report(verdict, { merged });
+  const lines = report(verdict, { merged, dataset: where.dataset });
   for (const line of lines) (verdict.blocked ? console.error : console.log)(line);
 
   process.exit(verdict.blocked ? 1 : 0);
