@@ -168,6 +168,12 @@ jobs:
   # It fires for a failed push deploy as well as a failed scheduled one, on purpose. The
   # scheduled case is the one that needed it — nobody is watching an unattended run — but
   # "the deploy failed and the site is now stale" is the same sentence either way.
+  #
+  # **Deleting this job was green** (MUSE-93) — nothing under `test/` or `scripts/` so much
+  # as mentioned it. `test/rebuild.test.ts` asserts the mounting now: the job is here, its
+  # `if` still names `failure()` so `needs:` cannot skip it, it waits on both halves of the
+  # deploy, it may open an issue and may do nothing else, and it assigns it. The reasoning
+  # above is what a failure of that test is pointing at; it is not restated there.
   alert:
     name: tell a human
     needs: [build, deploy]

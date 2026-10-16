@@ -310,6 +310,22 @@ jobs:
   # Its own job, with its own token: a one-call probe has no business holding `contents:
   # read`, and a `permissions:` block on the build job would have to be widened for every
   # action in it.
+  #
+  # **Deleting this job was green** (MUSE-93). MUSE-21's machinery is well guarded where it
+  # is code — the cron, the promised ceiling and the retry all bite — and was not guarded at
+  # all where it is configuration: QA removed this whole job and the entire suite passed.
+  # `test/rebuild.test.ts` asserts the mounting now: that the job is here, that it keeps the
+  # name branch protection requires, that it probes the state of the workflow carrying the
+  # cron, that it fails rather than warns on the disable GitHub documents, and that its host
+  # declares no `schedule:` of its own. If that test goes red, the sentences above are what
+  # stopped happening — do not delete them to make it green.
+  #
+  # One degradation recorded rather than fixed: the shape check below accepts a bare
+  # lowercase identifier, so a casing change at GitHub (`ACTIVE`) would be read as
+  # unreadable and warn forever — a permanent silent warning, indistinguishable from an
+  # outage. The documented values are lowercase, the warning does print, and normalising the
+  # case here would be shell that nothing in this repository can execute in a test, which is
+  # the shape of guard it has already been bitten by twice.
   rebuildloop:
     name: the rebuild loop is still enabled
     runs-on: ubuntu-latest
