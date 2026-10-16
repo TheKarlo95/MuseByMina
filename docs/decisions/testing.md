@@ -525,9 +525,13 @@ ticket (MUSE-114 is the open instance).
   name-scoped rule has one binding to watch rather than three.
 
   **For a tab Chromium opened, `page.url()` is not that bookkeeping — it is a mirror that
-  can be permanently wrong** (MUSE-70), and that was the last flake in the suite: about one
-  full `npm test` in four, on branches that had touched no browser code, and three tickets
-  were reported red for it innocently. A tab Playwright adopts *after* Chromium opened it
+  can be permanently wrong** (MUSE-70), and that was the flake that dominated the suite:
+  about one full `npm test` in four, on branches that had touched no browser code, and
+  three tickets were reported red for it innocently. **It is fixed and it was not the last
+  flake in the suite** — eight consecutive runs afterwards were clean of it and one of them
+  failed `test/trialform.test.ts` instead, unexplained; that observation, and what is and
+  is not known about it, is recorded once, in `test/helpers/concurrency.ts` (MUSE-91).
+  A tab Playwright adopts *after* Chromium opened it
   keeps `page.url() === 'about:blank'` **for the rest of its life** when its first document
   commits inside the adoption window. Measured in the failing run: the tab requested the
   destination's four fonts 60 ms after the `page` event and answered 200 to all of them,
@@ -544,6 +548,18 @@ ticket (MUSE-114 is the open instance).
   before it navigates. The 20 s is now sized against a measurement recorded beside it —
   click to a complete document is 524–1288 ms idle, 429–1704 ms at a load average above
   100, over 28 trials.
+
+  **MUSE-70's other half is a retry, and it is the suite's one exception to the rule above**
+  — `middleClickOpens` re-clicks, `TAB_ATTEMPTS = 3` asks of `TAB_BUDGET = 12_000` ms each,
+  a 36-second worst case — because whether Chromium acts on a middle-click is not a fact
+  about this site, and waiting longer was measured and does not work (45 s: 4 of 5 runs
+  still failed, each with the click itself finishing in 143–266 ms). It repeats the
+  *gesture*, never a wait and never an assertion. Both numbers' measurements live in that
+  function's own comment, and so does the `auxclick` record MUSE-91 added beside them: the
+  failure message used to cite the MUSE-33 markup assertions as proof the site was not the
+  cause, which a script calling `preventDefault` on `auxclick` leaves true — so it now
+  reports, from the window, whether the page received the gesture and whether it let it
+  through.
 
 - **The formatting convention is stated in `prettier.config.mjs`, and `prettier --write`
   over the tree is still wrong** (MUSE-58). Nothing stated it before, and Prettier's

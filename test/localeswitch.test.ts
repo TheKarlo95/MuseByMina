@@ -172,12 +172,24 @@ interface Opened {
  * arriving in the remaining forty-four seconds.
  *
  * So the retry is what is left, and it is honest for one reason: *whether Chromium acts on
- * a middle-click is not a fact about this site.* The markup half — that the entry is a
- * plain `<a>` with an `href` and no `target` — is asserted separately and deterministically
- * in the MUSE-33 block, so a switcher that stopped being a link fails there rather than
- * here. A middle-click is also idempotent on the page performing it (it navigates nothing),
- * so asking again costs a click and risks nothing. What this must never become is a retry
- * around the *assertions*: a tab that arrives and cannot be measured is rethrown below.
+ * a middle-click is not a fact about this site.* **It is the suite's one exception to „a
+ * browser suite waits for a condition, never for the clock"** (MUSE-54), and an exception
+ * rather than a loophole because what it repeats is the *gesture*: never a wait and never
+ * an assertion. A middle-click is idempotent on the page performing it (it navigates
+ * nothing), so asking again costs a click and risks nothing, and a tab that arrives and
+ * cannot be measured is rethrown below. **Do not add a second exception and do not raise
+ * either number** (MUSE-91) — `STATUS_BUDGET` in `test/trialform.test.ts` is what raising
+ * one buys: 15 s to 40 s by MUSE-54, and hit anyway.
+ *
+ * **The markup half is necessary and not sufficient, which is MUSE-91's correction.** The
+ * MUSE-33 block asserts the entry is a plain `<a>` with an `href`, no `target` and no
+ * `download` — every one of which a script calling `preventDefault` on `auxclick` leaves
+ * true. So „the switcher is still a link" is not „the page let the gesture through", and a
+ * failure here may not tell its reader the site is ruled out. That half is measured rather
+ * than assumed now: `watchAuxclick` below records every `auxclick` the window sees and
+ * whether it survived its propagation path, and the failure message reports what it found.
+ * A switcher that stopped being a link still fails in the MUSE-33 block, deterministically
+ * and in seconds; what this records is the case that block cannot see.
  *
  * `TAB_BUDGET` covers both halves of one attempt, and each was measured on its own.
  * `locator.click`'s actionability checks took **2.9–3.9 s** at
@@ -190,6 +202,91 @@ interface Opened {
  */
 const TAB_ATTEMPTS = 3;
 const TAB_BUDGET = 12_000;
+
+/**
+ * What the page itself saw of the gesture: the sufficient half the MUSE-33 block cannot
+ * assert (MUSE-91).
+ *
+ * `arrived` is counted in the **capture** phase at `window`, which is the first point in
+ * an event's propagation path, so it counts every `auxclick` that reached the document at
+ * all — including one a script then cancels. `bubbled` and `prevented` are counted in the
+ * **bubble** phase at `window`, the last point in that path, so they are the gesture's
+ * verdict after everything on the page has had its turn: a gesture that never bubbles had
+ * its propagation stopped, and one that bubbles `defaultPrevented` was cancelled. (A
+ * script that cancelled it from a bubble-phase `window` listener registered after this one
+ * would still be missed; the counts are honest about being read at the window, which is
+ * why the message they produce says where it measured.)
+ *
+ * Measured on the break that motivated it: `document.addEventListener('auxclick', (e) =>
+ * e.preventDefault(), true)` planted in `LocaleSwitch.astro`'s own script, href perfect
+ * and no `target`. All three attempts were spent (88, 26 and 15 ms of clicking), and the
+ * failure read *"3 of 3 auxclick(s) reached the window default-prevented, so a script on
+ * the page cancelled the gesture"*. Before MUSE-91 the same run said the browser had
+ * dropped them and that the site was ruled out.
+ *
+ * Deliberately passive — it calls nothing on the event — so the recorder cannot be the
+ * reason a tab fails to open. And deliberately not an `addInitScript`: that call belongs to
+ * `scripts/browser-checks.mjs` alone (MUSE-48), and this needs no pre-navigation hook,
+ * because the page it watches is already loaded when the gesture is performed.
+ */
+interface AuxclickSeen {
+  arrived: number;
+  bubbled: number;
+  prevented: number;
+}
+
+/** The window property the record is parked on, named so it cannot collide with the site. */
+const AUXCLICK_SEEN = '__muse91AuxclickSeen';
+
+type AuxclickHolder = Record<string, AuxclickSeen | undefined>;
+
+async function watchAuxclick(page: Page): Promise<void> {
+  await page.evaluate((key) => {
+    const holder = window as unknown as AuxclickHolder;
+    if (holder[key]) return;
+    const seen: AuxclickSeen = { arrived: 0, bubbled: 0, prevented: 0 };
+    holder[key] = seen;
+    window.addEventListener(
+      'auxclick',
+      () => {
+        seen.arrived += 1;
+      },
+      true,
+    );
+    window.addEventListener(
+      'auxclick',
+      (event) => {
+        seen.bubbled += 1;
+        if (event.defaultPrevented) seen.prevented += 1;
+      },
+      false,
+    );
+  }, AUXCLICK_SEEN);
+}
+
+/**
+ * The one sentence the failure below needs: did the page receive the gesture, and did it
+ * let it through? Each answer points at a different place to look, which is the whole
+ * reason the record exists.
+ */
+async function auxclickReport(page: Page): Promise<string> {
+  const seen = await page
+    .evaluate((key) => (window as unknown as AuxclickHolder)[key] ?? null, AUXCLICK_SEEN)
+    .catch(() => null);
+  if (!seen) {
+    return 'the auxclick record could not be read, so whether the page received the gesture is unmeasured';
+  }
+  if (seen.arrived === 0) {
+    return 'no auxclick reached the window at all, so the page never received the gesture';
+  }
+  if (seen.prevented > 0) {
+    return `${seen.prevented} of ${seen.arrived} auxclick(s) reached the window default-prevented, so a script on the page cancelled the gesture`;
+  }
+  if (seen.bubbled < seen.arrived) {
+    return `${seen.arrived - seen.bubbled} of ${seen.arrived} auxclick(s) never finished propagating, so a script on the page stopped the gesture`;
+  }
+  return `${seen.arrived} auxclick(s) reached the window undefaulted and unstopped`;
+}
 
 /**
  * Middle-click `selector` and measure the tab it opened, once that tab holds a document.
@@ -219,6 +316,9 @@ async function middleClickOpens(
   selector: string,
 ): Promise<Opened> {
   const lost: string[] = [];
+  // Before the first gesture, so every attempt is counted (MUSE-91). The page performing a
+  // middle-click navigates nowhere, so one installation covers all three attempts.
+  await watchAuxclick(page);
   for (let attempt = 1; attempt <= TAB_ATTEMPTS; attempt += 1) {
     const opened = context.waitForEvent('page', { timeout: TAB_BUDGET });
     // Park a handler on it before the click. The promise is deliberately created first so
@@ -259,13 +359,22 @@ async function middleClickOpens(
       lost.push(`${attempt}: the click took ${clicked}ms, no tab in the ${TAB_BUDGET}ms`);
     }
   }
+  // Three causes can produce this and the reader is given the evidence that separates
+  // them, rather than a conclusion (MUSE-91). The old wording named the browser and then
+  // ruled the site out by citing the MUSE-33 block — which asserts the markup, and the
+  // markup stays perfect while a script cancels the gesture. QA broke the site exactly
+  // that way and this message sent the reader at Chromium.
+  const auxclick = await auxclickReport(page);
   throw new Error(
     `Chromium opened no tab for ${TAB_ATTEMPTS} middle-clicks on ${selector} ` +
-      `(${lost.join('; ')}). MUSE-70 measured each gesture arriving at the link with ` +
-      `auxclick firing undefaulted, so read a run of these as the browser dropping them ` +
-      `rather than as a slow machine — and if the click durations above are close to the ` +
-      `budget it is the machine after all. That the entry is still a plain link is ` +
-      `asserted in the MUSE-33 block, so it is not what this is telling you.`,
+      `(${lost.join('; ')}). Measured at the window: ${auxclick}. ` +
+      `Read it in that order. If the page never received the gesture, or received it ` +
+      `cancelled or stopped, the fault is on the page and the MUSE-33 block cannot see ` +
+      `it — it asserts a plain <a> with an href and no target, all of which a cancelled ` +
+      `auxclick leaves true. If the click durations above are close to the ` +
+      `${TAB_BUDGET}ms budget, it is a slow machine. If the gesture reached the window ` +
+      `undefaulted and unstopped and no tab ever came, that is what MUSE-70 measured: ` +
+      `Chromium dropping a middle-click, which is not a fact about this site.`,
   );
 }
 
@@ -979,7 +1088,11 @@ describe('the entry for the locale you are reading is inert (MUSE-39)', () => {
       // only the proof that there is a document to judge — which is why `?lang=` going
       // missing reads as „expected `?lang=hr`, received nothing" rather than as a timeout.
       // Proved both times by building with the parameter dropped; the failure names the
-      // URL it got.
+      // URL it got. Re-proved by MUSE-91, which dropped the parameter again: this test
+      // then fails one assertion earlier, on the href, so the measurement of the *tab's*
+      // comparison was taken on „opens the HR link in a new tab" above — 1,177 ms for the
+      // test, 4.44 s for the run, reading „expected …/MuseByMina/en/#trial to be
+      // …/MuseByMina/?lang=hr#trial". Seconds and a comparison, not a timeout.
       expect(tab.url).toBe(urlFor('/schedule', `?${LANG_PARAM}=hr`));
       expect(tab.htmlLang).toBe('hr-HR');
       expect(tab.stored).toBe('hr');

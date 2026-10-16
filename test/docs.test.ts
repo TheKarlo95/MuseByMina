@@ -87,3 +87,76 @@ describe('the instruction file an agent cannot skip (MUSE-115)', () => {
     }
   });
 });
+
+/**
+ * **MUSE-91 — a documented claim that the suite is clean, and a retry written down only in
+ * the file that performs it.**
+ *
+ * Both halves were found by QA of MUSE-70, which is the ticket that fixed the middle-click
+ * flake. Two surfaces said that one *was the last flake in the suite*; eight consecutive
+ * full runs afterwards found no middle-click failure and one unexplained
+ * `test/trialform.test.ts` failure, so the claim was false while every rule citing it was
+ * green. And `middleClickOpens`'s retry — the considered exception to *"a browser suite
+ * waits for a condition, never for the clock"* — existed nowhere an agent reads, which is
+ * how an exception becomes a precedent.
+ *
+ * So this is a guard on the *prose*, deliberately: the thing that went wrong was a
+ * sentence, and the measurements behind it live in `test/helpers/concurrency.ts`.
+ */
+describe('what the rules claim about the suite flaking (MUSE-91)', () => {
+  const claude = readFileSync(join(ROOT, 'CLAUDE.md'), 'utf8');
+  const read = (file: string) => readFileSync(join(ROOT, file), 'utf8');
+
+  /** Everything an agent is pointed at, plus the two modules that carried the claim. */
+  const SURFACES = [
+    'CLAUDE.md',
+    ...readdirSync(join(ROOT, 'docs/decisions'))
+      .filter((f) => f.endsWith('.md'))
+      .map((f) => `docs/decisions/${f}`),
+    'test/helpers/browser-settle.ts',
+    'test/helpers/concurrency.ts',
+    'test/localeswitch.test.ts',
+  ];
+
+  it('says on no surface that the last flake is gone', () => {
+    // Claim-shaped forms only. „It was **not** the last flake" is the correction and has
+    // to pass, so the pattern matches the assertion and not the word — a guard that fired
+    // on the retraction would be turned off rather than obeyed.
+    const claimed = /(?:was|is|were) the last flake|no remaining flake|the suite has no flake/;
+    for (const file of SURFACES) {
+      expect(read(file), `${file} claims the suite has no flake left`).not.toMatch(claimed);
+    }
+  });
+
+  it('records the failure that is not the middle-click, with what is not known about it', () => {
+    // The flake table is where the next author will look, so the observation lives beside
+    // it rather than in a ticket. What is *not* known is the load-bearing half: a
+    // mechanism nobody measured, written as though it were measured, is MUSE-80's defect.
+    const census = read('test/helpers/concurrency.ts');
+    expect(census).toContain('MUSE-91');
+    expect(census).toContain('test/trialform.test.ts');
+    expect(census).toMatch(/not bisected/);
+    expect(census).toMatch(/inventing the mechanism/);
+  });
+
+  it('writes the retry, its budget and its worst case beside the rule it bends', () => {
+    const suite = read('test/localeswitch.test.ts');
+    const attempts = /const TAB_ATTEMPTS = ([\d_]+);/.exec(suite)?.[1] ?? '';
+    const budget = /const TAB_BUDGET = ([\d_]+);/.exec(suite)?.[1] ?? '';
+    expect([attempts, budget]).not.toContain('');
+
+    // Derived from the constants, so raising either one in the test file fails here until
+    // the rule an agent actually reads is raised with it. That is the whole defect: the
+    // 36-second worst case was half of MUSE-70's pull request title and was written down
+    // in one file, the one nobody reads before changing it.
+    const worst =
+      (Number(attempts.replace(/_/g, '')) * Number(budget.replace(/_/g, ''))) / 1000;
+    const rule = /never for the clock[\s\S]*?→ `testing\.md`/.exec(claude)?.[0] ?? '';
+    expect(rule).toContain(`TAB_ATTEMPTS = ${attempts}`);
+    expect(rule).toContain(`TAB_BUDGET = ${budget}`);
+    expect(rule).toContain(`${worst} s`);
+    // And it is stated as an exception. A retry recorded without that word reads as
+    // permission for the next one.
+    expect(rule).toMatch(/exception/);
+  });
+});

@@ -86,9 +86,12 @@ export {
  * | **82** — `test/blog.test.ts`   | 15 | **6** | **0** | MUSE-26, idle box, after MUSE-70 |
  * | **84** — `test/gallery.test.ts`, a build **and** a browser | 15 | **6** | **0** | MUSE-25, idle box |
  *
- * Every failure in that table is the same test and the same error: `test/localeswitch.
- * test.ts`'s middle-click, `page.waitForEvent: Timeout 20000ms exceeded while waiting for
- * event "framenavigated"`, reported by `settleNewTab` as *"it is still at about:blank"*.
+ * Every failure in the table *above* is the same test and the same error: `test/
+ * localeswitch.test.ts`'s middle-click, `page.waitForEvent: Timeout 20000ms exceeded
+ * while waiting for event "framenavigated"`, reported by `settleNewTab` as *"it is still
+ * at about:blank"*. **That is a statement about these rows and not about the suite** — a
+ * different failure was observed at 82 and is recorded below (MUSE-91), so do not read
+ * the sentence as „the middle-click is the only thing that flakes here".
  * So three things are true at once and all three matter:
  *
  *   - **It is not a resource timeout, and the twenty seconds were never the problem** —
@@ -177,6 +180,31 @@ export {
  * Measured at 84: **6 runs, 0 failures**, idle box, pool of 15. Read that `0` the way
  * MUSE-24's and MUSE-26's rows have to be read — it says the defect MUSE-70 fixed is
  * still fixed, not that there is headroom above 82.
+ *
+ * ## The failure in none of those rows (MUSE-91)
+ *
+ * **Observed once, not bisected, and left as an observation on purpose.** QA of MUSE-70
+ * ran eight consecutive full suites at **82**, load average 5 to 40, on a box shared with
+ * another agent. Zero middle-click failures — and run 1 failed `test/trialform.test.ts`
+ * with *"gave up waiting for the failure block after 40000ms"*: the stub endpoint reached
+ * 0 times by that submit, `[data-form-status]` still hidden, the button still saying
+ * „Pošalji prijavu", nothing on the console, and `aria-busy` unset. `aria-busy` is set by
+ * `TrialForm.astro` as the first thing the submit handler does, so **the handler never
+ * ran at all** — a plain left click on a live button produced nothing. The same file's
+ * `en` twin passed in 2,194 ms while the `hr` one spent 43,246.
+ *
+ * What is known: once in eight runs, at a total this table calls clean; the gesture
+ * produced no handler call; and `STATUS_BUDGET` was already raised from 15 s to 40 s by
+ * MUSE-54 **and was hit anyway**. What is **not** known: whether this is the phenomenon
+ * `settleNewTab` documents for middle-clicks — a gesture arriving at a live element and
+ * producing nothing — arriving on a left click instead. It has that shape and that is the
+ * whole of the evidence; nobody has instrumented this one, so calling the two the same
+ * mechanism would be inventing the mechanism, which is worse than an open observation.
+ *
+ * Two things follow and neither is a number. **The suite has an unexplained failure, so
+ * no claim anywhere may say the last one is gone.** And the answer when this is met again
+ * is not a bigger budget: a number raised because it was hit is a number that will be hit
+ * again — `STATUS_BUDGET` is the worked example, above.
  *
  * ## Why the worker count is not the divisor
  *
