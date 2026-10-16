@@ -39,6 +39,8 @@ import {
   headroom,
   type HeavyRecord,
   judge,
+  owningTestFileFrom,
+  UNATTRIBUTED,
 } from './helpers/concurrency';
 import {
   buildDirectoryNames,
@@ -1681,6 +1683,60 @@ describe('the run has a concurrency budget it cannot quietly exceed', () => {
     // `.astro` file under `test/` with the ticket that routed its page; an entry for a
     // file nobody runs any more is never contradicted by a run.
     expect(everyDeclaredFile.filter((file) => !existsSync(join(ROOT, file)))).toEqual([]);
+  });
+
+  /**
+   * **The census names the real path, directories included** (MUSE-96).
+   *
+   * `owningTestFile()` matched `([A-Za-z0-9._-]+\\.test\\.ts)` — a filename with no
+   * separator in it — and wrote `test/` in front of whatever it found. A heavyweight
+   * operation from `test/sub/ghost.test.ts` was therefore recorded against
+   * `test/ghost.test.ts`, which does not exist: the undeclared-file problem named a
+   * fiction, declaring the real path produced two contradictory problems at once, and the
+   * only declaration that made the run exit 0 was the fictitious one. The ratchet on the
+   * total still fired, so growth was never invisible — but attribution is the whole of
+   * what the per-file table is for (MUSE-68), and „the thing reporting is not the thing at
+   * fault" is the failure shape this board is worst at.
+   *
+   * Asserted as a rule against synthetic stacks, the way `judge` is, and for the same
+   * reason: the only alternative is planting a suite in a subdirectory and paying for a
+   * real build to attribute it, which is a heavyweight operation this run has no headroom
+   * for.
+   */
+  it('attributes an operation to the path it came from, subdirectory and all', () => {
+    const frame = (path: string): string =>
+      `Error\n    at recordHeavyOperation (/repo/scripts/heavy-census.mjs:75:5)\n` +
+      `    at Module.buildSite (${join(ROOT, 'test/helpers/build.ts')}:40:3)\n` +
+      `    at ${path}:17:3\n`;
+
+    // The escape, by name.
+    expect(owningTestFileFrom(frame(join(ROOT, 'test/sub/ghost.test.ts')))).toBe(
+      'test/sub/ghost.test.ts',
+    );
+    // Deeper, and a `file://` frame — vitest reports both spellings depending on the
+    // loader that produced the frame.
+    expect(owningTestFileFrom(frame(join(ROOT, 'test/a/b/deep.test.ts')))).toBe(
+      'test/a/b/deep.test.ts',
+    );
+    expect(
+      owningTestFileFrom(frame(pathToFileURL(join(ROOT, 'test/sub/ghost.test.ts')).href)),
+    ).toBe('test/sub/ghost.test.ts');
+    // And the case that always worked keeps working: every entry in `DECLARED` is spelled
+    // this way, so a regression here renames all 32 of them at once.
+    expect(owningTestFileFrom(frame(join(ROOT, 'test/nav.test.ts')))).toBe('test/nav.test.ts');
+  });
+
+  it('declines to attribute a frame from outside this tree', () => {
+    // The census is the budget's only evidence. A path that does not name a file in this
+    // repository is not evidence, and `UNATTRIBUTED` is already a reported problem — so
+    // the operation is still counted and still complained about, under a name that says
+    // the attribution failed rather than under a plausible-looking lie.
+    expect(owningTestFileFrom('    at /somewhere/else/test/other.test.ts:1:1\n')).toBe(
+      UNATTRIBUTED,
+    );
+    expect(owningTestFileFrom('    at Module.load (node:internal/modules/cjs/loader:1)')).toBe(
+      UNATTRIBUTED,
+    );
   });
 
   it('gives every declared file a reason, not just a number', () => {

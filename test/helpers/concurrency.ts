@@ -56,7 +56,13 @@ import {
 
 import { SCRATCH } from './scratch';
 
-export { CENSUS_ENV, HEAVY_KINDS, recordHeavyOperation } from '../../scripts/heavy-census.mjs';
+export {
+  CENSUS_ENV,
+  HEAVY_KINDS,
+  owningTestFileFrom,
+  recordHeavyOperation,
+  UNATTRIBUTED,
+} from '../../scripts/heavy-census.mjs';
 
 /**
  * **The recorded total, and a ratchet on it. Not a safety line — read this.**

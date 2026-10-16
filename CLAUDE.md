@@ -205,6 +205,15 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   `MUSE_PREVIEW_ROUTES=<name> npm run build` injects `/<name>-preview`. **Delete the entry
   with the ticket that routes the page.** The registry is empty, which is the healthy
   state. → `testing.md`
+- **A discovery scan must match the loader it shadows** (MUSE-96). Three did not, each one
+  level narrower than the thing that loads its subjects: the browser guard read `test/` one
+  directory deep while vitest loads `test/**/*.test.ts`, the route guards saw only `.astro`
+  while Astro routes eight extensions, and the census attributed a subdirectory suite to a
+  file that does not exist. `test/helpers/discovery.ts` is the one place a scan's subjects
+  come from: it **obtains** the real list where the tool gives one — Astro's own
+  `pageExtensions`, vitest's own resolved `include` — and where it must model one, says so
+  and **pins the model to the tool**, the way `prerenderStagingDir` is pinned.
+  → `testing.md`
 - **The formatting convention is stated in `prettier.config.mjs`, and `prettier --write`
   over the tree is still wrong** (MUSE-58). Run `npm run format -- <file>` on the one file
   you touched. **Then read `git diff`** — it reformats the whole file, and if it rewrapped
