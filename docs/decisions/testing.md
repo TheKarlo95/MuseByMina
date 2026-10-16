@@ -7,7 +7,11 @@ and rejected live here. Read the section that covers what your ticket touches.
 Nothing here is decoration. Each passage records a defect that recurred, or an approach
 that was tried and failed, and the cost of rediscovering it is the cost of the original
 bug. Do not shorten a passage to tidy it up — if something is genuinely stale, that is a
-ticket (MUSE-114 is the open instance).
+ticket: a statement one of these documents makes that the code does not support is filed
+and corrected, not trimmed in passing. **No ticket number is named here**, and
+`test/docs.test.ts` keeps it that way — a pointer naming whichever ticket happens to be
+filed is a claim about status, it stops being true the day that ticket closes, and naming
+a successor only moves the staleness to the next close (MUSE-114).
 
 - **A test that can only see `dist` cannot see a dev-only bug.** `test/fonts.test.ts` is
   the one suite that drives `astro dev`, through `astroDev()` in `test/helpers/scratch.ts`

@@ -160,3 +160,56 @@ describe('what the rules claim about the suite flaking (MUSE-91)', () => {
     expect(rule).toMatch(/exception/);
   });
 });
+
+/**
+ * **MUSE-114 — a pointer that names the ticket which is open is a claim about status, and
+ * status is the one thing a document cannot keep true.**
+ *
+ * All five documents ended their preamble with „that is a ticket (MUSE-114 is the open
+ * instance)". It was right the day it was written and wrong the day that ticket closed —
+ * the defect these documents exist to argue against, inside the sentence that argues it.
+ * Naming a successor moves the staleness to the next close rather than removing it, so the
+ * preambles name no ticket at all and say instead what is durably true: a statement the
+ * code does not support is filed and corrected rather than trimmed.
+ *
+ * Keyed on the **shape** rather than on the five lines that were fixed — a `MUSE-…` beside
+ * „open", „current" or „outstanding" *instance*, in either order, within one sentence. Not
+ * „live instance" or „the next instance": both are live prose in `content-model.md` and
+ * mean an occurrence of a defect, which is what these documents are made of.
+ *
+ * A ticket reference anywhere else in them is **provenance**, which is the opposite of a
+ * status claim: it says where a passage came from and stays true forever. So the second
+ * test is a floor — a guard that could be satisfied by deleting every reference would
+ * eventually be satisfied that way, which is MUSE-35's lesson about a ceiling with no
+ * floor, one document down.
+ */
+describe('a decision document names no ticket as the open instance (MUSE-114)', () => {
+  const DECISIONS = 'docs/decisions';
+  const files = readdirSync(join(ROOT, DECISIONS))
+    .filter((f) => f.endsWith('.md'))
+    .sort();
+
+  /**
+   * Whitespace is collapsed before matching, because these documents are hand-wrapped and
+   * the two halves of the claim can land on different lines; `[^.]` then keeps the window
+   * inside one sentence, so a reference in the next sentence is not read as part of this
+   * one.
+   */
+  const STATUS =
+    /MUSE-\d+[^.]{0,80}?(?:open|current|outstanding)\s+instance|(?:open|current|outstanding)\s+instance[^.]{0,80}?MUSE-\d+/i;
+
+  it.each(files)('%s names no ticket as the open instance of anything', (file) => {
+    const flat = readFileSync(join(ROOT, DECISIONS, file), 'utf8').replace(/\s+/g, ' ');
+    const claim = STATUS.exec(flat)?.[0];
+    expect(claim, `${file} names a ticket as the open instance of something`).toBe(
+      undefined,
+    );
+  });
+
+  it.each(files)('%s still cites the tickets its passages came from', (file) => {
+    // Measured 2026-10-16: 23, 32, 77, 77 and 83 references across the five. The floor is
+    // ten, which no document is near and a stripped one would fail.
+    const body = readFileSync(join(ROOT, DECISIONS, file), 'utf8');
+    expect(body.match(/MUSE-\d+/g)?.length ?? 0).toBeGreaterThan(10);
+  });
+});
