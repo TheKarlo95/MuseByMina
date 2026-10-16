@@ -561,12 +561,13 @@ ticket (MUSE-114 is the open instance).
   because „Ako i dalje ne ide, pošalji ponovno." is an instruction and has to stay caught.
 
   **Two things this ticket decided not to do, both raised by the QA that filed it.**
-  `/contact`'s second section still reads „Ako ti je obrazac prekomplicirano, piši nam…" /
+  `/contact`'s third section still read „Ako ti je obrazac prekomplicirano, piši nam…" /
   "If a form is one step too many, write to us…", which presents the form as the normal
   path that email is an alternative to. It is a claim about the *shape of the page* rather
-  than about the mechanism, no needle here can distinguish it from honest prose, and a
+  than about the mechanism, no needle here could distinguish it from honest prose, and a
   guard pinning that one sentence is the phrase-level guard this file keeps arguing
-  against — so it wants its own ticket with a class to assert, not a literal added here.
+  against — so it wanted its own ticket with a class to assert, not a literal added here.
+  **MUSE-117 is that ticket and it found one; see below.**
   And `/` and `/pricing` still render the form with no caveat beside it, so `/contact` is
   the only page where the visitor is told in advance. **That is accepted until MUSE-12**,
   and the reason is what changed on this branch: the failure message is now the same
@@ -574,6 +575,82 @@ ticket (MUSE-114 is the open instance).
   cannot be received and given the inbox in the same breath. A caveat above the form would
   be a second description of the same configuration on three more surfaces, and MUSE-12 —
   setting the endpoint — deletes the need for all of it.
+
+- **With no endpoint, a sentence may name the form only to say it cannot be sent**
+  (MUSE-117). `/contact`'s third section read „Ako ti je obrazac prekomplicirano, piši nam
+  ili nas pronađi na društvenim mrežama." / "If a form is one step too many, write to us or
+  find us on social media." — four lines below the hero MUSE-84 had made honest, and one
+  section below the form whose every failure message MUSE-110 had just gated. The page
+  therefore read: *the form cannot be received* — then, four lines later, *if the form is
+  too much trouble, write to us instead*. „Ako ti je X prekomplicirano" presupposes that X
+  works and offers email to whoever finds it inconvenient; with `PUBLIC_FORM_ENDPOINT`
+  unset email is the **only** path and convenience is not the question.
+
+  **The work was finding the property, not writing the sentence**, which is why MUSE-110
+  raised this and left it: the sentence instructs no submission, promises nothing and names
+  no mechanism, so `SUBMIT` is silent on it and should be. Three candidates were considered
+  and two were rejected on their merits.
+
+  *Relative prominence* — "the form is offered first, email second" — is a fact about order
+  and framing across a page rather than about a sentence. An assertion over element order
+  fires on legitimate layouts, and the defect survives any order.
+
+  *A conditional-inconvenience frame* — the ticket's own favourite — is a real class and
+  needs **two open vocabularies**, both of which leak. The condition marker goes first: the
+  frame survives losing „ako" („Obrazac ti je prekomplicirano? Piši nam."). The
+  inconvenience predicate is worse, because Croatian cannot compress it into a stem — the
+  natural prefix is „pre-" (prekomplicirano, prezahtjevno, predugo) and „preko obrasca"
+  means *via the form*, the one phrasing that has to stay caught by `SUBMIT`.
+
+  **So the needle is the presupposition rather than the frame that carries it**, and it has
+  no vocabulary of inconvenience in it at all: on a page that renders the form, in the build
+  where the form cannot send, *every sentence that names the form says the form cannot be
+  sent or received*. `UNSENDABLE` in `test/trialform.test.ts`. It catches the live sentence,
+  the frame with „ako" removed, both rewordings MUSE-84 measured passing a phrase-level
+  guard („Prijavu možeš poslati i kroz obrazac ispod." / "You can also submit the form
+  below."), and „Obrazac je najlakši način, ali možeš nam i pisati." — none of which share a
+  word with each other.
+
+  **Measured before it was adopted**, over the whole rendered body of every page in `dist`,
+  split into sentences at block boundaries: nineteen sentences named the form, ten of them
+  on the six pages that render it, and exactly two of those ten — the Croatian sentence and
+  its English twin — did not say the form cannot be sent. **Zero false positives in scope.**
+  The other nine are all on `/privacy`, which does not render the form and is outside the
+  scope *by construction* rather than by exemption: the scope is `formPages`, derived from
+  `ROUTES` and `[data-trial-form]`. That is also right on the merits — `/privacy` is a
+  statutory document (MUSE-72), Art. 13 copy has to describe in the present tense what the
+  form collects and who receives it, and it may not be bent into a disclaimer to satisfy a
+  test. It already says the true thing in its own register: „Obrazac trenutačno nije
+  povezan ni s jednom vanjskom uslugom."
+
+  **The polarity is inverted and that is the thing to be careful about.** `SUBMIT` and
+  `RETRY` are prohibitions: a loose needle over-fires, somebody reads the red build, and
+  the cost is an argument. `UNSENDABLE` is a **requirement** — a sentence passes by
+  containing it — so a loose needle is a hole nobody sees. It is therefore **not** built
+  from `NEGATION_HR`/`NEGATION_EN`, which are deliberately broad for the opposite job:
+  „Obrazac **ne** moraš poslati ako ti je prekomplicirano." is a negation two words from a
+  send verb and is the defect, and "You do **not** need to send the form." is the English
+  of it. What the honest sentence has is a **modal of possibility** — „ne može poslati",
+  „ne možemo primiti", "cannot be sent", "cannot receive" — and „moraš" / "need to" is not
+  one. Bounded forward and tight for the same reason: a false negative is a red test on
+  honest copy that whoever reworded it will read, and a false positive is a sentence nobody
+  will.
+
+  **The replacement is one sentence, true in both states, and deliberately not a third
+  branch.** „Piši nam ili nas pronađi na društvenim mrežama." / "Write to us or find us on
+  social media." — the live sentence with the conditional frame removed and nothing else
+  changed, so the register is the register it already had. With an endpoint configured the
+  form *is* the normal path and the original sentence would be correct again, so a gated
+  third string was available and was not taken: a sentence that names no mechanism is true
+  in both configurations, and a second conditional is a second thing to keep agreeing with
+  the form's own configuration. The section's job is unchanged — these are the direct
+  channels, and the list under it is what they are.
+
+  **What is still unwatched, so the next author knows.** The eyebrow above it, „Ili nam se
+  javi direktno" / "Or reach us directly", frames email as the alternative to the section
+  above without claiming anything about the form; it names no mechanism, so `UNSENDABLE`
+  does not read it, and it was left alone. And a sentence can still rate the form as
+  primary without naming it („to je najlakši način"), which no needle here catches.
 
 - **„Dvoja vrata, ne šest." is `Home.astro`'s own line, not the design brief's** (MUSE-80).
   Four comments — two in `src/components/Home.astro`, two in `test/home.test.ts` — cited

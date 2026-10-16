@@ -74,6 +74,32 @@ const settings = await getSiteSettings();
  * publishes three rates and no trial rate, and `test/pricing.test.ts` already refuses
  * "no commitment" as a payment-terms claim one layer down. Retiring an unsupported
  * commercial term needs no decision from the studio; adding one does (MUSE-71).
+ *
+ * **`elseLede` names no mechanism, and that is what makes it ungated** (MUSE-117).
+ *
+ * It used to open with a **conditional-inconvenience frame** — *if the form is too much
+ * trouble for you, write to us instead* — four lines under a hero that had just said the
+ * form cannot be received. A frame of that shape presupposes the mechanism works and
+ * offers email to whoever finds it inconvenient; with no endpoint email is the only path
+ * and convenience is not the question. The frame is gone and the rest of the sentence is
+ * untouched, so the section still does its job — these are the direct channels, and the
+ * list below it is what they are.
+ *
+ * Note what this comment does *not* do — spell the retired sentence, even to explain it.
+ * `test/offerclaims.test.ts` reads everything under `src/` as plain text, so a comment
+ * here is the first false positive any future needle for this frame would hit; that is
+ * MUSE-71's rule and there is no exemption list. `docs/decisions/pages.md` holds the
+ * verbatim before and after, and `test/trialform.test.ts` holds it as a tooth — neither
+ * tree is scanned.
+ *
+ * It is **not** a third branch beside `lede`. A sentence that mentions no mechanism is
+ * true in both configurations, which the `page` description has to be for a reason it
+ * cannot escape (MUSE-84) and which this sentence can be for free — and a second
+ * conditional is a second thing to keep agreeing with the form's own configuration.
+ * `test/trialform.test.ts`'s `UNSENDABLE` is the guard: on a build with no endpoint,
+ * every sentence of every form page that names the form has to say the form cannot be
+ * sent. This one does not name it at all, so it passes in both states rather than by
+ * branching.
  */
 const t = {
   hr: {
@@ -86,7 +112,7 @@ const t = {
       : 'Bez partnera, bez iskustva. Obrazac trenutačno ne možemo primiti, pa nam prijavu pošalji e-mailom na:',
     formHeading: 'Prijavi se',
     elseHeading: 'Ili nam se javi direktno',
-    elseLede: 'Ako ti je obrazac prekomplicirano, piši nam ili nas pronađi na društvenim mrežama.',
+    elseLede: 'Piši nam ili nas pronađi na društvenim mrežama.',
     where: 'Gdje smo',
     openMaps: 'Otvori u Google Maps',
     schedule: 'Pogledaj raspored',
@@ -99,7 +125,7 @@ const t = {
       : 'No partner, no experience. We cannot receive the form at the moment, so send your request by email to:',
     formHeading: 'Sign up',
     elseHeading: 'Or reach us directly',
-    elseLede: 'If a form is one step too many, write to us or find us on social media.',
+    elseLede: 'Write to us or find us on social media.',
     where: 'Where we are',
     openMaps: 'Open in Google Maps',
     schedule: 'See the schedule',

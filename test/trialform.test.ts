@@ -1156,6 +1156,29 @@ const HR_STEP = step(NEGATION_HR);
 const EN_STEP = step(NEGATION_EN);
 
 /**
+ * **„obrazac" loses its `z` in every oblique case, and the needle covered one case form
+ * out of seven** (MUSE-109). The object was `obraz[\p{L}]*`, which cannot match
+ * „obrasca", „obrascu", „obrascem", „obrasci" or „obrasče" — and the oblique cases are
+ * how the instruction is naturally phrased: „preko obrasca", „putem obrasca", „u
+ * obrascu". Every tooth in `INSTRUCTIONS_HR` used to be nominative or accusative, so the
+ * needle set was only ever exercised against the one form it happened to cover, while
+ * `src/lib/forms.ts` already writes „u obrascu" twice. `obra[sz]` closes it, and
+ * `OBRAZAC_HR` pins the whole declension against the pattern so a future narrowing is a
+ * red test rather than a sentence nobody wrote down.
+ *
+ * The plural genitive is „obrazaca" and keeps the `z`, so the character class is a class
+ * rather than a second stem.
+ *
+ * **At module scope because two needles ask it** (MUSE-117). „Which word means *the
+ * form*" is one fact, and `SUBMIT` and `UNSENDABLE` both need it; two spellings of it
+ * would be two things to keep agreeing, and only one of them would get the next
+ * declension fix. `OBRAZAC_HR`'s coverage test reads this constant, so it covers both.
+ */
+const FORM_HR = String.raw`obra[sz][\p{L}]*`;
+/** The English half. No declension, so it is a word rather than a stem. */
+const FORM_EN = String.raw`\bforms?\b`;
+
+/**
  * **The surfaces both class needles are asked of, read off the build in one place
  * (MUSE-109).**
  *
@@ -1314,21 +1337,8 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
    * needle read the `<noscript>` line as an instruction — measured, which is why it is
    * written this way and why that sentence is in `INNOCENT_FORM_PROSE`.
    */
-  /**
-   * **„obrazac" loses its `z` in every oblique case, and the needle covered one case form
-   * out of seven** (MUSE-109). The object was `obraz[\p{L}]*`, which cannot match
-   * „obrasca", „obrascu", „obrascem", „obrasci" or „obrasče" — and the oblique cases are
-   * how the instruction is naturally phrased: „preko obrasca", „putem obrasca", „u
-   * obrascu". Every tooth below used to be nominative or accusative, so the needle set was
-   * only ever exercised against the one form it happened to cover, while `src/lib/forms.ts`
-   * already writes „u obrascu" twice. `obra[sz]` closes it, and `OBRAZAC_HR` pins the whole
-   * declension against the pattern so a future narrowing is a red test rather than a
-   * sentence nobody wrote down.
-   *
-   * The plural genitive is „obrazaca" and keeps the `z`, so the character class is a class
-   * rather than a second stem.
-   */
-  const OBJECT_HR = String.raw`obra[sz][\p{L}]*`;
+  /** `FORM_HR`, at module scope since MUSE-117 — see the comment on it. */
+  const OBJECT_HR = FORM_HR;
 
   /**
    * **Every form of the word, so the teeth cannot all be one inflection.** All seven
@@ -1378,7 +1388,7 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
    * needle depends on is untouched.
    */
   const DETERMINER_EN = String.raw`(?:the|a|an|this|that|these|those|our|your|their|its|my)`;
-  const OBJECT_EN = String.raw`(?:${DETERMINER_EN}[^\p{L}\d]+)?\bforms?\b`;
+  const OBJECT_EN = String.raw`(?:${DETERMINER_EN}[^\p{L}\d]+)?${FORM_EN}`;
 
   /**
    * **The verbs, as a list rather than inside the pattern** (MUSE-109), because the other
@@ -1441,7 +1451,7 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
         'iu',
       ),
       objectFirst: new RegExp(
-        String.raw`\bforms?\b${EN_STEP}{0,2}?[^\p{L}\d]+${VERB_EN}`,
+        String.raw`${FORM_EN}${EN_STEP}{0,2}?[^\p{L}\d]+${VERB_EN}`,
         'iu',
       ),
     },
@@ -2001,14 +2011,23 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
    *    `ROUTES` — the surface below, and MUSE-110's reach brought to this needle.
    *
    * **It is not every page, and it is not the whole of any page, and the reason is a
-   * measurement rather than a preference.** Asked of whole documents the needle fires on
-   * `/contact`'s second section — „Ako ti je obrazac prekomplicirano, piši nam…", caught
-   * in Croatian by `piši` and *not* in English, where "write to us" is not a submit verb.
-   * That sentence is MUSE-110's deliberate exclusion: it is a claim about the shape of the
-   * page rather than about the mechanism, it was given its own ticket, and
-   * `docs/decisions/pages.md` refuses a pinned literal for it by name. So a page-wide
-   * scope today would be either a red build on a sentence this ticket may not rewrite or
-   * exactly the phrase-level exemption that file keeps arguing against.
+   * measurement rather than a preference.** Asked of whole documents the needle used to
+   * fire on `/contact`'s third section — „Ako ti je obrazac prekomplicirano, piši nam…",
+   * caught in Croatian by `piši` and *not* in English, where "write to us" is not a submit
+   * verb. That was a match for the wrong reason: the sentence instructed no submission,
+   * and „piši" governed „nam" rather than „obrazac". MUSE-117 has since rewritten the
+   * sentence and given its actual class a needle of its own — `UNSENDABLE`, below — so the
+   * accidental match is gone rather than relied on.
+   *
+   * **Which leaves a page-wide scope measurably clean today, and it is still not taken.**
+   * Measured post-fix over the whole rendered body of all twenty-three pages in `dist`:
+   * zero hits, `/privacy`'s four form sentences included. The reason not to widen is the
+   * instrument rather than the result — `instructsSubmission` is handed one flat string
+   * and its separators are `[^\p{L}\d]+`, which cross sentences and paragraphs, so a
+   * page-wide `SUBMIT` pairs a verb four words away in *any* block with „obrazac" in the
+   * next one. It is clean because today's prose happens not to do that, and nothing holds
+   * it there. `UNSENDABLE` splits at block boundaries before it reads anything, which is
+   * why it is the needle that took the wider scope.
    *
    * **And it is a needle about rendered surfaces, not about source.** `test/
    * offerclaims.test.ts` can scan `src/` because „free trial" appears nowhere in code;
@@ -2018,12 +2037,17 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
    * and „Ostavi prazno i prikazuje se obrazac za kontakt" in `offering.ts`. A source scan
    * here would be eleven exemptions and one real finding.
    *
-   * **Unwatched, so the next author knows:** `/contact`'s second section (above); `/` and
-   * `/pricing`'s prose around the form, which carries no caveat at all and is accepted
-   * until MUSE-12; `/privacy`'s notice beyond the four strings pinned in
-   * `INNOCENT_FORM_PROSE`; and every other page's prose, none of which names the form
-   * today. A page that starts instructing a submission tomorrow is caught only if it does
-   * it in `/contact`'s hero, in a `page` document or in a form message.
+   * **Unwatched by *this* needle, so the next author knows:** `/` and `/pricing`'s prose
+   * around the form, which carries no caveat at all and is accepted until MUSE-12;
+   * `/privacy`'s notice beyond the strings pinned in `INNOCENT_FORM_PROSE`; and every
+   * other page's prose, none of which names the form today. A page that starts
+   * instructing a submission tomorrow is caught by `SUBMIT` only if it does it in
+   * `/contact`'s hero, in a `page` document or in a form message.
+   *
+   * `UNSENDABLE` (MUSE-117) covers prose the other way round and over a wider scope — it
+   * reads every sentence of every form page's rendered body — so a submit instruction in
+   * `/contact`'s third section is now caught there even though it is outside this needle.
+   * What neither watches is prose on a page that does **not** render the form.
    */
   it('no form message on any page instructs a submission this build cannot make', async () => {
     for (const { locale, route } of formPages) {
@@ -2202,6 +2226,290 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
         `${route} no longer says ${JSON.stringify(text)} in the build with ` +
           `${build === 'configured' ? 'an endpoint' : 'no endpoint'} configured`,
       ).toContain(text);
+    }
+  });
+});
+/**
+ * **MUSE-117 — with no endpoint, a sentence may name the form only to say it cannot be
+ * sent.**
+ *
+ * The defect: `/contact`'s third section read „Ako ti je obrazac prekomplicirano, piši nam
+ * ili nas pronađi na društvenim mrežama." / "If a form is one step too many, write to us
+ * or find us on social media." — four lines below a hero that had just said, correctly,
+ * that the form cannot be received and offered the inbox instead (MUSE-84), and one
+ * section below a form whose every failure message now says the same thing (MUSE-110). So
+ * the page read: *the form cannot be received* — then, four lines later, *if the form is
+ * too much trouble, write to us instead.* The second sentence presents the form as the
+ * normal path and email as the fallback for somebody who finds it inconvenient. With
+ * `PUBLIC_FORM_ENDPOINT` unset email is the **only** path, and convenience is not the
+ * question being asked.
+ *
+ * **MUSE-110 raised it and deliberately left it, and the reason it left it is this
+ * ticket's whole substance: there was no class to assert.** „Ako ti je obrazac
+ * prekomplicirano" instructs no submission, promises nothing and names no mechanism, so
+ * `SUBMIT` above is silent on it and should be. Pinning that one sentence as a literal is
+ * the phrase-level guard MUSE-84 measured the worth of and `docs/decisions/pages.md`
+ * refuses by name — and MUSE-109 exists precisely because a literal pin let a rewording
+ * through. A fix with no assertable property behind it is a copy edit the next content
+ * change quietly undoes.
+ *
+ * ## The three candidate properties, and why this is the one
+ *
+ * **Relative prominence** — "the form is offered first and email second" — is a fact about
+ * order and framing across a whole page rather than about any sentence. An assertion over
+ * element order fires on legitimate layouts, and the defect survives any order: the
+ * sentence reads the same way above the form as below it.
+ *
+ * **A conditional-inconvenience frame** — „Ako ti je X prekomplicirano" presupposes that X
+ * works — is a real class and was the near miss. It needs two open vocabularies, and both
+ * leak. The condition marker goes first: the frame survives losing „ako" („Obrazac ti je
+ * prekomplicirano? Piši nam."). The inconvenience predicate is worse, because Croatian
+ * cannot compress it into a stem — the natural prefix is „pre-" (prekomplicirano,
+ * prezahtjevno, predugo) and „preko obrasca" means *via the form*, which is the one
+ * phrasing that must stay caught by `SUBMIT`. Two open lists is the shape of guard the
+ * next rewording walks past.
+ *
+ * **So the needle is the presupposition rather than the frame that carries it.** Every one
+ * of those sentences has the same thing wrong with it, and it is not a word: it talks
+ * about the form as something a visitor might choose to use, on a build where using it
+ * does nothing. Turned around, that is a property with no vocabulary of inconvenience in
+ * it at all:
+ *
+ * > On a page that renders the form, in the build where the form cannot send, **every
+ * > sentence that names the form says that the form cannot be sent or received.**
+ *
+ * It catches the live sentence; the frame with „ako" removed; both rewordings MUSE-84
+ * measured slipping past a phrase-level guard („Prijavu možeš poslati i kroz obrazac
+ * ispod." / "You can also submit the form below."); and „Obrazac je najlakši način, ali
+ * možeš nam i pisati.", which rates the form as primary with no condition anywhere in it.
+ * None of those share a word with the sentence this ticket was filed against.
+ *
+ * ## Measured before it was adopted, which is the ticket's own instruction
+ *
+ * Over the whole rendered body of every page in `dist`, split into sentences at block
+ * boundaries: **nineteen sentences named the form; ten of them on the six pages that
+ * render it, and exactly two of those ten did not say the form cannot be sent** — the
+ * Croatian sentence this ticket is about and its English twin. Zero false positives in
+ * scope. Re-measured after the rewrite: seventeen, eight of them in scope, all eight
+ * disclaiming.
+ *
+ * The other nine are all on `/privacy`, which does not render the form and is therefore
+ * **out of scope by construction rather than by exemption**: the scope below is
+ * `formPages`, derived from `ROUTES` and `[data-trial-form]`, the same list MUSE-109 and
+ * MUSE-110 read. That boundary is also the right one on the merits. `/privacy` is a
+ * statutory document (MUSE-72): Art. 13 copy has to describe what the form collects and
+ * who receives it, in the present tense, and it may not be bent into a disclaimer to
+ * satisfy a test. It already says the true thing in its own register — „Obrazac trenutačno
+ * nije povezan ni s jednom vanjskom uslugom".
+ *
+ * ## The polarity, which is the one thing to be careful about here
+ *
+ * `SUBMIT` and `RETRY` are **prohibitions**: a loose needle over-fires, a reviewer sees the
+ * red build, and the cost is an argument. `UNSENDABLE` is a **requirement** — a sentence
+ * passes by containing it — so a loose needle is a hole and nobody sees it. The polarity is
+ * inverted and so is which kind of error is safe.
+ *
+ * That is why it is **not** built from `NEGATION_HR` / `NEGATION_EN`, which are
+ * deliberately broad for the opposite job. „Obrazac **ne** moraš poslati ako ti je
+ * prekomplicirano." is a negation two words from a send verb and is the defect, and "You do
+ * **not** need to send the form." is the English of it. What the honest sentence actually
+ * has is a **modal of possibility** — „ne može poslati", „ne možemo primiti", "cannot be
+ * sent", "cannot receive" — and „moraš" / "need to" is not one. Both needles are bounded
+ * forward and tight for the same reason: a false negative is a red test on honest copy,
+ * which whoever reworded it will read, and a false positive is a sentence nobody will.
+ */
+describe('MUSE-117: no sentence offers email as a way around a form that works', () => {
+  /**
+   * **Sentences, split at block boundaries as well as at punctuation — and this is
+   * load-bearing rather than tidy. Do not replace it with `flat()`.**
+   *
+   * A sentence does not span a block element, and the eyebrow, the address heading and
+   * the lede of `/contact`'s third section carry no terminal punctuation at all. Measured
+   * on this branch: read as one flat string the three concatenate into „Ili nam se javi
+   * direktno Ilica 209, Zagreb Ako ti je obrazac prekomplicirano…" — **one "sentence",
+   * which can borrow a disclaimer from the element above it.** A heading reading „Obrazac
+   * trenutačno ne možemo primiti" over any framing at all would then satisfy `UNSENDABLE`
+   * on the heading's words, and because this needle is a *requirement* (see the header)
+   * that is a silent pass rather than a visible over-fire. A refactor that flattens the
+   * document first makes the guard green and empty.
+   *
+   * So every tag ends a sentence **except** a closed list of inline ones — a new block
+   * tag therefore defaults to separating, which is the safe direction for a requirement.
+   * `<a>` has to be inline: the hero's disclaimer and the inbox link are one sentence.
+   */
+  const INLINE =
+    'a|abbr|b|bdi|bdo|cite|code|data|dfn|em|i|kbd|mark|q|s|samp|small|span|strong|sub|sup|time|u|var|wbr';
+  const BREAK = '\u0000';
+
+  /**
+   * `<script>` and `<style>` go first and whole. The output ships no `.js` file
+   * (`content-model.md`), so every script is inline in the document and its text would
+   * otherwise read as prose.
+   */
+  function sentences(html: string): string[] {
+    const body = /<body\b[^>]*>([\s\S]*?)<\/body>/.exec(html)?.[1] ?? html;
+    return decodeEntities(
+      body
+        .replace(/<script\b[\s\S]*?<\/script>/gi, BREAK)
+        .replace(/<style\b[\s\S]*?<\/style>/gi, BREAK)
+        .replace(new RegExp(String.raw`</?(?:${INLINE})\b[^>]*>`, 'gi'), ' ')
+        .replace(/<[^>]*>/g, BREAK),
+    )
+      .split(BREAK)
+      .flatMap((chunk) => chunk.split(/(?<=[.!?:])\s+/))
+      .map((sentence) => sentence.replace(/\s+/g, ' ').trim())
+      .filter((sentence) => sentence !== '');
+  }
+
+  /** „obrazac" in any case, or "form" — the module-scope atoms `SUBMIT` reads. */
+  const NAMES_FORM = {
+    hr: new RegExp(FORM_HR, 'iu'),
+    en: new RegExp(FORM_EN, 'iu'),
+  } as const;
+
+  /**
+   * **A modal of possibility, negated, and then a verb of sending or receiving.**
+   *
+   * Croatian: „ne može poslati", „ne možemo primiti", „nije moguće poslati". The modal is
+   * the half that carries the meaning, so it is required and „moraš" is not in it; the
+   * negation reuses `NEGATION_HR` because a *broader* negation cannot widen a needle whose
+   * precision lives in the modal. „moć" is spelled out beside „može" — the infinitive and
+   * the future („nećemo moći primiti") keep the ć, so `mo[žz]` cannot reach them.
+   *
+   * English: "cannot" fuses the negation and the modal, which is why `NEGATION_EN` is not
+   * read here at all — "without" and "never" are in it, and "Without JavaScript this form
+   * cannot be sent" would then satisfy the requirement on the word „without" rather than
+   * on what the sentence says.
+   *
+   * Two words of slack, forward only: "cannot **be** sent" spends one, „ne možemo primiti"
+   * spends none, and three would reach across a clause.
+   */
+  const MODAL_HR = String.raw`(?:mo[žz]e[\p{L}]*|moć[\p{L}]*|moguć[\p{L}]*)`;
+  const SEND_HR = String.raw`(?:posla[\p{L}]*|pošalj[\p{L}]*|prim[\p{L}]*|šalj[\p{L}]*|slanj[\p{L}]*)`;
+  const UNABLE_EN = String.raw`(?:cannot|can\s?not|can[’']t|could\s?not|couldn[’']t|unable\s+to)`;
+  const SEND_EN = String.raw`(?:sent|send|receive|received|receiving|deliver|delivered|transmitted|go\s+through)`;
+  const slack = String.raw`(?:[^\p{L}\d]+[\p{L}\d]+){0,2}?[^\p{L}\d]+`;
+
+  const UNSENDABLE = {
+    hr: new RegExp(String.raw`(?:${NEGATION_HR})[^\p{L}\d]+${MODAL_HR}${slack}${SEND_HR}`, 'iu'),
+    en: new RegExp(String.raw`\b${UNABLE_EN}${slack}\b${SEND_EN}\b`, 'iu'),
+  } as const;
+
+  /** Every sentence of `html` that names the form without saying it cannot be sent. */
+  function offersAWayAround(html: string, locale: 'hr' | 'en'): string[] {
+    return sentences(html).filter(
+      (sentence) => NAMES_FORM[locale].test(sentence) && !UNSENDABLE[locale].test(sentence),
+    );
+  }
+
+  /**
+   * **The teeth: what the needle has to refuse.** The first of each pair is what the site
+   * published. Then the frame with its condition marker removed, the two rewordings
+   * MUSE-84 measured passing a phrase-level guard, a negation that is not a modal of
+   * possibility, and the framing with no condition in it at all — six shapes that share
+   * no vocabulary, which is the point of asserting the presupposition instead.
+   */
+  const FRAMING = {
+    hr: [
+      // Live on `/contact` until this ticket.
+      'Ako ti je obrazac prekomplicirano, piši nam ili nas pronađi na društvenim mrežama.',
+      // The same frame with „ako" gone, which is why a condition marker is not the needle.
+      'Obrazac ti je prekomplicirano? Piši nam.',
+      // A negation inside the frame — `NEGATION_HR` alone would read this as honest.
+      'Ako ne želiš ispunjavati obrazac, javi nam se e-mailom.',
+      // MUSE-84's measured rewording: a modal of possibility with nothing negated.
+      'Prijavu možeš poslati i kroz obrazac ispod.',
+      // A negation two words from a send verb, and „moraš" is not a modal of possibility.
+      'Obrazac ne moraš poslati ako ti je prekomplicirano.',
+      // No condition anywhere, and the oblique case MUSE-109 widened the atom for.
+      'Umjesto obrasca možeš nam pisati e-mailom.',
+      // The claim stated outright rather than framed.
+      'Obrazac je najlakši način, ali možeš nam i pisati.',
+    ],
+    en: [
+      'If a form is one step too many, write to us or find us on social media.',
+      'Is the form too much? Write to us instead.',
+      'If you would rather not fill in the form, write to us.',
+      'You can also submit the form below.',
+      'You do not need to send the form.',
+      'Instead of the form, write to us by email.',
+      'The form is the easiest way, but you can write to us too.',
+    ],
+  } as const;
+
+  /**
+   * **And what it has to accept** — read off the copy table rather than quoted, so a
+   * reworded disclaimer is tested as it is written and not as this file remembers it.
+   * `undeliverable.fail` is the hero's sentence word for word (MUSE-110 chose it that
+   * way); `noscript` is the other place the page says the same thing.
+   */
+  const HONEST = (locale: 'hr' | 'en') => [
+    FORM_COPY[locale].undeliverable.fail,
+    FORM_COPY[locale].noscript,
+  ];
+
+  for (const locale of ['hr', 'en'] as const) {
+    it(`${locale}: every framing of the form as the working path is refused`, () => {
+      for (const text of FRAMING[locale]) {
+        expect(
+          NAMES_FORM[locale].test(text),
+          `the tooth ${JSON.stringify(text)} does not name the form, so it is a tooth ` +
+            'about nothing — the needle only reads sentences that name it',
+        ).toBe(true);
+        expect(
+          offersAWayAround(text, locale),
+          `${JSON.stringify(text)} presents the form as a path the visitor may take, on ` +
+            'a build where taking it does nothing, and the needle reads it as honest. ' +
+            'Tighten `UNSENDABLE` — a requirement that a sentence can satisfy without ' +
+            'saying the form cannot be sent is a hole rather than a guard (MUSE-117)',
+        ).not.toEqual([]);
+      }
+    });
+
+    it(`${locale}: the sentences that disclaim the form are accepted`, () => {
+      for (const text of HONEST(locale)) {
+        expect(
+          UNSENDABLE[locale].test(text),
+          `${JSON.stringify(text)} says the form cannot be sent and the needle does not ` +
+            'read it that way. This is the safe direction of the two — a red test on ' +
+            'honest copy — but it still has to be fixed here rather than on the page',
+        ).toBe(true);
+      }
+    });
+  }
+
+  /**
+   * **The guard, over every page that renders the form.**
+   *
+   * Only the build with no endpoint. With one configured the form *is* the normal path,
+   * „Ako ti je obrazac prekomplicirano, piši nam." is true, and a needle applied there
+   * would forbid the honest copy — which is the same reason `SUBMIT` is asked of the hero
+   * in one state only.
+   *
+   * The floor is what stops a changed `sentences` making this a loop over nothing: every
+   * form page says the form cannot be sent at least once, in the `<noscript>` block if
+   * nowhere else.
+   */
+  it('no form page offers email as a way around the form', async () => {
+    for (const { locale, route } of formPages) {
+      const html = await pageMarkup(unconfigured, route);
+      const naming = sentences(html).filter((sentence) => NAMES_FORM[locale].test(sentence));
+
+      expect(
+        naming.length,
+        `${route} has no sentence naming the form at all — the <noscript> block says it ` +
+          'cannot be sent on every page that renders it, so this guard is reading the ' +
+          'wrong markup',
+      ).toBeGreaterThan(0);
+
+      expect(
+        offersAWayAround(html, locale),
+        `${route} names the form in a sentence that does not say it cannot be sent, on a ` +
+          'build where no submission is transmitted. That presents the form as the ' +
+          'working path and email as the alternative for somebody who finds it ' +
+          'inconvenient; with no endpoint email is the only path (MUSE-117). Either the ' +
+          'sentence says the form cannot be received, or it does not mention the form',
+      ).toEqual([]);
     }
   });
 });
