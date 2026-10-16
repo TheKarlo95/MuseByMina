@@ -359,7 +359,9 @@ retired and what must not come back.
   `fetch`. **The form's own failure copy is gated on it too** (MUSE-110): with no endpoint
   no message instructs a retry and one line offers the inbox, including the offline one,
   which that branch does reach. `formMessages` in `src/lib/forms.ts` is the only place it
-  is decided. → `pages.md`
+  is decided. **With no endpoint, a sentence may name the form only to say it cannot be
+  sent** (MUSE-117). `UNSENDABLE` is a **requirement**, not a prohibition, so a loose
+  needle is a hole rather than noise. → `pages.md`
 - **`/privacy/` is a statutory document, so it stays in code** (MUSE-72), and the one fact
   that varies is read off the form's own configuration. Art. 13(1)(e) takes *categories* of
   recipient, so the live paragraph names no provider. **Retention and whether student
