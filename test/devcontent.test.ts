@@ -46,7 +46,7 @@ import { seedDocs, type SeedDoc } from './helpers/seed';
  * below come in pairs, one for each environment, and the pairing is the point:
  *
  *   - a dev server re-reads (an edit under a running server appears) **and** a build
- *     memoises (one query per reader, the promise shared by identity);
+ *     memoises the two readers it memoises, the promise shared by identity;
  *   - a dev server says which regime it is in **and** so does a build, in its log, where
  *     the question is actually asked;
  *   - a dev server names the offline command when the API cannot be reached **and** a
@@ -70,6 +70,15 @@ import { seedDocs, type SeedDoc } from './helpers/seed';
  * a reader called directly from a test memoises exactly as it does in a build. That is
  * the regime the existing suite already assumes: `test/projections.test.ts` relies on
  * `getSiteSettings` answering a second fixture from the first one's dataset and says so.
+ *
+ * ## What MUSE-94 changed in here
+ *
+ * One assertion in section 2 read `expect(buildLog).toMatch(/queried once and memoised/)`
+ * — it matched **the announce line's sentence**, and the sentence was false: two of the
+ * fifteen readers memoise and the other thirteen re-query on every call, in a build as
+ * much as under a dev server. A test satisfied by a sentence is the MUSE-50 shape in a suite
+ * rather than in a component, and it is the reason nothing noticed for the life of
+ * MUSE-47. It is now `QUERIES_PER_BUILD`, counted off a real build's own census line.
  */
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -293,7 +302,40 @@ describe('a content edit shows up in a running dev server', () => {
 
 /* ------------------------------------------ 2. a build still memoises, and says live */
 
-describe('a build still issues one query per reader', () => {
+/**
+ * **How many queries one `astro build` issues. Measured, not implied (MUSE-94).**
+ *
+ * Counted on 2026-10-16 against `astro build` at this commit, with `runQuery`
+ * instrumented, from two builds that agreed to the query — one reading
+ * `content/seed.ndjson` and one reading the live dataset:
+ *
+ *     scheduleSlot 6   event 6   post 5   studioStory 2   prosePage 2
+ *     pricingTier 2    instructor 2   galleryImage 2   siteSettings 1   page 1   = 29
+ *
+ * **The two ones are the whole of the memoisation**, and that is why this number is here.
+ * `siteSettings` is read by the footer on all twenty-three pages and answers once;
+ * `page` is read by every page's `<head>` and answers once. Every other reader is
+ * deliberately *not* memoised, each for a reason written beside it in
+ * `src/lib/sanity/index.ts` — three of them take a `now` that goes into the query, and a
+ * cache that ignored it would answer one instant's question with another's.
+ *
+ * A figure with its measurement beside it, in the shape `scripts/budget.mjs` uses: adding
+ * a page or a reader moves it, and moving it is then a deliberate edit with a new
+ * measurement rather than a drift nothing reports. Re-measure with the census line the
+ * build prints — do not adjust this to whatever the suite happens to say.
+ */
+const QUERIES_PER_BUILD = 29;
+
+/** The query census a build prints as it exits, as a number. */
+function queryCensus(log: string): number {
+  const census = /\[content\] (\d+) quer(?:y|ies) in all\./.exec(log);
+  if (census === null) {
+    throw new Error(`The build printed no query census. Its log was:\n${log}`);
+  }
+  return Number(census[1]);
+}
+
+describe('a build still memoises the two readers it memoises, and says live', () => {
   it('runs in the build regime in-process, which is what the rest of the suite assumes', () => {
     // Stated rather than assumed: every assertion in this block, and every memoisation
     // `test/projections.test.ts` relies on, is only the build regime because this is
@@ -338,10 +380,28 @@ describe('a build still issues one query per reader', () => {
     }
   });
 
-  it('says in its log that it memoised, whichever source it read', () => {
+  it('counts its queries, rather than being taken at its word about them', () => {
+    /**
+     * **The assertion MUSE-94 is about.** What stood here matched the announce line's
+     * own sentence — `/queried once and memoised/` — so it asserted that a *claim* was
+     * printed and nothing at all about what the build did. Thirteen of the fifteen
+     * readers re-query per call, so the claim was false and the test was green;
+     * replacing the gate with the spelling `dev.ts` forbids left it green too.
+     *
+     * A count is the behaviour. `QUERIES_PER_BUILD` above carries the measurement.
+     */
+    expect(queryCensus(devEnvBuild.log)).toBe(QUERIES_PER_BUILD);
+  });
+
+  it('says in its log which readers memoise and which re-query, whichever source it read', () => {
     expect(buildLog).toContain('[content] build');
-    expect(buildLog).toMatch(/queried once and memoised/);
-    expect(devEnvBuild.log).toMatch(/queried once and memoised/);
+    for (const log of [buildLog, devEnvBuild.log]) {
+      // Named, because „each reader" was the word that made MUSE-47's cause unreadable
+      // and then survived its fix.
+      expect(log).toMatch(/getSiteSettings/);
+      expect(log).toMatch(/every other reader re-queries on every call/);
+      expect(log).not.toMatch(/each reader is queried once and memoised/);
+    }
   });
 
   it('cannot be talked into the dev regime by the environment', () => {

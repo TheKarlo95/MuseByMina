@@ -248,10 +248,13 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   (MUSE-59, MUSE-60). The branch prepares the seed *and* the route, says in the PR body it
   must not be merged yet, and somebody runs the import between review and merge.
   **An agent does not run that command.** → `content-model.md`
-- **A dev server re-reads content per request; a build reads once per reader** (MUSE-47).
-  Both caches are per-build. The gate is the literal `import.meta.hot` (`src/lib/sanity/
-  dev.ts`) — write it exactly that way, and never use `NODE_ENV` or `process.argv`, which
-  whoever starts the build can set. → `content-model.md`
+- **A dev server re-reads content per request; a build memoises exactly two readers**
+  (MUSE-47, MUSE-94). `getSiteSettings` and the `page` reader — the other thirteen
+  re-query per call, **twenty-nine queries to a build**, which `test/devcontent.test.ts`
+  counts off the build's own census line rather than taking the log's word for it. Both
+  caches are per-build. The gate is the literal `import.meta.hot` (`src/lib/sanity/
+  dev.ts`) — write it that way, though all three spellings behave alike; never `NODE_ENV`
+  or `process.argv`, which whoever starts the build can set. → `content-model.md`
 - **Offline dev is `MUSE_CONTENT_FIXTURE=content/seed.ndjson npm run dev`**, and MUSE-47
   deliberately built no mechanism for it: no fallback, no `dev:offline` script, no second
   gated boolean. → `content-model.md`

@@ -78,7 +78,31 @@ import {
  *
  * ---
  *
- * **Each reader is memoised for the life of the build — and *only* of a build (MUSE-47).**
+ * **Two readers are memoised for the life of the build — and *only* of a build**
+ * (MUSE-47, MUSE-94).
+ *
+ * **„Each reader" is what this said, and it was false** — which matters more than a wrong
+ * word usually does, because the build log said it too and the only test of the
+ * memoisation matched that sentence. `getSiteSettings` and `pagesByRoute` go through
+ * `perBuild`. The other thirteen readers re-query on **every call**, in a build exactly as
+ * under a dev server, and each one says so beside itself with the reason. Measured, with
+ * `runQuery` instrumented, from a seed build and a live build that agreed to the query:
+ * **twenty-nine queries to a build**, of which the memoised readers are two —
+ *
+ *     scheduleSlot 6   event 6   post 5   studioStory 2   prosePage 2
+ *     pricingTier 2    instructor 2   galleryImage 2   siteSettings 1   page 1
+ *
+ * **MUSE-94 left that as it is, and the reason is not thrift.** `perBuild` keys on
+ * nothing, so it cannot memoise a reader that takes an argument: `getEvents`,
+ * `getPastEvents` and `getPosts` each take a `now` that goes *into* the query, and a
+ * cache ignoring it would answer one instant's question with another's — which is the
+ * opposite of why `now` is a parameter. For the rest, the comments below are the
+ * decision: `test/projections.test.ts` swaps the fixture per test, and a memoised reader
+ * answers the second test from the first test's dataset. So seventeen of the twenty-nine
+ * are repeats and they are affordable — a live build spends about 1.6 s inside `runQuery`
+ * in total, against an `npm run build` that `astro check` dominates. What was wrong here
+ * was the sentence, and the build log now names the two readers instead of claiming all
+ * fifteen, with `census` in `./client.ts` printing the count a test reads.
  *
  * `Footer.astro` reads the singleton, and it renders on nine pages; `TrialForm.astro`
  * reads it too, on two of them. Without memoisation that is a dozen identical HTTP

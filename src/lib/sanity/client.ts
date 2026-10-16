@@ -102,7 +102,7 @@ const CLIENT_CONFIG = {
   //
   // With the uncached host each read answers with the dataset as of the moment it is
   // asked, and reads only ever move forward, so a build cannot publish a revision older
-  // than the dataset held when it started. (It can publish one *newer* — thirteen
+  // than the dataset held when it started. (It can publish one *newer* — twenty-nine
   // queries over a few seconds, and Mina could publish between the first and the last.
   // That is a different thing and not worth machinery: no page goes stale, and the next
   // scheduled build converges.)
@@ -112,10 +112,24 @@ const CLIENT_CONFIG = {
   // rather than taking turns with it: median **2.70 s cached against 3.13 s uncached**,
   // the two spreads not overlapping. That is **+0.43 s** on an `npm run build` of
   // fifteen-odd seconds, where it is inside the run-to-run noise, because `astro check`
-  // dominates the wall clock. (The per-query figure, for whoever next changes the query
-  // count: all thirteen sequentially, median of seven rounds, 294 ms against 648 ms —
-  // ~27 ms a query.) Four scheduled builds a day times thirteen queries is ~1,600
-  // requests a month. The read volume the CDN exists for is not this site's.
+  // dominates the wall clock. **Those were whole builds**, so that number already
+  // contains every query a build issues and is the one figure here that needed no
+  // correcting.
+  //
+  // **The counts were wrong until MUSE-94, and „thirteen" was the wrong number.**
+  // Thirteen was how many *distinct* queries `./queries.ts` held when this comment was
+  // written — it holds fifteen now — and a build does not issue each of them once:
+  // thirteen of the fifteen readers in `./index.ts`, one per query in it, re-query on
+  // every call, so a build issues **twenty-nine**. Measured with `runQuery`
+  // instrumented, from a seed build and a live build that agreed to the query, and
+  // pinned with its measurement as
+  // `QUERIES_PER_BUILD` in `test/devcontent.test.ts`. So four scheduled builds a day is
+  // **~3,400 requests a month**, not the ~1,600 this said. (The per-query figure is a
+  // *delta* and is unaffected: the thirteen distinct queries run sequentially, median of
+  // seven rounds, 294 ms cached against 648 ms uncached — ~27 ms a query. The same
+  // instrumentation has a live build spending 1,633 ms inside `runQuery` in total.)
+  // The read volume the CDN exists for is still not this site's, which is the conclusion
+  // and the one part of this argument the wrong count did not reach.
   //
   // `cacheMode: 'noStale'` is the other candidate and is declined. It is a *request*
   // option rather than a config one, so its correctness would rest on every call site
@@ -229,6 +243,14 @@ let announced = false;
  * `astro build` and a real `astro dev` rather than trusting a unit test about an
  * `import.meta` constant.
  *
+ * **The caching clause names the two readers, because „each reader" was false** (MUSE-94).
+ * It said „each reader is queried once and memoised for this process" for the life of
+ * MUSE-47, and only `getSiteSettings` and the `page` reader go through `perBuild`; the
+ * other thirteen re-query on every call, twenty-nine queries to a build. The sentence was also
+ * the *only* thing a test asserted about the memoisation, so it was documentation
+ * confirming itself. `census` below is the replacement: a count, printed from the process
+ * that issued the queries, which `test/devcontent.test.ts` now reads instead.
+ *
  * **The endpoint clause is MUSE-81's half.** A stale deploy is green, so the log is the
  * only place „was this build's content current?" can be answered after the fact — and it
  * could not be, because the line named the dataset and never the host it was read from.
@@ -240,7 +262,8 @@ function announce(fixture: string | undefined): void {
   announced = true;
   const dev = inDevServer();
   const caching = !dev
-    ? `[content] build — each reader is queried once and memoised for this process.`
+    ? `[content] build — getSiteSettings and the page metadata are queried once and ` +
+      `memoised for this process; every other reader re-queries on every call.`
     : fixture === undefined
       ? `[content] dev server — every reader is re-read on each request, so a Studio ` +
         `edit shows up on reload.`
@@ -317,6 +340,39 @@ function offlineHint(): string {
  * `minimum: 0` accepted in silence. Checked here, both paths fail with one error class and
  * one message, before a source is even chosen. `./params.ts` has the long note.
  */
+let queries = 0;
+let censusInstalled = false;
+
+/**
+ * **How many queries this build issued, said once, at the end (MUSE-94).**
+ *
+ * The announce line above cannot carry this: it prints on the *first* query, which is the
+ * moment the total is least knowable. So the count is printed as the process exits, from
+ * the module that did the counting — and that placement is the whole of why this is a
+ * `process.on('exit')` and not an Astro integration. `astro.config.mjs` is loaded in its
+ * own module graph, so an integration hook would be holding a second copy of `queries`
+ * that is permanently zero.
+ *
+ * **It exists so the memoisation claim can be checked instead of read.** Before this, the
+ * only assertion about „one query per reader" matched the sentence that made the claim,
+ * and the claim was wrong by seventeen queries — see the note on `announce`. A number in
+ * the build log is checkable from outside the process, which is the same reason the
+ * regime line is there at all, and it is the figure `test/devcontent.test.ts` pins with
+ * its measurement.
+ *
+ * Build regime only. Under a dev server „this build" is not a thing, the process lives
+ * for days, and the useful statement about that regime — that it re-reads per request —
+ * is already on the announce line.
+ */
+function census(): void {
+  queries += 1;
+  if (censusInstalled || inDevServer()) return;
+  censusInstalled = true;
+  process.on('exit', () => {
+    console.log(`[content] ${queries} ${queries === 1 ? 'query' : 'queries'} in all.`);
+  });
+}
+
 export async function runQuery<T>(
   query: string,
   params: Record<string, unknown> = {},
@@ -324,6 +380,9 @@ export async function runQuery<T>(
   const fixture = fixturePath();
   announce(fixture);
   requireQueryParameters(query, params);
+  // After the parameter check, so the census counts queries that were really issued
+  // rather than calls that threw in front of either source (MUSE-51, MUSE-94).
+  census();
   if (fixture !== undefined) return runFixtureQuery<T>(query, params, fixture);
 
   try {
