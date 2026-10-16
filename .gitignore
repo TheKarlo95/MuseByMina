@@ -28,4 +28,25 @@ pnpm-debug.log*
 .idea/
 
 # agent worktrees (transient, created by the ticket pipeline)
+#
+# Both conventions in use, and the second one is the point (MUSE-116). `.claude/worktrees/`
+# is what the pipeline creates; `.worktrees/` is where per-ticket and QA worktrees are added
+# by hand. `.worktrees/` was missing here, and several gates take their exclusions from this
+# file — `test/seo.test.ts`'s source scan and `scripts/check-format.mjs` — so `npm test` run
+# from the main checkout failed whenever a `.worktrees/<name>/` existed: seven files inside
+# one of them named the deploy host at paths that are not `test/seo.test.ts`'s three
+# exemptions. Invisible from inside a worktree, where the scan root is the worktree itself,
+# and impossible in CI, which checks out fresh.
+#
+# **Why excluding this from an otherwise exhaustive scan is safe, which is the question the
+# next person will have.** `test/seo.test.ts`'s host scan takes its exclusions from here
+# precisely so there is no scan list to keep current, and an entry here is therefore also an
+# exemption from it — the shape MUSE-45 warns about ("a skip list is MUSE-19's allow-list
+# wearing the other hat"). It is still right, because a worktree is a **copy of this
+# repository at another commit**, not a new place for a host to hide: whatever it contains
+# was already scanned at its own commit, on its own branch, by this same gate. That argument
+# holds for a worktree and nothing else, so this stays two named directories rather than a
+# pattern. `test/seo.test.ts` asserts both, and asserts that a path which merely *looks* like
+# a worktree is still read.
 .claude/worktrees/
+.worktrees/

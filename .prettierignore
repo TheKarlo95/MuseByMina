@@ -15,8 +15,13 @@ dist/
 .sanity/
 node_modules/
 
-# Another checkout of this repository, agent-owned and transient.
+# Another checkout of this repository, agent-owned and transient. Both conventions in use:
+# `.claude/worktrees/` is what the pipeline creates, `.worktrees/` is added by hand, and the
+# second was missing from here as well as from `.gitignore` (MUSE-116). Formatting another
+# commit's copy of a file is damage, not churn — it is a change to a tree this branch does
+# not own and whose git status is somebody else's.
 .claude/worktrees/
+.worktrees/
 
 # Generated artefacts. `sanity/schema.json` and `sanity/schema.stamp.json` are fingerprinted
 # by `scripts/check-sanity.mjs`; reformatting either fails `npm run build` for no reason.
