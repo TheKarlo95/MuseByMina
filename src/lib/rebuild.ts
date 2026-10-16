@@ -33,6 +33,25 @@
  *   - **:20 past, not :00.** GitHub's own documentation says the `schedule` event is
  *     delayed during its highest-load windows and that those include the start of every
  *     hour, and recommends scheduling away from it.
+ *
+ * **Three of this arrangement's parts are configuration, and configuration has to be
+ * asserted mounted** (MUSE-93). Everything above is reachable from Node and is tested as
+ * behaviour: the cron string, the ceiling derived from the gaps, the pure function the
+ * badge renders. The parts that are not — `ci.yml`'s `rebuildloop` job, `deploy.yml`'s
+ * `alert` job, and the one line of `sanity.config.ts` that hands the badge to the Studio —
+ * could each be deleted outright with the whole suite green, because testing a pure
+ * function says nothing about whether anything calls it. They are one defect in three
+ * places, so `MOUNTED` in `test/rebuild.test.ts` is one table applied three times, each
+ * entry carrying the sentence that says what stops happening when the mechanism goes: who
+ * finds out an unattended run failed, and what sees GitHub silently disabling the schedule
+ * after sixty days of repository inactivity.
+ *
+ * And the property underneath all of it: **no GitHub credential exists anywhere in this
+ * repository**, which is what made the webhook route unacceptable rather than merely
+ * slower to build. That one is now stated where it can be enforced — the suite forbids the
+ * dispatch trigger a webhook would be called through, holds every `GH_TOKEN` to the run's
+ * own ephemeral token, and pins the set of secrets any workflow may name to the single one
+ * that cannot act on GitHub at all.
  */
 
 /** Minutes past the hour, in UTC. See the note above on why this is not zero. */
