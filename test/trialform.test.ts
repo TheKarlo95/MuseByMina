@@ -3,7 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { launchChecks, openCheckPage } from '../scripts/browser-checks.mjs';
 import { FORM_COPY, type FormCopy } from '../src/lib/forms';
-import type { Locale } from '../src/lib/i18n';
+import { DEFAULT_LOCALE, type Locale } from '../src/lib/i18n';
+import { ROUTES } from '../src/lib/pages';
 import { settleInteraction } from './helpers/browser-settle';
 import { startPreview, type Preview, type StubReply } from './helpers/preview';
 
@@ -276,6 +277,23 @@ const FAILURES: Failure[] = [
   {
     label: 'the visitor is offline',
     build: 'stub',
+    offline: true,
+    explains: 'offline',
+  },
+  /**
+   * **The one combination nothing drove, and the reason MUSE-110 had to be checked
+   * rather than assumed.**
+   *
+   * The two conditions are independent: `send()` throws for the missing endpoint
+   * *inside* the `try`, so the `catch` still reads `navigator.onLine` and still picks
+   * the offline line. So the offline copy is reachable on the deploy that has no
+   * endpoint, and a gate on the generic body alone would have left half the defect
+   * live. Driven here rather than reasoned about — the suite had a cell for each
+   * condition and none for both.
+   */
+  {
+    label: 'the visitor is offline and no endpoint is configured',
+    build: 'none',
     offline: true,
     explains: 'offline',
   },
@@ -826,6 +844,24 @@ describe('MUSE-72: the privacy notice describes the form that was actually built
  * statement. Gating it would mean a second description source in code, which is the one
  * thing `getPage(route)` exists to prevent.
  */
+/**
+ * **The two primitives both class needles in this file are built out of (MUSE-84, MUSE-110).**
+ *
+ * Module scope rather than inside one `describe`, because the *boundary* they draw is
+ * one rule and not two: a claim and a statement that the thing cannot be done are the
+ * same verb and the same object with „ne" / "not" between them, so a needle for either
+ * claim has to refuse a negation in the gap and in front of the verb. Two copies of
+ * that rule would be two chances to widen only one of them.
+ *
+ * `step` is one word of slack that is not a negation.
+ */
+const NEGATION_HR = String.raw`ne|ni|nije|nemoj|nemojte|nećemo`;
+const NEGATION_EN = String.raw`not|cannot|never|without`;
+const step = (negations: string) =>
+  String.raw`(?:[^\p{L}\d]+(?!(?:${negations})(?![\p{L}\d]))[\p{L}\d’']+)`;
+const HR_STEP = step(NEGATION_HR);
+const EN_STEP = step(NEGATION_EN);
+
 describe('MUSE-84: the contact copy describes the form that was actually built', () => {
   /**
    * Which of the two heroes was rendered.
@@ -883,15 +919,8 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
    * needle read the `<noscript>` line as an instruction — measured, which is why it is
    * written this way and why that sentence is in `INNOCENT_FORM_PROSE`.
    */
-  const NEGATION_HR = String.raw`ne|ni|nije|nemoj|nemojte|nećemo`;
-  const NEGATION_EN = String.raw`not|cannot|never|without`;
-  /** One word of slack that is not a negation. */
-  const step = (negations: string) =>
-    String.raw`(?:[^\p{L}\d]+(?!(?:${negations})(?![\p{L}\d]))[\p{L}\d’']+)`;
   const VERB_HR = String.raw`(?<!(?:${NEGATION_HR})[\s-])(?:ispun|popun|pošalj|poslat|predaj|predat|prijav)[\p{L}]*`;
   const VERB_EN = String.raw`(?<!(?:${NEGATION_EN})[\s-])\b(?:fill|send|submit|complete|use|return|post)\b`;
-  const HR_STEP = step(NEGATION_HR);
-  const EN_STEP = step(NEGATION_EN);
 
   const SUBMIT = {
     hr: {
@@ -1179,6 +1208,460 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
       // The raw document rather than its text: two of these are a `<meta>` content
       // attribute, which stripping tags would throw away.
       const page = await markup(unconfigured, route);
+      expect(page, `${route} no longer says ${JSON.stringify(text)}`).toContain(text);
+    }
+  });
+});
+
+/**
+ * **MUSE-110 — the form's own failure copy describes the form that was actually built.**
+ *
+ * The defect: `failBody` told the visitor „Tvoji odgovori su ostali u obrascu, pa možeš
+ * pokušati ponovno." / "Your answers are still in the form, so you can try again." and was
+ * **not** gated on `FORM_HAS_PROCESSOR`, which gated only `/contact`'s hero (MUSE-84) and
+ * `/privacy`'s recipient paragraphs (MUSE-72). With `PUBLIC_FORM_ENDPOINT` unset — the
+ * live deploy, MUSE-12 — `TrialForm.astro` throws before any `fetch`, so that was the body
+ * **every** visitor saw: an instruction to retry that cannot succeed on any attempt, on the
+ * page whose hero had just said, correctly, that the form cannot be received. Measured in
+ * `data-msg-fail-body` on `/`, `/contact` and `/pricing` in both locales — six pages,
+ * byte-identical in both builds.
+ *
+ * It is MUSE-72's and MUSE-84's defect one surface further in, and it survived them both
+ * because their guards read the hero, the `<meta name="description">`, `llms.txt` and the
+ * notice, and never the form's own messages.
+ *
+ * **Both directions, against the two builds this file already performs.** With an endpoint
+ * the retry wording is true and must come back; with none the honest body is the inbox and
+ * no retry. Nothing here costs a heavyweight operation — `configured` and `unconfigured`
+ * are the previews MUSE-15 needed and MUSE-72 and MUSE-84 reuse (`test/helpers/
+ * concurrency.ts`, zero headroom).
+ *
+ * **The claim is a class, not the two sentences this ticket edited.** MUSE-84 measured what
+ * a phrase-level guard is worth here: a guard whose every needle is the string being
+ * deleted asserts "the old words are gone", so the next author reinstates the claim in
+ * different words and the suite stays green. So the question asked below is *does any
+ * message the browser can show tell the visitor to send or try again*, as a verb-and-adverb
+ * adjacency in both word orders, and it is asked of **every** `data-msg-*` attribute on
+ * every page that renders the form — derived from `ROUTES`, so a seventh page joins the
+ * guard by existing.
+ */
+describe('MUSE-110: the failure copy describes the form that was actually built', () => {
+  /**
+   * **„Pošalji ponovno" — a send-or-try verb and „again", in either order.**
+   *
+   * The adverb is the half that cannot be left out of a retry instruction in either
+   * language, and the verb list is what separates „pošalji ponovno" from the two innocent
+   * uses of „ponovno" this site publishes. Written as alternatives with a right-hand
+   * boundary rather than as a stem: `ponov[\p{L}]*` would also match „ponoviti", which is
+   * `/aboutus`'s „ima vremena ponoviti isti korak" — *repeat*, not *retry*.
+   *
+   * **„ponovi" / "repeat" is deliberately not a verb here**, for the same sentence: that
+   * page legitimately says there is time to repeat a step „i pitati ponovno ako nije" /
+   * "and to ask again if it has not", which puts an innocent „ponovno" four words from an
+   * innocent „ponoviti". Both halves of that are pinned below and asserted still live.
+   *
+   * **Negation is the boundary, and `MODAL_HR` is the half MUSE-84 did not need.** An
+   * instruction and a statement that the thing cannot be done are the same verb and the
+   * same adverb with „ne" between them, and in Croatian the negation attaches to the modal
+   * rather than to the verb — „obrazac se **ne može** poslati ponovno" puts „ne" two words
+   * in front of „poslati", where MUSE-84's single-word lookbehind cannot see it. Measured:
+   * without `MODAL_HR` that sentence reads as an instruction. The modal list is closed and
+   * short on purpose — „ne ide" is **not** in it, because „Ako i dalje ne ide, pošalji
+   * ponovno." is an instruction and has to stay caught.
+   *
+   * English needs no modal rule: the participle „sent" is not the infinitive „send", so
+   * "cannot be sent again" never matched. It gets the one thing Croatian has no safe
+   * single word for instead — `oneWord`, for "resend" and "retry", which instruct a retry
+   * with no adverb at all. „Ponovi" would be the Croatian equivalent and is the word
+   * `/aboutus` uses for *repeat*.
+   */
+  const AGAIN_HR = String.raw`(?:ponovno|ponovo|opet|još\s+jednom)(?![\p{L}\d])`;
+  const AGAIN_EN = String.raw`(?:again|once\s+more|one\s+more\s+time)(?![\p{L}\d])`;
+  const MODAL_HR = String.raw`(?<!(?:${NEGATION_HR})[\s-](?:mož|smij|uspij|uspje)[\p{L}]*[\s-](?:se[\s-])?)`;
+  const RETRY_VERB_HR = String.raw`(?<!(?:${NEGATION_HR})[\s-])${MODAL_HR}(?:pokuša|proba|pošalj|poslat|posla|predaj|predat|ispun|popun|prijav|klikn|stisn)[\p{L}]*`;
+  const RETRY_VERB_EN = String.raw`(?<!(?:${NEGATION_EN})[\s-])\b(?:try|send|submit|fill|complete|press|click|tap)\b`;
+
+  const RETRY = {
+    hr: {
+      verbFirst: new RegExp(
+        String.raw`${RETRY_VERB_HR}${HR_STEP}{0,3}?[^\p{L}\d]+${AGAIN_HR}`,
+        'iu',
+      ),
+      againFirst: new RegExp(
+        String.raw`${AGAIN_HR}${HR_STEP}{0,2}?[^\p{L}\d]+${RETRY_VERB_HR}`,
+        'iu',
+      ),
+    },
+    en: {
+      verbFirst: new RegExp(
+        String.raw`${RETRY_VERB_EN}${EN_STEP}{0,3}?[^\p{L}\d]+${AGAIN_EN}`,
+        'iu',
+      ),
+      againFirst: new RegExp(
+        String.raw`${AGAIN_EN}${EN_STEP}{0,2}?[^\p{L}\d]+${RETRY_VERB_EN}`,
+        'iu',
+      ),
+      oneWord: new RegExp(
+        String.raw`(?<!(?:${NEGATION_EN})[\s-])\b(?:resend|retry|re-?submit|re-?send)\b`,
+        'iu',
+      ),
+    },
+  } as const;
+
+  /** Every needle that fires on `text`, named, so a failure says which shape it was. */
+  function instructsRetry(text: string, locale: Locale): string[] {
+    return Object.entries(RETRY[locale])
+      .filter(([, pattern]) => pattern.test(text))
+      .map(([shape, pattern]) => `${shape}: ${JSON.stringify(pattern.exec(text)?.[0])}`);
+  }
+
+  /**
+   * **The teeth.** The first three of each list are what the site published; the rest are
+   * rewordings that say the same thing, including the word order Croatian makes free and
+   * the two English words that need no adverb. A needle nobody has run against the
+   * sentences it is for is the shape of defence this repository keeps re-filing.
+   *
+   * The last HR entry is the negation boundary from the other side: „ne ide" is a negation
+   * and the sentence is still an instruction.
+   */
+  const RETRIES = {
+    hr: [
+      FORM_COPY.hr.failBody,
+      FORM_COPY.hr.failOffline,
+      FORM_COPY.hr.invalid,
+      'Pokušaj ponovno.',
+      'Probaj još jednom.',
+      'Ponovno pošalji prijavu.',
+      'Možeš poslati prijavu ponovno.',
+      'Pošalji opet kad budeš mogla.',
+      'Klikni ponovno na Pošalji.',
+      'Ako i dalje ne ide, pošalji ponovno.',
+    ],
+    en: [
+      FORM_COPY.en.failBody,
+      FORM_COPY.en.failOffline,
+      FORM_COPY.en.invalid,
+      'Try again.',
+      'Please resend the form.',
+      'Submit it once more.',
+      'Again, press send.',
+      'You can retry.',
+      'Try the form again later.',
+    ],
+  } as const;
+
+  /**
+   * **Prose that legitimately says „ponovno" / "again", and must not match** —
+   * `INNOCENT_FORM_PROSE`'s pattern, and asserted *live* for its reason: a boundary tested
+   * only against strings in a test file drifts away from the page it protects.
+   *
+   * `/aboutus`'s second paragraph is the measured case, in both locales. Then the copy this
+   * ticket shipped and the `<noscript>` line beside it, read off the table rather than
+   * quoted — both are the honest branch, and the needle has to leave them alone.
+   */
+  const INNOCENT_RETRY_PROSE = [
+    {
+      locale: 'hr',
+      route: '/aboutus',
+      text: 'Na satu ima vremena ponoviti isti korak dok ne sjedne, i pitati ponovno ako nije.',
+    },
+    {
+      locale: 'en',
+      route: '/en/aboutus',
+      text: 'In class there is time to repeat a step until it settles, and to ask again if it has not.',
+    },
+    { locale: 'hr', route: '/contact', text: FORM_COPY.hr.undeliverable.fail },
+    { locale: 'en', route: '/en/contact', text: FORM_COPY.en.undeliverable.fail },
+    { locale: 'hr', route: '/contact', text: FORM_COPY.hr.undeliverable.invalid },
+    { locale: 'en', route: '/en/contact', text: FORM_COPY.en.undeliverable.invalid },
+    { locale: 'hr', route: '/contact', text: FORM_COPY.hr.noscript },
+    { locale: 'en', route: '/en/contact', text: FORM_COPY.en.noscript },
+  ] as const;
+
+  /**
+   * The negation boundary from the inside, and the only entries here that are not live.
+   *
+   * They are what an honest *statement* about the same mechanism looks like, and the
+   * reason `MODAL_HR` exists. Nothing on the site says them today; if something does
+   * tomorrow, the needle must already have been right about them.
+   */
+  const INNOCENT_NEGATIONS = {
+    hr: [
+      'Ovaj se obrazac ne može poslati ponovno.',
+      'Ne možeš poslati ponovno.',
+      'Ne smije se poslati ponovno.',
+    ],
+    en: ['This form cannot be sent again.', 'Do not send it again.'],
+  } as const;
+
+  /** `/schedule` → `/en/schedule`; `/` → `/en`. The spelling `preview.url` takes. */
+  const localeRoute = (route: string, locale: Locale): string =>
+    locale === DEFAULT_LOCALE ? route : route === '/' ? '/en' : `/${locale}${route}`;
+
+  interface Message {
+    /** The attribute's suffix: `fail-body` for `data-msg-fail-body`. */
+    name: string;
+    value: string;
+  }
+
+  /** Markup stripped, entities decoded, so a phrase split by a tag still reads. */
+  const decode = (text: string): string =>
+    text
+      .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)))
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, '&');
+
+  /**
+   * **Every message the browser can show, read off the page.**
+   *
+   * The copy reaches the script as `data-msg-*` and is invisible until something writes it
+   * into the alert, so the markup is the only place the whole set is observable at once —
+   * and reading the attributes rather than a list of names means a message added next year
+   * is inside this guard without anybody adding it.
+   */
+  const messagesIn = (html: string): Message[] =>
+    [...html.matchAll(/data-msg-([a-z-]+)="([^"]*)"/g)].map((match) => ({
+      name: match[1]!,
+      value: decode(match[2]!),
+    }));
+
+  const valueOf = (messages: Message[], name: string): string => {
+    const found = messages.filter((message) => message.name === name);
+    expect(found.length, `the form renders no data-msg-${name}`).toBeGreaterThan(0);
+    return found[0]!.value;
+  };
+
+  const STATES = [
+    { label: 'an endpoint configured', processor: true, preview: () => configured },
+    { label: 'no endpoint configured', processor: false, preview: () => unconfigured },
+  ] as const;
+
+  async function markupOf(preview: Preview, route: string): Promise<string> {
+    const response = await fetch(preview.url(route));
+    expect(response.status, `${route} did not build`).toBe(200);
+    return await response.text();
+  }
+
+  /**
+   * **Which pages render the form — derived, both builds, with a floor.**
+   *
+   * Walked off `ROUTES` rather than listed, so the guard covers `/`, `/contact` and
+   * `/pricing` today because they carry the form and not because this file names them, and
+   * a fourth embedding joins on its own. The floor is what stops a renamed `data-trial-form`
+   * turning every assertion below into a loop over nothing.
+   */
+  const formPages: { locale: Locale; route: string }[] = [];
+
+  beforeAll(async () => {
+    for (const locale of ['hr', 'en'] as const) {
+      for (const { route } of ROUTES) {
+        const spelling = localeRoute(route, locale);
+        if ((await markupOf(unconfigured, spelling)).includes('data-trial-form')) {
+          formPages.push({ locale, route: spelling });
+        }
+      }
+    }
+  }, 60_000);
+
+  it('finds the pages that render the form', () => {
+    expect(
+      formPages.length,
+      'no page under ROUTES renders [data-trial-form] — has the form or the attribute ' +
+        'been renamed? Every assertion in this block loops over this list',
+    ).toBeGreaterThanOrEqual(6);
+  });
+
+  for (const state of STATES) {
+    it(`${state.label}: no message on any page says more than this build can do`, async () => {
+      for (const { locale, route } of formPages) {
+        const messages = messagesIn(await markupOf(state.preview(), route));
+        expect(
+          new Set(messages.map((message) => message.name)).size,
+          `${route} renders ${messages.length} data-msg-* attributes, which is fewer than ` +
+            'the form has messages — this guard is reading the wrong markup',
+        ).toBeGreaterThanOrEqual(6);
+
+        const instructing = messages
+          .filter((message) => instructsRetry(message.value, locale).length > 0)
+          .map((message) => `data-msg-${message.name}: ${JSON.stringify(message.value)}`);
+
+        if (state.processor) {
+          // An endpoint is configured, so a retry can reach somebody and the advice is
+          // true again. Asserted as a class rather than as the two strings, so restoring
+          // it in different words is still restoring it.
+          expect(
+            instructing,
+            `${route} tells the visitor nothing about trying again, although this build ` +
+              'has an endpoint and a retry can succeed',
+          ).not.toEqual([]);
+        } else {
+          // The shipping state, and the one the defect was live in.
+          expect(
+            instructing,
+            `${route} tells the visitor to send or try again on a build with no endpoint, ` +
+              'where no attempt can succeed — the MUSE-110 defect, exactly. With no ' +
+              'endpoint the only honest answer is the inbox',
+          ).toEqual([]);
+        }
+      }
+    });
+
+    it(`${state.label}: the failure body is the one the configuration allows`, async () => {
+      for (const { locale, route } of formPages) {
+        const messages = messagesIn(await markupOf(state.preview(), route));
+        const copy = FORM_COPY[locale];
+        const body = valueOf(messages, 'fail-body');
+        const offline = valueOf(messages, 'fail-offline');
+        const invalid = valueOf(messages, 'invalid');
+
+        if (state.processor) {
+          expect(body, `${route}`).toBe(copy.failBody);
+          expect(offline, `${route}`).toBe(copy.failOffline);
+          expect(invalid, `${route}`).toBe(copy.invalid);
+          // The split MUSE-15 made: one cause the visitor can act on, everything else in
+          // one generic line. It only exists while something can be transmitted.
+          expect(
+            offline,
+            'the two failure lines are the same string while an endpoint is configured, ' +
+              'so being offline is no longer explained as the one thing to act on',
+          ).not.toBe(body);
+        } else {
+          expect(body, `${route}`).toBe(copy.undeliverable.fail);
+          expect(invalid, `${route}`).toBe(copy.undeliverable.invalid);
+          /**
+           * **With no endpoint the cause makes no difference, so there is one body.**
+           *
+           * Not a third state: the same gate, and in the off position the split MUSE-15
+           * made has nothing to be about. Nothing is transmitted whether the visitor's
+           * connection is up or down, so „check your connection and send again" is as
+           * untrue as the generic retry — and the no-endpoint branch does reach it, which
+           * is what `FAILURES`' last entry drives.
+           */
+          expect(
+            offline,
+            'the offline line is a different string with no endpoint configured, so one ' +
+              'of the two is describing a submission this build cannot make',
+          ).toBe(body);
+        }
+      }
+    });
+  }
+
+  /**
+   * **AC4 — the hero, the form and the `<noscript>` ask describe one mechanism.**
+   *
+   * The fourth surface is `/privacy`, which MUSE-72 holds to the same constant two
+   * describes above. What this adds is that the three surfaces on `/contact` itself point
+   * at the *same* inbox and that each sentence ends where the address begins, which is
+   * `FormCopy['noscript']`'s convention and the whole of what "offers the inbox" means.
+   */
+  for (const { locale, route } of [
+    { locale: 'hr' as const, route: '/contact' },
+    { locale: 'en' as const, route: '/en/contact' },
+  ]) {
+    it(`${locale}: with no endpoint, every surface on /contact offers the one inbox`, async () => {
+      const html = await markupOf(unconfigured, route);
+      const addresses = new Set(
+        [...html.matchAll(/mailto:([^"'?]+)/g)].map((match) => decode(match[1]!)),
+      );
+      expect(addresses.size, `/contact offers ${addresses.size} different addresses`).toBe(1);
+
+      const hero = /<section[^>]*class="hero[^"]*"[^>]*>([\s\S]*?)<\/section>/.exec(html)?.[1];
+      const noscript = /<noscript>([\s\S]*?)<\/noscript>/.exec(html)?.[1];
+      const failMail = /<p[^>]*data-fail-mail[^>]*>([\s\S]*?)<\/p>/.exec(html)?.[1];
+      for (const [surface, region] of [
+        ['the hero', hero],
+        ['the <noscript> block', noscript],
+        ['the form’s failure block', failMail],
+      ] as const) {
+        expect(region, `${route} has no ${surface}`).toBeDefined();
+        expect(region!, `${surface} does not offer the inbox`).toContain('mailto:');
+      }
+
+      // And the sentence each address follows ends in a colon rather than a full stop.
+      const copy = FORM_COPY[locale];
+      for (const sentence of [copy.undeliverable.fail, copy.noscript]) {
+        expect(sentence.trimEnd().endsWith(':'), JSON.stringify(sentence)).toBe(true);
+      }
+    });
+  }
+
+  /**
+   * **And the same claim where the visitor actually reads it** — the rendered alert, from
+   * a real submit in a real browser on the build that has no endpoint.
+   *
+   * The markup assertions above are about what the page hands the script; this is what the
+   * script writes. Both causes are driven, because the offline branch is reachable with no
+   * endpoint (`send()` throws inside the `try`, so the `catch` still reads
+   * `navigator.onLine`) — which is the half of this ticket that had to be checked rather
+   * than assumed.
+   */
+  for (const target of TARGETS) {
+    for (const failure of FAILURES.filter((candidate) => candidate.build === 'none')) {
+      it(`${target.locale}, ${failure.label}: the alert instructs no retry and offers the inbox`, async () => {
+        const seen = await failOnce(failure, target);
+        const status = flatten(seen.status);
+
+        expect(
+          instructsRetry(status, target.locale),
+          'the alert the visitor reads tells them to send or try again, on a build with ' +
+            'no endpoint where no attempt can succeed (MUSE-110)',
+        ).toEqual([]);
+        expect(status, 'the alert says nothing at all about the failure').toContain(
+          flatten(FORM_COPY[target.locale].undeliverable.fail),
+        );
+        // The way out, which is the only thing left that works.
+        expect(seen.email, 'the page offered no address').toContain('@');
+        expect(
+          status,
+          'the alert says what cannot be done without offering what can',
+        ).toContain(seen.email);
+      });
+    }
+  }
+
+  it('an endpoint restores the retry wording where the visitor reads it', async () => {
+    for (const target of TARGETS) {
+      const server = FAILURES.find((candidate) => candidate.reply?.kind === 'error')!;
+      const seen = await failOnce(server, target);
+      expect(
+        instructsRetry(flatten(seen.status), target.locale),
+        'with an endpoint configured a retry can succeed, so the alert has to say so — ' +
+          'gating a true sentence out is the same defect pointing the other way',
+      ).not.toEqual([]);
+    }
+  });
+
+  for (const locale of ['hr', 'en'] as const) {
+    it(`${locale}: every known phrasing of a retry instruction is caught`, () => {
+      for (const sentence of RETRIES[locale]) {
+        expect(
+          instructsRetry(sentence, locale),
+          `no needle catches ${JSON.stringify(sentence)}, which instructs a retry`,
+        ).not.toEqual([]);
+      }
+    });
+
+    it(`${locale}: prose that legitimately says “again” is not caught`, () => {
+      const innocent = [
+        ...INNOCENT_RETRY_PROSE.filter((entry) => entry.locale === locale).map((e) => e.text),
+        ...INNOCENT_NEGATIONS[locale],
+      ];
+      for (const sentence of innocent) {
+        expect(
+          instructsRetry(sentence, locale),
+          `a needle reads ${JSON.stringify(sentence)} as a retry instruction. It says ` +
+            'nothing a build without an endpoint cannot do — widen the verb list or the ' +
+            'negation rule rather than exempting it',
+        ).toEqual([]);
+      }
+    });
+  }
+
+  it('the prose the boundary is drawn around is still published', async () => {
+    for (const { route, text } of INNOCENT_RETRY_PROSE) {
+      const page = await markupOf(unconfigured, route);
       expect(page, `${route} no longer says ${JSON.stringify(text)}`).toContain(text);
     }
   });

@@ -8,8 +8,10 @@
 import {
   FORM_COPY,
   FORM_ENDPOINT,
+  FORM_HAS_PROCESSOR,
   HONEYPOT_FIELD,
   formFields,
+  formMessages,
   type LevelOption,
 } from '../lib/forms';
 import { localeUrl, type Locale } from '../lib/i18n';
@@ -92,6 +94,20 @@ const copy = FORM_COPY[locale];
 const fields = formFields(copy, packages);
 
 /**
+ * The messages a failed submit can show, chosen by the form's own configuration
+ * (MUSE-110).
+ *
+ * `failBody`, `failOffline` and `invalid` all ended by telling the visitor to send again,
+ * and none of them was gated — so on the deploy that has no endpoint, where this script
+ * throws before any `fetch`, the form instructed a retry that cannot succeed on any
+ * attempt, one section below a hero that had just said the form cannot be received
+ * (MUSE-84). `FORM_HAS_PROCESSOR` is the same expression the `send()` below tests, and
+ * `formMessages` is the only place the choice is made; nothing here reads
+ * `copy.failBody` directly any more.
+ */
+const messages = formMessages(copy, FORM_HAS_PROCESSOR);
+
+/**
  * The inbox a failed submission falls back to is content (MUSE-20), read here in
  * frontmatter. The form *copy* is not: the browser needs the validation messages at
  * runtime, handed over as `data-msg-*` attributes, so `FORM_COPY` stays in code.
@@ -108,12 +124,12 @@ const privacyHref = localeUrl('/privacy', locale);
     aria-label={copy.formLabel}
     method="dialog"
     data-endpoint={FORM_ENDPOINT}
-    data-msg-invalid={copy.invalid}
+    data-msg-invalid={messages.invalid}
     data-msg-sending={copy.sending}
     data-msg-submit={copy.submit}
-    data-msg-fail-title={copy.failTitle}
-    data-msg-fail-body={copy.failBody}
-    data-msg-fail-offline={copy.failOffline}
+    data-msg-fail-title={messages.failTitle}
+    data-msg-fail-body={messages.failBody}
+    data-msg-fail-offline={messages.failOffline}
     novalidate
   >
     {/*

@@ -256,6 +256,40 @@ export interface PackageCopy {
   any: string;
 }
 
+/**
+ * **What the form says when nothing it is told can leave the site** (MUSE-110).
+ *
+ * Two strings, because two of the messages above instruct a send and the third is the
+ * title, which is true either way. See `FormCopy['undeliverable']` for the argument and
+ * `formMessages` for the one place the choice is made.
+ */
+export interface UndeliverableCopy {
+  /**
+   * The single failure line — every cause, including being offline.
+   *
+   * **The offline/generic split exists only while something can be transmitted.** It is
+   * there because the actions differ: "check your connection and send again" is useful
+   * advice exactly once. With no endpoint the actions do not differ, because no attempt
+   * reaches anybody whether the connection is up or down — and the offline branch *is*
+   * reachable in this state: `send()` throws for the missing endpoint inside the `try`, so
+   * the `catch` still reads `navigator.onLine`. One line for both is therefore the same
+   * gate in its off position rather than a third state.
+   *
+   * Ends in a colon: the studio email address follows it as a link, `noscript`'s
+   * convention and the honest hero's (MUSE-84).
+   */
+  fail: string;
+  /**
+   * The validation alert, with the instruction to send again taken off the end.
+   *
+   * The visitor can still press the button — the form validates, and that is the whole
+   * point of keeping it completable — but a message this build renders may not tell them
+   * that sending is what comes next. What is left is the half that is true: which fields
+   * to look at.
+   */
+  invalid: string;
+}
+
 export interface FormCopy {
   /** Accessible name for the `<form>` itself. */
   formLabel: string;
@@ -268,7 +302,12 @@ export interface FormCopy {
   package: PackageCopy;
   submit: string;
   sending: string;
-  /** The single alert raised when validation stopped a submit. */
+  /**
+   * The single alert raised when validation stopped a submit.
+   *
+   * Ends by telling the visitor to send again, so it is chosen by the endpoint too — see
+   * `undeliverable` below (MUSE-110).
+   */
   invalid: string;
   /** Used when a field has no message of its own. */
   requiredAny: string;
@@ -289,6 +328,9 @@ export interface FormCopy {
    * a visitor can use, and it is not translatable prose either.
    *
    * Ends in a colon: the studio email address follows it as a link.
+   *
+   * Shown when a processor exists, which is what makes a retry worth suggesting — see
+   * `undeliverable` below for the other state (MUSE-110).
    */
   failBody: string;
   /**
@@ -302,6 +344,30 @@ export interface FormCopy {
    * Ends in a colon: the studio email address follows it as a link.
    */
   failOffline: string;
+  /**
+   * **The same messages for the build that cannot transmit anything at all** (MUSE-110).
+   *
+   * `invalid`, `failBody` and `failOffline` above all end by telling the visitor to send
+   * again, which is true exactly when `FORM_HAS_PROCESSOR` is — and it was not gated on
+   * it. With `PUBLIC_FORM_ENDPOINT` unset, which is the live deploy (MUSE-12), the script
+   * throws before any `fetch`, so „možeš pokušati ponovno" was the line **every** visitor
+   * read, on the page whose hero had just said the form cannot be received (MUSE-84).
+   *
+   * So the gate is the same expression the hero and the privacy notice read, and this is
+   * the off position: one failure line that offers the inbox and instructs nothing, and a
+   * validation alert that says what to fix and stops there.
+   *
+   * Three things about the shape. It is a **group**, like `PackageCopy`, so a fourth
+   * string added for this state is covered by `formMessages` the moment it exists rather
+   * than by somebody remembering. The strings are declared here rather than chosen with a
+   * conditional expression inside the table, because the table is also the oracle the
+   * suite subtracts from (`residue` in `test/trialform.test.ts`) and a copy table whose
+   * contents depend on the *reader's* environment cannot be compared with a page built in
+   * the other state. And `failTitle` is **not** in here: „Prijava nije poslana." is true in
+   * both states, and a second copy of a sentence nobody has to change is a sentence that
+   * can drift.
+   */
+  undeliverable: UndeliverableCopy;
   /**
    * What happens to the data — GDPR Art. 13, in one sentence, beside the fields.
    *
@@ -387,6 +453,12 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
       'Tvoji odgovori su ostali u obrascu, pa možeš pokušati ponovno. Ako i dalje ne ide, piši nam na:',
     failOffline:
       'Izgleda da trenutno nema internetske veze. Tvoji odgovori su ostali u obrascu — provjeri vezu i pošalji ponovno. Možeš nam i pisati na:',
+    // MUSE-110: the same sentence the hero and the `<noscript>` block use on this build,
+    // deliberately — one mechanism described in one way, on three surfaces of one page.
+    undeliverable: {
+      fail: 'Obrazac trenutačno ne možemo primiti. Prijavu nam pošalji e-mailom na:',
+      invalid: 'Provjeri označena polja.',
+    },
     privacy:
       'Ime, e-mail i broj telefona koristimo samo da ti odgovorimo i dogovorimo termin. Ne šaljemo newsletter. Što se s podacima točno događa, piše u izjavi o privatnosti.',
     privacyLink: 'Izjava o privatnosti',
@@ -439,6 +511,10 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
       'Your answers are still in the form, so you can try again. If it still will not go through, write to us at:',
     failOffline:
       'You appear to be offline. Your answers are still in the form — check your connection and send again. You can also write to us at:',
+    undeliverable: {
+      fail: 'We cannot receive the form at the moment. Send your request by email to:',
+      invalid: 'Check the marked fields.',
+    },
     privacy:
       'We use your name, email and phone only to reply and arrange a time. No newsletter. Exactly what happens to the data is in the privacy notice.',
     privacyLink: 'Privacy notice',
@@ -536,6 +612,47 @@ export function formFields(
     },
     ...core,
   ];
+}
+
+/** The four strings the form hands the browser as `data-msg-*` for a failed submit. */
+export interface FormMessages {
+  /** The single form-level alert raised when validation stopped a submit. */
+  invalid: string;
+  failTitle: string;
+  failBody: string;
+  failOffline: string;
+}
+
+/**
+ * **The one place the form's failure copy is chosen** (MUSE-110).
+ *
+ * `hasProcessor` is `FORM_HAS_PROCESSOR` at the call site — the same expression the
+ * script tests before it will `fetch`, which `Contact.astro`'s lede and `Privacy.astro`'s
+ * recipient paragraph already read. A parameter rather than a read inside, so a test can
+ * ask what the *other* build says; the component passes the constant, so the gate is
+ * visible where the attributes are rendered.
+ *
+ * `failTitle` is the same string either way and is routed through here anyway: a caller
+ * that assembled three of the four from this function and read the fourth off the table
+ * would be one edit away from reading two.
+ */
+export function formMessages(copy: FormCopy, hasProcessor: boolean): FormMessages {
+  if (hasProcessor) {
+    return {
+      invalid: copy.invalid,
+      failTitle: copy.failTitle,
+      failBody: copy.failBody,
+      failOffline: copy.failOffline,
+    };
+  }
+  return {
+    invalid: copy.undeliverable.invalid,
+    failTitle: copy.failTitle,
+    // One line for every cause, because with nothing to transmit the cause cannot change
+    // what the visitor should do. See `UndeliverableCopy['fail']`.
+    failBody: copy.undeliverable.fail,
+    failOffline: copy.undeliverable.fail,
+  };
 }
 
 /**

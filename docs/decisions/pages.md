@@ -481,6 +481,88 @@ ticket (MUSE-114 is the open instance).
   about how a class runs. `test/pricing.test.ts` already refuses "no commitment" in the
   period names, which is the same claim one layer down.
 
+- **The form's own failure copy is gated on the same constant** (MUSE-110). `failBody`
+  said „Tvoji odgovori su ostali u obrascu, pa možeš pokušati ponovno." / "Your answers
+  are still in the form, so you can try again." and was gated on nothing, so with
+  `PUBLIC_FORM_ENDPOINT` unset — the live deploy, MUSE-12 — it was the line **every**
+  visitor read: a retry that cannot succeed on any attempt, one section below the hero
+  MUSE-84 had just made honest. Live in `data-msg-fail-body` on `/`, `/contact` and
+  `/pricing` in both locales, byte-identical in both builds; measured before the ticket
+  was filed and again on the branch.
+
+  It is MUSE-72's and MUSE-84's defect one surface further in, and **it survived both
+  because their guards read the hero, the `<meta name="description">`, `llms.txt` and the
+  notice, and never the form's own messages.** The form is where a claim about the
+  mechanism is least visible — the copy ships as `data-msg-*` attributes and nothing
+  renders it until a submit fails — so it is the surface a reviewer reading the page will
+  not see.
+
+  **Three messages instructed a send, and the third one is the judgement call.**
+  `failBody`, `failOffline` and `invalid` („Provjeri označena polja i pošalji ponovno." /
+  "Check the marked fields and send again.") all end by telling the visitor to send again.
+  The validation alert is the arguable one: its subject is the field rather than the
+  mechanism. It is gated anyway, for a reason that is about the guard rather than about
+  the sentence — „pošalji ponovno" in it is **word for word** what `failOffline` says, so
+  no needle can tell the two apart, and the only discriminator is which attribute carried
+  it. A carve-out keyed on that is a carve-out exactly where a real claim can hide, and
+  the ticket's first criterion is *no form message instructs a retry*. With no endpoint it
+  says what to fix and stops.
+
+  **With no endpoint there is one failure line, and that is the gate in its off position
+  rather than a third state.** `failOffline` exists because the actions differ — "check
+  your connection and send again" is useful advice exactly once — and with nothing to
+  transmit the actions do not differ. **And the offline branch is reachable in that
+  state**, which the ticket asked to be checked rather than assumed: `send()` throws for
+  the missing endpoint *inside* the `try`, so the `catch` still reads `navigator.onLine`
+  and still picks the offline line. Driven rather than reasoned about — `FAILURES` in
+  `test/trialform.test.ts` had a cell for each condition and none for both, and with the
+  cell added the pre-fix alert rendered „pošalji ponovno" in a real browser. So gating the
+  generic body alone would have left half the defect live on the one visitor whose network
+  is down.
+
+  `UndeliverableCopy` is a **group**, like `PackageCopy`, so a fourth string for this
+  state is covered by `formMessages` the moment it exists; and the strings are declared in
+  the table rather than chosen by a conditional expression inside it, because the table is
+  also the oracle `residue` subtracts from, and a copy table whose contents depend on the
+  *reader's* environment cannot be compared with a page built in the other state.
+  `failTitle` is deliberately not in the group: „Prijava nije poslana." is true either
+  way, and a second copy of a sentence nobody has to change is a sentence that can drift.
+
+  **The guard is a class needle, and the class is „does any message tell the visitor to
+  send or try again".** A verb-and-adverb adjacency in both word orders, asked of **every**
+  `data-msg-*` attribute on every page that renders the form — derived from `ROUTES`, with
+  a floor, so the six pages are covered because they carry the form and not because the
+  test names them. MUSE-84 measured what a phrase-level guard is worth here and this is
+  the fourth ticket in a row to reach the same conclusion. Like `SUBMIT` it **cannot** live
+  in `test/helpers/offer-claims.ts`: the claim is *conditional*, and `RETIRED_CLAIMS` is a
+  list of things that may appear nowhere, ever.
+
+  Two things in the needle that look arbitrary. „ponovi" / "repeat" is **not** a verb in
+  it, and the adverb is spelled out as alternatives rather than as a stem, because
+  `/aboutus` publishes „ima vremena ponoviti isti korak … i pitati ponovno ako nije" /
+  "time to repeat a step … and to ask again if it has not" — an innocent „ponovno" four
+  words from an innocent „ponoviti", in the one register the site writes in. And
+  `MODAL_HR` is the half MUSE-84 did not need: in Croatian the negation attaches to the
+  modal, so „obrazac se **ne može** poslati ponovno" puts „ne" two words in front of the
+  verb, where a single-word lookbehind cannot see it. Measured — without it that sentence
+  reads as an instruction. The modal list is short and closed, and „ne ide" is not in it,
+  because „Ako i dalje ne ide, pošalji ponovno." is an instruction and has to stay caught.
+
+  **Two things this ticket decided not to do, both raised by the QA that filed it.**
+  `/contact`'s second section still reads „Ako ti je obrazac prekomplicirano, piši nam…" /
+  "If a form is one step too many, write to us…", which presents the form as the normal
+  path that email is an alternative to. It is a claim about the *shape of the page* rather
+  than about the mechanism, no needle here can distinguish it from honest prose, and a
+  guard pinning that one sentence is the phrase-level guard this file keeps arguing
+  against — so it wants its own ticket with a class to assert, not a literal added here.
+  And `/` and `/pricing` still render the form with no caveat beside it, so `/contact` is
+  the only page where the visitor is told in advance. **That is accepted until MUSE-12**,
+  and the reason is what changed on this branch: the failure message is now the same
+  honest sentence on all six pages, so a visitor who submits anywhere is told the form
+  cannot be received and given the inbox in the same breath. A caveat above the form would
+  be a second description of the same configuration on three more surfaces, and MUSE-12 —
+  setting the endpoint — deletes the need for all of it.
+
 - **„Dvoja vrata, ne šest." is `Home.astro`'s own line, not the design brief's** (MUSE-80).
   Four comments — two in `src/components/Home.astro`, two in `test/home.test.ts` — cited
   the brief for it. The brief contains no „vrata", no "door" and no "not six"; its only

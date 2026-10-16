@@ -90,6 +90,16 @@ describe('the form copy table', () => {
     for (const key of prose) {
       expect(EN[key], `${key} is the same in both languages`).not.toBe(HR[key]);
     }
+
+    // The same claim for `undeliverable`'s two sentences (MUSE-110). By path, because
+    // they are a group rather than top-level keys — and `toBeDefined` first, or a
+    // renamed group would compare `undefined` with `undefined` and pass.
+    for (const path of ['undeliverable.fail', 'undeliverable.invalid']) {
+      const [hr, en] = [leaves(HR).get(path), leaves(EN).get(path)];
+      expect(hr, `${path} is missing from the Croatian table`).toBeDefined();
+      expect(en, `${path} is missing from the English table`).toBeDefined();
+      expect(en, `${path} is the same in both languages`).not.toBe(hr);
+    }
   });
 
   it('has a message for every field that can be left blank by mistake', () => {
@@ -187,11 +197,14 @@ describe('the form copy table', () => {
   });
 
   it('ends every string a link is appended to with a colon', () => {
-    // `failBody`, `failOffline` and `noscript` are each followed by the studio email
-    // address in the markup. Without the colon the sentence reads as if it were finished.
+    // `failBody`, `failOffline`, `noscript` and `undeliverable.fail` are each followed by
+    // the studio email address in the markup. Without the colon the sentence reads as if
+    // it were finished. By path, so the group `undeliverable` is covered too (MUSE-110).
     for (const copy of Object.values(FORM_COPY)) {
-      for (const key of ['failBody', 'failOffline', 'noscript'] as const) {
-        expect(copy[key].trimEnd().endsWith(':'), key).toBe(true);
+      for (const path of ['failBody', 'failOffline', 'noscript', 'undeliverable.fail']) {
+        const text = leaves(copy).get(path);
+        expect(text, `${path} is missing from the copy table`).toBeDefined();
+        expect(text!.trimEnd().endsWith(':'), path).toBe(true);
       }
     }
   });
@@ -206,9 +219,16 @@ describe('the form copy table', () => {
      * the copy table, which is the other way it could come back.
      */
     for (const copy of Object.values(FORM_COPY)) {
-      for (const key of ['failTitle', 'failBody', 'failOffline'] as const) {
-        expect(copy[key], `${key} names an HTTP status`).not.toMatch(/\b[1-5]\d\d\b/);
-        expect(copy[key], `${key} names a build-time variable`).not.toMatch(/[A-Z][A-Z0-9]*_[A-Z0-9_]+/);
+      // `undeliverable.fail` is the failure line the build with no endpoint shows
+      // (MUSE-110), and the diagnostic it must not carry is the one that was rendered
+      // verbatim: the name of the environment variable that is unset.
+      for (const path of ['failTitle', 'failBody', 'failOffline', 'undeliverable.fail']) {
+        const text = leaves(copy).get(path);
+        expect(text, `${path} is missing from the copy table`).toBeDefined();
+        expect(text!, `${path} names an HTTP status`).not.toMatch(/\b[1-5]\d\d\b/);
+        expect(text!, `${path} names a build-time variable`).not.toMatch(
+          /[A-Z][A-Z0-9]*_[A-Z0-9_]+/,
+        );
       }
     }
   });
@@ -377,7 +397,9 @@ describe('the placement of a shared copy string', () => {
 
   /** What to call a shape in a failure message: its routes, or the file that has it. */
   const whereRendered = (shape: Shape): string => {
-    const routes = PAGE_SHAPES.filter((page) => page.shapes.has(shape)).map((page) => page.route);
+    const routes = PAGE_SHAPES.filter((page) => page.shapes.has(shape)).map(
+      (page) => page.route,
+    );
     if (routes.length > 0) return routes.sort().join(', ');
     const files = CALL_SITES.filter((site) =>
       site.tags.some((tag) => shapesOf(tag).includes(shape)),
@@ -561,8 +583,10 @@ describe('the placement of a shared copy string', () => {
 
     // Not a list to maintain — it is read off `test/`. Only the floor is pinned, so that
     // a rename or a deletion cannot leave this assertion looping over nothing.
-    expect(guards.length, 'no residue guard found — has the pattern been renamed?')
-      .toBeGreaterThanOrEqual(3);
+    expect(
+      guards.length,
+      'no residue guard found — has the pattern been renamed?',
+    ).toBeGreaterThanOrEqual(3);
 
     for (const guard of guards) {
       for (const word of ['provenance', 'placement']) {
