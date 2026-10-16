@@ -57,9 +57,7 @@ import {
  * This docstring used to say layer 3 "also sweeps the trial form's `<option>`s and
  * the schedule's filter chips". Both halves were wrong. It sweeps `dist` for the
  * three *retired Croatian words* and nothing else, so relabelling either to an
- * arbitrary new string — `Novice`, `Expert` — passed all four layers; and the
- * filter chips no longer exist at all, MUSE-36 having deleted `STYLES` and the
- * style filter.
+ * arbitrary new string — `Novice`, `Expert` — passed all four layers.
  *
  * The fix is not a fifth layer. The form's level options now carry
  * `data-level-name`, the same markup contract the doors and the schedule's slots
@@ -73,6 +71,66 @@ import {
  * What covers a level name rendered by some *future* component that forgets the
  * attribute is layer 4: it cannot spell the name in the first place, so it has to
  * read `LEVEL_NAME`, and reading `LEVEL_NAME` is what the attribute documents.
+ *
+ * ---
+ *
+ * **MUSE-119 — the chips, and the false sentence that is why they were left out.**
+ *
+ * Where the paragraph above now stops, it used to carry a second clause: "and the
+ * filter chips no longer exist at all, MUSE-36 having deleted `STYLES` and the style
+ * filter". MUSE-36 deleted the **style** filter group. The **level** group was
+ * untouched and is still rendered — `Schedule.astro` builds one chip per entry in
+ * `LEVELS` plus an "all" chip, five buttons on every `/schedule` page in both
+ * locales. The chips existed at `4be63d3` — MUSE-36's own commit, the one the clause
+ * cited — where `Schedule.astro` has two `class="chip"` elements and three
+ * `data-level-name`, none of them on a chip.
+ *
+ * So MUSE-18's first criterion named the form options **or** the chips, and only the
+ * form half was met: relabelling the chips to `Novice / Rising / Adept / Expert` in
+ * both locales left this suite, `test/schedule.test.ts` and `test/formcopy.test.ts`
+ * green at 119 tests. That is MUSE-80's rule with a measurable cost — a fabricated
+ * citation is worse than fabricated copy, because the next author trusts it rather
+ * than opening the file, and here the next author was the person fixing the other
+ * half of this very ticket.
+ *
+ * The chips now carry `data-level-name` too, so layers 1–2 cover them, which is what
+ * MUSE-18's notes said to prefer over a fourth special case. The attribute is on the
+ * four level chips and deliberately **not** on the "all" chip, which is not a level —
+ * the same split as the form's "not sure yet" option. The chip's content is the level
+ * name and nothing else, which is what the contract requires. The filter script is
+ * untouched: it keys on `data-filter` / `data-value`, which is also what
+ * `test/schedule.test.ts` reads.
+ *
+ * ---
+ *
+ * **The census: six render sites, and the mechanism that covers each** (MUSE-119).
+ * MUSE-18's notes listed five, and a census missing the one uncovered site is what
+ * made the work look complete.
+ *
+ *   1. `Home.astro`'s two doors — the attribute, so layers 1–2.
+ *   2. `/schedule`'s accordion slot labels — the attribute, so layers 1–2.
+ *   3. `/schedule`'s grid block labels — the attribute, so layers 1–2.
+ *   4. the trial form's level `<option>`s, on `/`, `/contact` and `/pricing` — the
+ *      attribute since MUSE-18, so layers 1–2.
+ *   5. `/schedule`'s four level filter chips — the attribute since MUSE-119, so
+ *      layers 1–2.
+ *   6. `/whatisbachata`'s "Levels" facts row — `test/whatisbachata.test.ts`'s AC4.
+ *
+ * The sixth **cannot** carry the attribute by construction: `WhatIsBachata.astro:122`
+ * joins the four names with `' · '` into one facts-row value, and the contract
+ * requires the element to show nothing but the name. AC4 there `indexOf`s each name
+ * in dancer order, which is the same guarantee for a joined string — so it is covered
+ * by its own page suite rather than by this one, and that is the whole of why it is
+ * not a hole.
+ *
+ * Every one of the first five also needs an assertion that it is *still* marked,
+ * because layers 1–2 can only check the elements that opt in. The doors have one in
+ * `the two beginner doors`; the form's options and the chips have their own describes
+ * below, because they are the two that were found unmarked. The slot and block labels
+ * had AC2's "names all three levels on /schedule in both locales" and no longer do on
+ * their own — marking the chips covers all four levels, so that assertion would stay
+ * green with the slots unmarked. The chips' describe pays for that with one of its
+ * own; see the note on it.
  */
 
 // --------------------------------------------------------------------------
@@ -252,6 +310,39 @@ function levelSelectOptions(html: string): LevelOptionEl[] {
       label: text(m[2]!),
     };
   });
+}
+
+interface FilterChipEl {
+  /** `data-value` — the level key, or `all`. */
+  value: string;
+  /** `data-level-name`, or `undefined` when the chip does not declare a level. */
+  level: string | undefined;
+  /** What the visitor reads. */
+  label: string;
+}
+
+/**
+ * The `/schedule` filter chips of one group, in document order.
+ *
+ * Matched on `data-filter` rather than on `class="chip"`, for the reason
+ * `levelSelectOptions` is matched on `name="level"`: `data-filter` is the attribute
+ * the component's own script keys on, so it is the one that cannot be renamed
+ * without the filter itself breaking. The class is styling.
+ */
+function filterChips(html: string, kind: string): FilterChipEl[] {
+  const re = /<button\b([^>]*\bdata-filter="([^"]*)"[^>]*)>([\s\S]*?)<\/button>/g;
+  return [...html.matchAll(re)]
+    .filter((m) => decode(m[2]!) === kind)
+    .map((m) => {
+      const attrs = m[1]!;
+      const value = /\bdata-value="([^"]*)"/.exec(attrs);
+      const level = /\bdata-level-name="([^"]*)"/.exec(attrs);
+      return {
+        value: value ? decode(value[1]!) : '',
+        level: level ? decode(level[1]!) : undefined,
+        label: text(m[3]!),
+      };
+    });
 }
 
 // --------------------------------------------------------------------------
@@ -560,6 +651,118 @@ describe('the trial form’s level options are covered by the same mechanism', (
       expect(options.slice(1).map((option) => option.label)).toEqual(
         LEVELS.map((level) => LEVEL_NAME[locale][level]),
       );
+    }
+  });
+});
+
+/**
+ * MUSE-119 — `/schedule`'s level filter chips, the other half of MUSE-18's first
+ * criterion and the one its own docstring said did not exist.
+ *
+ * The chips were never in the subject set: `Schedule.astro` labels each one
+ * `LEVEL_NAME[locale][value]` and rendered it with `data-filter`, `data-value` and
+ * `aria-pressed` and no `data-level-name`, so layers 1–2 could not see five buttons
+ * per page in both locales. Relabelling them to `Novice / Rising / Adept / Expert`
+ * was measured green across every suite that names a level name at all.
+ *
+ * Three things are pinned here, the same three the form's options pin. That the
+ * chips are found at all, so this cannot pass by matching nothing. That every chip
+ * which *is* a level declares which — the sentence layers 1–2 then enforce, and the
+ * one that makes a relabel fail instead of ship. And that the declared level is the
+ * same string as the filter's `data-value`, so the label and the thing it filters
+ * cannot drift apart.
+ *
+ * The "all" chip is the one chip that is deliberately not a level — it is the
+ * unfiltered state, and its label is prose — so it carries no attribute and is
+ * asserted to carry none. Marking it would make layer 2 demand that „Sve razine"
+ * equal a level name.
+ */
+describe('the schedule’s level filter chips are covered by the same mechanism', () => {
+  /** Every built page that renders the chips. Not a list — the filters move with the view. */
+  function pagesWithLevelChips(): string[] {
+    return build
+      .htmlFiles()
+      .filter((file) => filterChips(build.read(file), 'level').length > 0);
+  }
+
+  it('finds the five level chips on /schedule in both locales', () => {
+    for (const locale of LOCALES) {
+      expect(
+        filterChips(page[locale].schedule, 'level').map((chip) => chip.value),
+        `the level chips on ${SCHEDULE_PAGE[locale]}`,
+      ).toEqual(['all', ...LEVELS]);
+    }
+    // The chips are a `/schedule` feature; finding them nowhere would mean the matcher
+    // reads something other than the markup the component emits.
+    expect(pagesWithLevelChips().length, 'no built page renders the level chips').toBe(
+      LOCALES.length,
+    );
+  });
+
+  it('marks every level chip with data-level-name, on every page that has the chips', () => {
+    for (const file of pagesWithLevelChips()) {
+      const [all, ...levels] = filterChips(build.read(file), 'level');
+
+      expect(all!.value, `${file}: the first chip is not the "all" chip`).toBe('all');
+      expect(all!.level, `${file}: the "all" chip claims to be a level`).toBeUndefined();
+
+      expect(
+        levels.map((chip) => chip.level),
+        `${file}: a level chip carries no data-level-name, so the guard cannot see it`,
+      ).toEqual([...LEVELS]);
+    }
+  });
+
+  it('filters on the level it says it is, so the label and the filter cannot drift', () => {
+    for (const file of pagesWithLevelChips()) {
+      for (const chip of filterChips(build.read(file), 'level').slice(1)) {
+        expect(chip.level, `${file}: the "${chip.value}" chip declares a different level`).toBe(
+          chip.value,
+        );
+        expect(LEVELS, `${file}: "${chip.value}" is not a level key`).toContain(chip.value);
+      }
+    }
+  });
+
+  it('keeps the “all” chip’s wording translated, since it is prose and not a level', () => {
+    const [hr, en] = LOCALES.map((locale) => filterChips(page[locale].schedule, 'level')[0]!);
+    expect(hr!.label.trim(), 'the "all" chip lost its wording').not.toBe('');
+    expect(en!.label, 'the "all" chip is not translated').not.toBe(hr!.label);
+  });
+
+  /**
+   * What marking the chips costs, paid here rather than left as a note.
+   *
+   * AC2's "names all three levels on /schedule in both locales" was the presence
+   * assertion for the slot and block labels, because they were the only marked
+   * elements on the page. The chips cover all four levels too, so that assertion is
+   * now satisfiable by the chips alone: the slot labels could quietly stop opting in
+   * and it would stay green. Nothing else watches them — `test/schedule.test.ts`
+   * reads `data-level`, `data-slot` and the times, and never the name.
+   *
+   * So each slot says which level it is twice, once for the filter and once for the
+   * reader, and this is where the two are required to agree.
+   */
+  it('keeps the slot and block labels marked, which the chips must not stand in for', () => {
+    const re = /<(li|div)\b([^>]*\bdata-slot\b[^>]*)>([\s\S]*?)<\/\1>/g;
+    for (const locale of LOCALES) {
+      const slots = [...page[locale].schedule.matchAll(re)];
+      // Four classes, rendered twice — the accordion and the grid (design system §7.2).
+      expect(slots.length, `no [data-slot] elements on ${SCHEDULE_PAGE[locale]}`).toBe(
+        seededSchedule().length * 2,
+      );
+
+      for (const slot of slots) {
+        const level = /\bdata-level="([^"]*)"/.exec(slot[2]!)?.[1];
+        expect(
+          level,
+          `a slot on ${SCHEDULE_PAGE[locale]} declares no data-level`,
+        ).toBeDefined();
+        expect(
+          levelNames(slot[3]!).map((found) => found.level),
+          `the ${level} slot on ${SCHEDULE_PAGE[locale]} does not mark its level name`,
+        ).toEqual([level]);
+      }
     }
   });
 });
