@@ -1,9 +1,10 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { LOCALE_HTML_LANG } from '../src/lib/i18n';
+import { claimOutDir } from './helpers/scratch';
 import { resolveRequest } from './helpers/serve';
 import {
   alternates,
@@ -621,9 +622,16 @@ describe('MUSE-42: the host is written in one file, and the repo says which', ()
     },
   ];
 
-  /** `.gitignore`, as patterns: comments and blanks dropped, slashes trimmed. */
-  function notSource(): string[] {
-    return readFileSync(join(ROOT, '.gitignore'), 'utf8')
+  /**
+   * `.gitignore`, as patterns: comments and blanks dropped, slashes trimmed.
+   *
+   * `root` is a parameter so the walk can be driven over a synthetic checkout as well as
+   * over this one (MUSE-116). It reads that root's own `.gitignore`, which for the
+   * synthetic case is a copy of this repository's — so the test below gates the real file
+   * rather than a restatement of it.
+   */
+  function notSource(root: string = ROOT): string[] {
+    return readFileSync(join(root, '.gitignore'), 'utf8')
       .split('\n')
       .map((line) => line.replace(/#.*$/, '').trim())
       .map((line) => line.replace(/^\/+|\/+$/g, ''))
@@ -647,16 +655,23 @@ describe('MUSE-42: the host is written in one file, and the repo says which', ()
   }
 
   /** Every file in the repository that is not disclaimed, as repo-relative paths. */
-  function repoSources(): string[] {
-    const patterns = notSource();
+  function repoSources(root: string = ROOT): string[] {
+    const patterns = notSource(root);
     const descend = (dir: string): string[] =>
       readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
         const full = join(dir, entry.name);
-        const rel = relative(ROOT, full).replace(/\\/g, '/');
+        const rel = relative(root, full).replace(/\\/g, '/');
         if (isIgnored(rel, patterns)) return [];
         return entry.isDirectory() ? descend(full) : [rel];
       });
-    return descend(ROOT).sort();
+    return descend(root).sort();
+  }
+
+  /** The files at `root` that name the host and may not, as `repoSources` sees them. */
+  function hostNamers(root: string): string[] {
+    return repoSources(root)
+      .filter((file) => !exempt(file))
+      .filter((file) => readFileSync(join(root, file)).includes(DEPLOY_HOST));
   }
 
   function exempt(file: string): boolean {
@@ -702,10 +717,92 @@ describe('MUSE-42: the host is written in one file, and the repo says which', ()
     for (const tree of ['src', 'sanity', 'scripts', 'logo', '.github', 'test', 'public']) {
       expect(isIgnored(tree, patterns), tree).toBe(false);
     }
-    // A worktree under `.claude/` is another checkout of this repo, host and all. It is
-    // ignored, and `.claude` itself is not — so project config is still swept.
+    // A worktree is another checkout of this repo, host and all. **Both** conventions in
+    // use are ignored (MUSE-116) — `test/helpers/scratch.ts` names them as the two the
+    // prune has to reach, and one of them was ignored while the other was not. `.claude`
+    // itself is not ignored, so project config is still swept.
     expect(isIgnored('.claude/worktrees/agent-x/src/pages/index.astro', patterns)).toBe(true);
+    expect(isIgnored('.worktrees/qa-00e1989/src/pages/index.astro', patterns)).toBe(true);
     expect(isIgnored('.claude/settings.json', patterns)).toBe(false);
+  });
+
+  /**
+   * **A worktree sitting in the checkout may not change what this scan reads** (MUSE-116).
+   *
+   * `.gitignore` disclaimed `.claude/worktrees/` and not `.worktrees/`, two directories
+   * doing the same job. So `npm test` from the main checkout failed the assertion below
+   * whenever a `.worktrees/<name>/` existed: seven files inside one of them named the
+   * deploy host at paths that are not among `MAY_NAME_THE_HOST`'s three — every one a
+   * legitimate copy at an illegitimate path. It was invisible from inside a worktree,
+   * because `ROOT` is the test file's own location and a worktree holds no worktrees; and
+   * invisible in CI, which checks out fresh. A gate whose input depends on where it runs
+   * is the hazard MUSE-62 recorded from the other side.
+   *
+   * Adding the entry is also adding an exemption to a scan that is deliberately
+   * exhaustive, which is the shape MUSE-45 warns about. The reason it is still right is
+   * written beside the entry in `.gitignore`, and it is the reason this test can be an
+   * **equality** rather than a subtraction: a worktree is this repository at another
+   * commit, so the scan read every byte of it already, on its own branch, at that commit.
+   *
+   * Driven over a synthetic checkout rather than over `ROOT`, for two reasons. The
+   * condition is absent from `ROOT` whenever the suite runs inside a worktree, which is
+   * nearly always — an assertion about `ROOT` would be the vacuously green test this
+   * repository keeps re-filing. And the fixture holds **both** conventions, so the test
+   * fails if either one stops being disclaimed.
+   */
+  describe('MUSE-116: a worktree in the checkout is not a second copy to scan', () => {
+    /**
+     * A checkout: this repository's own `.gitignore`, one source file, and one copy of
+     * this repository per entry in `worktrees` — each naming the host the way the real
+     * files at those paths legitimately do.
+     */
+    function checkout(hint: string, worktrees: string[]): string {
+      const root = claimOutDir(hint);
+      writeFileSync(join(root, '.gitignore'), readFileSync(join(ROOT, '.gitignore')));
+      mkdirSync(join(root, 'src'), { recursive: true });
+      writeFileSync(join(root, 'src/page.ts'), 'export const page = 1;\n');
+      for (const worktree of worktrees) {
+        mkdirSync(join(root, worktree, 'test/helpers'), { recursive: true });
+        writeFileSync(
+          join(root, worktree, 'astro.config.mjs'),
+          `site: process.env.SITE ?? '${PAGES_DEPLOY.SITE}'\n`,
+        );
+        writeFileSync(join(root, worktree, 'test/helpers/build.ts'), `${PAGES_DEPLOY.SITE}\n`);
+      }
+      return root;
+    }
+
+    /** The two conventions, and the names the two that exist today actually carry. */
+    const WORKTREES = ['.worktrees/qa-00e1989', '.claude/worktrees/muse-116'];
+
+    it('reads exactly the files it reads with the worktrees absent', () => {
+      // The acceptance criterion, as an equality rather than a count: not "about the same
+      // number of files" but "the same files".
+      const bare = checkout('hostscan-bare', []);
+      const nested = checkout('hostscan-worktrees', WORKTREES);
+
+      expect(repoSources(bare)).toEqual(['.gitignore', 'src/page.ts']);
+      expect(repoSources(nested)).toEqual(repoSources(bare));
+    });
+
+    it('names no host inside one, at either convention', () => {
+      // The assertion that was actually red, run at a root where the condition exists.
+      // `exempt` matches `astro.config.mjs` and `test/` at the root and nowhere else, so
+      // a worktree's copy of either offends unless `.gitignore` disclaims the directory.
+      const nested = checkout('hostscan-offenders', WORKTREES);
+
+      expect(hostNamers(nested)).toEqual([]);
+    });
+
+    it('still reads a path that only looks like a worktree', () => {
+      // The entry disclaims a directory, not a word. A file *about* the worktrees is
+      // source like any other, so the exemption cannot widen into "anything named after
+      // one" — which is how a skip list stops being a line and becomes a hole.
+      const nested = checkout('hostscan-nearmiss', WORKTREES);
+      writeFileSync(join(nested, 'worktrees.md'), `See ${PAGES_DEPLOY.SITE}\n`);
+
+      expect(hostNamers(nested)).toEqual(['worktrees.md']);
+    });
   });
 
   /**
@@ -732,10 +829,7 @@ describe('MUSE-42: the host is written in one file, and the repo says which', ()
    * counter-example is not a rule.
    */
   it('lets nothing but the config, the deploy workflow and the suite name the host', () => {
-    const offenders = repoSources()
-      .filter((file) => !exempt(file))
-      .filter((file) => readFileSync(join(ROOT, file)).includes(DEPLOY_HOST));
-    expect(offenders).toEqual([]);
+    expect(hostNamers(ROOT)).toEqual([]);
   });
 
   it('keeps every exemption live, so the list cannot rot into a blanket', () => {
