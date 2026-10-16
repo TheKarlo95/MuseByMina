@@ -1625,9 +1625,17 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
 
   - **`LEVELS` has four entries, in dancer order** — `beginner → improver → intermediate
     → advanced`. The order drives the grid, the Studio dropdown and the homepage doors, so
-    a new level is *inserted*, never appended. `LEVEL_PREREQUISITE.improver` is the one
-    string on the site nobody has confirmed with Mina; it is marked as such in
-    `src/lib/schedule.ts`.
+    a new level is *inserted*, never appended. **All four of `LEVEL_PREREQUISITE`'s entry
+    thresholds are unconfirmed** — this bullet said `improver` was the only one until
+    MUSE-85 checked, and the sentence licensing the other three came from the same commit
+    that authored `improver`, two days after the rest, about work MUSE-6 had specified for
+    three levels. The record is `LEVEL_PREREQUISITE_CONFIRMATION` in `src/lib/schedule.ts`,
+    a typed map that cannot say „confirmed" without naming a person and a date, and
+    `test/schedule.test.ts` pins it empty and freezes the four published strings.
+    **The pages still publish all four**, which is the owner's decision over removing the
+    two that carry a number (a year, two years); MUSE-85's second criterion stays open
+    until Mina is asked. Do not soften one into vagueness instead — same claim, less
+    information.
   - **There is no `STYLES`.** The three style names were invented with the rows and had
     shaped a filter, three homepage cards and a required `class.style` field. The guard is
     **the values, not the name** (MUSE-76): it used to match the English identifier
