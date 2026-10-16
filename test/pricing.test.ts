@@ -783,7 +783,11 @@ describe('§7.2: the featured treatment is a hairline and a tab, never a fill', 
 
   it('fills nothing with the accent', () => {
     // "never an accent fill, which would overpower the row in either theme" (§7.2).
-    for (const declaration of STYLE.match(/\bbackground(?:-color)?:[^;]+;/g) ?? []) {
+    // A rule is about a property, not one spelling of it (MUSE-76, MUSE-84, MUSE-99,
+    // MUSE-122: the same defect four times). `background-image: linear-gradient(
+    // var(--accent), …)` paints the identical flat fill, so all three spellings are read.
+    const fills = STYLE.match(/\bbackground(?:-color|-image)?\s*:[^;}]+[;}]/g) ?? [];
+    for (const declaration of fills) {
       expect(declaration).not.toMatch(/--accent(?!-)/);
       expect(declaration).not.toMatch(/--accent-fill/);
     }
@@ -799,12 +803,16 @@ describe('§7.2: the featured treatment is a hairline and a tab, never a fill', 
     // `src/styles/base.css`. Declaring it here replaces `lining-nums` and `42 €`
     // becomes `4² €` with the column still neatly aligned. `npm run ds` fails on this
     // too; it is here because a price in Cormorant is the exact case that bug was about.
-    expect(STYLE).not.toMatch(/font-variant-numeric|font-feature-settings/);
+    // `font-variant` is the shorthand that resets numeric too, so it is the same property.
+    expect(STYLE).not.toMatch(/font-variant(?:-numeric)?\s*:|font-feature-settings/);
   });
 
   it('sizes nothing to a fixed width (§10: Croatian runs 20–25% longer)', () => {
-    // `min-width` and `max-width` are fine — a floor and a ceiling are not a width.
-    for (const declaration of STYLE.match(/(?<![-\w])width:[^;]+;/g) ?? []) {
+    // `min-width` and `max-width` are fine — a floor and a ceiling are not a width. The
+    // logical synonym `inline-size` is the same property (and the spelling `Gallery.astro`
+    // prefers); `min-inline-size` and `max-inline-size` are excused for the same reason.
+    const widths = STYLE.match(/(?<![-\w])(?:width|inline-size)\s*:[^;}]+[;}]/g) ?? [];
+    for (const declaration of widths) {
       expect(declaration, declaration).toMatch(/100%|auto|fit-content|max-content/);
     }
   });
