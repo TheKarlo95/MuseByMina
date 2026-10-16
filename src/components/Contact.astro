@@ -67,13 +67,23 @@ const settings = await getSiteSettings();
  * address follows it as a link — `FormCopy['noscript']`'s convention, for the same reason:
  * telling somebody to write to us without the address in front of them is half a fix.
  *
- * **„bez obveze" / "no commitment" is gone and nothing replaced it** (MUSE-84's „also in
- * scope"). „Bez partnera, bez iskustva" are facts about how a class runs and the site
- * says them everywhere, `siteSettings.tagline` included. „Bez obveze" is a *term of an
- * offer* — nobody has said what attending a first class commits you to, `/pricing`
- * publishes three rates and no trial rate, and `test/pricing.test.ts` already refuses
- * "no commitment" as a payment-terms claim one layer down. Retiring an unsupported
+ * **„bez obveze" / "no commitment" is gone, nothing replaced it, and nothing guards it**
+ * (MUSE-84's „also in scope"). „Bez partnera, bez iskustva" are facts about how a class
+ * runs and the site says them everywhere, `siteSettings.tagline` included. „Bez obveze"
+ * is a *term of an offer* — nobody has said what attending a first class commits you to,
+ * and `/pricing` publishes three rates and no trial rate. Retiring an unsupported
  * commercial term needs no decision from the studio; adding one does (MUSE-71).
+ *
+ * **Nothing in the suite refuses it, and this comment used to say something did**
+ * (MUSE-114). `test/pricing.test.ts` was credited here with refusing the English half „one
+ * layer down", and it does not: its needle runs over `periodName(period, locale)` — the
+ * three `PRICE_PERIODS` names, never page copy — and it is English-only, so the Croatian
+ * would pass it even inside a period name. `RETIRED_CLAIMS` in
+ * `test/helpers/offer-claims.ts` is where a guard would live and it has no entry for this
+ * either, so the sentence can come back to this lede with every gate green; what stops it
+ * is this paragraph. Accepted rather than fixed in passing, because the needle would have
+ * to be a *class* rather than a literal (MUSE-84, MUSE-109) and an entry there carries the
+ * live strings it was measured against — its own ticket, not a comment correction.
  *
  * **`elseLede` names no mechanism, and that is what makes it ungated** (MUSE-117).
  *

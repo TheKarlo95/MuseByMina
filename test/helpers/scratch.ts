@@ -283,9 +283,10 @@ const ASTRO_ERROR_CONTEXT = /^\s*(?:at\s|[╭╰│├┬─└┌]|Hint:|Locati
  *   1. `[ERROR] [vite] ✗ Build failed in 212ms` / `[UNRESOLVED_IMPORT] Could not resolve
  *      '…' in src/lib/icon.ts` — a deleted asset. The banner, then the cause.
  *   2. `[ERROR] [muse-staging-guard] An unhandled error occurred …` / `outDir must start
- *      with the project root path, and may not be the root (MUSE-41, MUSE-92).` — same
- *      shape, our own integration. (MUSE-92 reworded that line; the shape is unchanged,
- *      and it is why the guard's headline is one line and carries the ticket refs.)
+ *      with the project root path and with the working directory, and may not be the root
+ *      (MUSE-41, MUSE-92, MUSE-108).` — same shape, our own integration. (MUSE-92 and
+ *      MUSE-108 each reworded that line; the shape is unchanged, and it is why the guard's
+ *      headline is one line and carries the ticket refs.)
  *   3. `[ERROR] SanityContentError: There is no \`siteSettings\` document …` / `    at
  *      requireDocument (…)` — the cause is *on* the marker line and what follows is a
  *      stack frame.
@@ -734,7 +735,8 @@ export async function astroDev(
    *
    * Why it is here rather than in each suite: `test/fonts.test.ts` measured `404.astro` in
    * CI for the life of MUSE-35's coverage and stayed green, because the error page carries
-   * the same stylesheet, the same six faces and the same two preloads. Its own
+   * the same stylesheet, the same six faces and — the preload set being per page since
+   * MUSE-74 — the same six preloads as a Croatian page. Its own
    * per-request canonical check (MUSE-62) is what catches a wrong *route*; this catches a
    * wrong *base*, which is the failure that makes every route wrong at once, and it
    * catches it for a suite written next year that has never heard of either ticket.
