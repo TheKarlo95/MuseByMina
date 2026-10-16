@@ -1,7 +1,10 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { normalizeValidationRules } from '@sanity/validation/_internal';
+import { createSchema } from 'sanity';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 // The build gate itself, so `npm test` asserts properties of the gate rather than
@@ -15,6 +18,7 @@ import {
 } from '../scripts/check-sanity.mjs';
 import { schemaTypes, SINGLETON_TYPES } from '../sanity/schemaTypes';
 import {
+  ROUTE_VALUES,
   SOCIAL_PLATFORMS,
   SOCIAL_PLATFORM_NAME,
   WITHDRAWN_OPTION_SETS,
@@ -115,8 +119,21 @@ interface FieldLike {
   type: string;
   options?: Record<string, unknown>;
   fields?: FieldLike[];
-  of?: FieldLike[];
+  of?: ArrayMemberLike[];
   validation?: unknown;
+}
+
+/**
+ * An array *member* — the `of: [...]` entry that says what an array holds.
+ *
+ * Typed apart from `FieldLike` for one reason: a member may be anonymous, and seven of
+ * the nine in this schema are (`pricingTier.features[]`, `event.lineup[]`, the two
+ * `instructors[]`, …). Declaring `name` required here and reading it anyway is how
+ * `${path}.undefined` ends up in a failure message, or a `.toLowerCase()` throws on a
+ * guard's widest sweep.
+ */
+interface ArrayMemberLike extends Omit<FieldLike, 'name'> {
+  name?: string;
 }
 
 interface TypeLike {
@@ -134,19 +151,54 @@ function typeNamed(name: string): TypeLike {
   return found;
 }
 
-/** Every field in the schema, with the path it sits at — nested fields included. */
-function allFields(): { path: string; field: FieldLike }[] {
+/**
+ * Every node of the schema definitions, with the path it sits at.
+ *
+ * `members: false` is "every field Mina types into" — nested fields included, array
+ * members skipped. `members: true` adds the `of: [...]` entries themselves, which is a
+ * different question and the one MUSE-95 needed: **an array member can carry an
+ * `options.list` of its own**, and that is the normal shape of a Sanity multi-select
+ * (`type: 'array', of: [{type: 'string', options: {list: [...]}}]`).
+ *
+ * The walk recursed *through* a member into `member.fields` and never pushed the member,
+ * so every rule stated over `allFields()` was blind to that shape. It was caught anyway,
+ * by the text scan below, and only because `sanity/schema.json` happens to record the
+ * extracted literals and happens to sit inside `sanity/` — a guard holding by luck
+ * (MUSE-95). The `Rule.valid()` form is not recorded there, which is the half that
+ * escaped.
+ *
+ * An anonymous member is given the empty string as a name rather than being renamed after
+ * its type: a name-substring rule has to be able to ask the question and get "no" from a
+ * node that has no name, and a type name — `string`, `reference`, `localeText` — is not a
+ * name anybody chose. Nothing may be *required* of a member through this walk for that
+ * reason, so the two assertions about what Mina reads keep the narrower set.
+ */
+function walkSchema({ members }: { members: boolean }): { path: string; field: FieldLike }[] {
   const out: { path: string; field: FieldLike }[] = [];
   const visit = (prefix: string, fields: FieldLike[] | undefined): void => {
     for (const field of fields ?? []) {
       const path = `${prefix}.${field.name}`;
       out.push({ path, field });
       visit(path, field.fields);
-      for (const member of field.of ?? []) visit(`${path}[]`, member.fields);
+      for (const member of field.of ?? []) {
+        const memberPath = `${path}[]`;
+        if (members) out.push({ path: memberPath, field: { ...member, name: member.name ?? '' } });
+        visit(memberPath, member.fields);
+      }
     }
   };
   for (const type of types) visit(type.name, type.fields);
   return out;
+}
+
+/** Every field in the schema, with the path it sits at — nested fields included. */
+function allFields(): { path: string; field: FieldLike }[] {
+  return walkSchema({ members: false });
+}
+
+/** The same, plus the array members themselves — see `walkSchema`. */
+function allFieldsAndArrayMembers(): { path: string; field: FieldLike }[] {
+  return walkSchema({ members: true });
 }
 
 /**
@@ -173,6 +225,22 @@ function optionValues(field: FieldLike): string[] {
 }
 
 /**
+ * The first half of every withdrawal failure: which ticket, which dimension, and the
+ * registry's own `because` quoted verbatim.
+ *
+ * One function because four assertions say it now, and because the thing that must not be
+ * lost is the `because` — this guard is not defending a settled decision (the design
+ * brief and MUSE-36 still disagree about whether the studio teaches by style), so a
+ * message that only said „not allowed" would stop the conversation it exists to start.
+ */
+function withdrawnPreamble(withdrawn: (typeof WITHDRAWN_OPTION_SETS)[number]): string {
+  return (
+    `${withdrawn.ticket} withdrew the ${withdrawn.dimension} dimension: ` +
+    `${withdrawn.because}\n`
+  );
+}
+
+/**
  * Every file the schema fingerprint covers, repo-relative — derived from `SOURCE_GLOBS`
  * rather than listed, so a new schema source is scanned without anybody adding it here.
  *
@@ -188,6 +256,204 @@ function fingerprintedFiles(): string[] {
       ? walkTree(join(ROOT, glob.slice(0, -3))).map((file) => relative(ROOT, file))
       : [glob];
   });
+}
+
+/* -------------------------------------------- the closed sets the Studio enforces */
+
+/**
+ * **The schema as Sanity resolves it, which is the only place a closed set is a fact.**
+ *
+ * MUSE-95. Everything else here reads the schema *definitions* or the schema *source
+ * text*, and a withdrawn dimension can be put back out of reach of both: declare the
+ * values in a module nothing fingerprints, import them into a field's `validation`, and
+ * the definitions hold a function the walk cannot inspect while the source files hold no
+ * literal to scan for. Reproduced exactly as the ticket describes it — `src/lib/vibe.ts`
+ * exporting the three strings, `class.pristup` validated with `oneOf(Rule, [...VIBES])`,
+ * `npm run sanity:types` — and the gate exited 0 with all 64 tests here green, against a
+ * closed set Sanity's own validator really enforced.
+ *
+ * So the question is asked of the resolved schema instead: *what does the Studio actually
+ * refuse?* `createSchema` resolves each field's type, and `normalizeValidationRules` —
+ * `@sanity/validation`'s own normaliser, the one the Studio's validation runs through —
+ * turns that type's `validation` into the `Rule` objects whose `_rules` can be read. A
+ * declared `.valid([...])` lands there, and so does the rule Sanity **infers** from an
+ * `options.list`, so one reader covers both forms and does not care where the values came
+ * from: a literal, an imported constant, a spread, a module in no list anywhere.
+ *
+ * `@sanity/validation` is a declared devDependency pinned to the version `sanity` pins,
+ * for the reason `test/routes.test.ts` states beside its own use of it.
+ *
+ * **What this cannot see**, written down rather than left to be discovered:
+ *
+ *   - **`Rule.custom()`.** The constraint is a function. Sanity also skips a custom rule
+ *     entirely unless the validation run is given a client, so it is unobservable in a
+ *     test either way — which is the note already on `oneOf` in `enums.ts`, and the
+ *     reason this repo declares its closed sets with `valid()`.
+ *   - **A free-text field.** A withdrawn value Mina could *type* is not a closed set, and
+ *     this reader will say nothing about it. The name layer and the text scan are what
+ *     cover that half, which is why all four layers stay.
+ *   - **Values that are not strings.** Everything withdrawn here is a string; a numeric
+ *     or object constraint is read as no match rather than stringified, for
+ *     `optionValues`'s reason.
+ *   - **A node reached some way other than `fields` and `of`.** Reference *targets* are
+ *     not followed, because a field on another document type is that type's field and is
+ *     walked as such.
+ */
+const resolvedSchema = createSchema({ name: 'muse', types: schemaTypes as never });
+
+/** A resolved schema node, as much of it as this walk reads. */
+interface ResolvedType {
+  name?: string;
+  jsonType?: string;
+  fields?: { name: string; type: ResolvedType }[];
+  of?: ResolvedType[];
+}
+
+/**
+ * `_rules`, as `@sanity/validation` itself types them — no second copy of the union.
+ *
+ * It is declared `@internal` and `@deprecated internal use only`, so `astro check`
+ * reports two hints here (hints, not warnings: the run is still 0/0). That is the right
+ * trade and not an oversight. Reading it off Sanity's own types means the flags and
+ * constraints this understands cannot drift from the ones the Studio enforces, and the
+ * alternative — restating the parts of `RuleSpec` we read — is a second copy of a fact,
+ * which is the shape MUSE-76 was filed about. If a future `sanity` removes it, the
+ * positive control in „reads the closed sets the Studio really enforces" fails and says
+ * so; a hand-written union would keep compiling and report nothing.
+ */
+type NormalisedRule = ReturnType<typeof normalizeValidationRules>[number];
+type RuleSpecLike = NormalisedRule['_rules'][number];
+
+/**
+ * Every value a node's validation declares as allowed, or `[]` when it declares no
+ * closed set at all.
+ *
+ * `all` and `either` carry nested rules, so they are followed: `Rule.either(valid([…]),
+ * …)` declares the same set one level down. Measured, and the reason for the
+ * `Array.isArray` on a field the types call an array: that constraint arrives as a single
+ * rule object for a two-child `either`.
+ *
+ * The one cast is the handover of a resolved type to the normaliser, which wants Sanity's
+ * full `SchemaType`; this walk reads four of its keys and models no more than that.
+ */
+function declaredClosedSet(type: ResolvedType): string[] {
+  const read = (rules: NormalisedRule[]): string[] =>
+    rules.flatMap((rule) =>
+      (rule._rules ?? []).flatMap((spec: RuleSpecLike) => {
+        if (spec.flag === 'all' || spec.flag === 'either') {
+          const nested = spec.constraint;
+          return read(Array.isArray(nested) ? nested : [nested]);
+        }
+        return spec.flag === 'valid'
+          ? spec.constraint.filter((value): value is string => typeof value === 'string')
+          : [];
+      }),
+    );
+  return [...new Set(read(normalizeValidationRules(type as never)))];
+}
+
+/**
+ * Every node of the resolved schema, from this project's own types down.
+ *
+ * The roots are the definitions rather than `schema.getTypeNames()`, so the walk covers
+ * what somebody here wrote and not Sanity's built-ins; a built-in reached through one of
+ * our fields (an image's `asset`) is walked as part of that field. Resolved types are
+ * shared — one `localeString` object serves every bilingual value — so a node is visited
+ * once and reported at the first path that reaches it. That is enough: a closed set is a
+ * property of the type, not of the path.
+ */
+function resolvedNodes(): { path: string; type: ResolvedType }[] {
+  const out: { path: string; type: ResolvedType }[] = [];
+  const seen = new Set<ResolvedType>();
+  const visit = (path: string, type: ResolvedType | undefined): void => {
+    if (!type || seen.has(type)) return;
+    seen.add(type);
+    out.push({ path, type });
+    for (const field of type.fields ?? []) visit(`${path}.${field.name}`, field.type);
+    for (const member of type.of ?? []) visit(`${path}[]`, member);
+  };
+  for (const type of types) visit(type.name, resolvedSchema.get(type.name) as ResolvedType);
+  return out;
+}
+
+/* ------------------------------------------------ the modules the schema is built from */
+
+/** Where the schema starts. `schemaTypes` is what `sanity.config.ts` hands the Studio. */
+const SCHEMA_ENTRY = 'sanity/schemaTypes/index.ts';
+
+/**
+ * **Every module the schema is built from, read off its own imports** (MUSE-95).
+ *
+ * `SOURCES` in `scripts/check-sanity.mjs` is hand-written and per file under `src/lib/`,
+ * deliberately — a coarse `src/lib/**` would make a CSS edit a schema change and spend
+ * `SANITY_DEPLOY_TOKEN` republishing Mina's Studio. The cost of that choice is that a
+ * module the schema imports can sit in neither the fingerprint nor the text scan, so the
+ * three withdrawn values can live in it and later edits to them are not even a schema
+ * change. Nothing asserted the two agreed; this is that assertion, and it is derived
+ * rather than listed, which is the half a filename-based fix cannot have.
+ *
+ * The entry point is the **schema** and not `sanity.config.ts`. Only the schema declares
+ * fields, and the config reaches `sanity/badges.ts` → `src/lib/rebuild.ts`, which is
+ * studio-only on purpose: the rebuild cadence is not schema source and making it one
+ * would invalidate the artefacts whenever the cron moved.
+ *
+ * Syntax, not words (`test/helpers/source-guard.ts`'s rule): specifiers are read off
+ * import and export declarations and off `import('…')`, so a path named in a comment or
+ * in prose is not a module. A specifier that resolves to nothing throws rather than being
+ * dropped — `matchesGlob`'s reason, that a reader which quietly answers "nothing here"
+ * makes every check downstream of it pass by not understanding the question.
+ *
+ * Bare specifiers are not followed: `sanity` and `typescript` are packages, they are not
+ * ours to scan, and a value inside one of them is reachable only by the resolved-schema
+ * layer — which is where the guarantee lives, and why this one is about coverage rather
+ * than about the values.
+ */
+function schemaModules(): string[] {
+  const found = new Set<string>();
+  const queue = [SCHEMA_ENTRY];
+
+  while (queue.length > 0) {
+    const file = queue.shift() as string;
+    if (found.has(file)) continue;
+    found.add(file);
+
+    const text = readFileSync(join(ROOT, file), 'utf8');
+    const tree = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+    const specifiers: string[] = [];
+    const collect = (node: ts.Node): void => {
+      if (
+        (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+        node.moduleSpecifier &&
+        ts.isStringLiteral(node.moduleSpecifier)
+      ) {
+        specifiers.push(node.moduleSpecifier.text);
+      }
+      if (
+        ts.isCallExpression(node) &&
+        node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        node.arguments[0] &&
+        ts.isStringLiteral(node.arguments[0])
+      ) {
+        specifiers.push(node.arguments[0].text);
+      }
+      ts.forEachChild(node, collect);
+    };
+    collect(tree);
+
+    for (const specifier of specifiers) {
+      if (!specifier.startsWith('.')) continue;
+      const base = join(ROOT, file, '..', specifier);
+      const candidate = ['', '.ts', '.tsx', '/index.ts', '/index.tsx']
+        .map((suffix) => `${base}${suffix}`)
+        .find((path) => existsSync(path) && statSync(path).isFile());
+      if (!candidate) {
+        throw new Error(`\`${specifier}\` in ${file} resolves to no file — teach this walk.`);
+      }
+      queue.push(relative(ROOT, candidate));
+    }
+  }
+
+  return [...found].sort();
 }
 
 /**
@@ -510,38 +776,38 @@ describe('the closed sets stay in code, not in the CMS', () => {
      * only other needles for those three words in the repository are over page copy and
      * route strings (`test/whatisbachata.test.ts`), not over the schema.
      *
-     * So: three layers, widest last.
+     * So: four layers, widest last.
      *
      *   1. **Named after it.** Kept from MUSE-36 unchanged in effect, because for the
      *      obvious case it gives the clearest failure there is — one field path and
      *      nothing else to read. It is not the guarantee; a third name defeats it.
-     *   2. **Offering the values**, in any fixed list, under any field name, on any type.
-     *      This is the guarantee, and the acceptance criterion is `vrsta` rather than
-     *      `style`.
-     *   3. **Naming the values anywhere in the schema source** — the test below. A closed
-     *      set does not have to be an `options.list`: this repo declares one through
-     *      `Rule.valid()` as well (`oneOf`, `page.route`), and `validation` is a function
-     *      that cannot be inspected without calling it. Layer 2 cannot see that; a text
-     *      scan can.
+     *   2. **Offering the values**, in any fixed list, under any field name, on any type
+     *      — and, since MUSE-95, on any array *member*, which is the normal shape of a
+     *      Sanity multi-select and was reachable by nothing here.
+     *   3. **Declaring them as a closed set the Studio enforces** — the test below, which
+     *      asks `@sanity/validation` what the field really refuses. This is the guarantee
+     *      now: it reads a resolved rule rather than a written literal, so it holds
+     *      wherever the values were declared.
+     *   4. **Naming the values anywhere the schema is built from** — the text scan after
+     *      it, which is the only layer that can name a `file:line`.
      *
      * The values, the names and the reason all come from `WITHDRAWN_OPTION_SETS` in
      * `sanity/schemaTypes/enums.ts`. Nothing about bachata is written here.
      */
     for (const withdrawn of WITHDRAWN_OPTION_SETS) {
       const why =
-        `${withdrawn.ticket} withdrew the ${withdrawn.dimension} dimension: ` +
-        `${withdrawn.because}\n` +
+        `${withdrawnPreamble(withdrawn)}` +
         'Read the note on `WITHDRAWN_OPTION_SETS` in sanity/schemaTypes/enums.ts ' +
         'before putting it back.';
 
-      const named = allFields()
+      const named = allFieldsAndArrayMembers()
         .filter(({ field }) =>
           withdrawn.names.some((needle) => field.name.toLowerCase().includes(needle)),
         )
         .map(({ path }) => path);
       expect(named, `a schema field is named after it. ${why}`).toEqual([]);
 
-      const offering = allFields()
+      const offering = allFieldsAndArrayMembers()
         .map(({ path, field }) => ({
           path,
           found: optionValues(field).filter((value) => withdrawn.values.includes(value)),
@@ -555,21 +821,92 @@ describe('the closed sets stay in code, not in the CMS', () => {
     }
   });
 
-  it('names no withdrawn value anywhere in the schema source, list or not', () => {
+  it('reads the closed sets the Studio really enforces, in all three forms', () => {
     /**
-     * Layer 3, and a tripwire rather than a model of the schema (the same role the
+     * The positive control for the reader the next test depends on, and it is not
+     * decoration: `declaredClosedSet` finds a withdrawn dimension by finding a closed set,
+     * so a reader that has stopped resolving rules — a renamed `_rules`, a changed
+     * normaliser, a `createSchema` that no longer resolves field types — reports nothing
+     * and passes. "A guard that finds no affordances passes" is the shape this repository
+     * keeps re-filing.
+     *
+     * Three paths, one per declaration form this schema uses:
+     *
+     *   - `class.level` declares its set **only** as `options.list`, so reading it proves
+     *     the rule Sanity *infers* from a list is resolved and read.
+     *   - `page.route` declares one with `oneOf(Rule, …)`, i.e. `Rule.valid()` — the form
+     *     no walk of `options` can see, and the one MUSE-95's escape used.
+     *   - `siteSettings.social[].platform` sits inside a named array member, so reading it
+     *     proves the walk goes through `of: [...]` rather than stopping at the array.
+     */
+    const closedSets = new Map(
+      resolvedNodes().map(({ path, type }) => [path, declaredClosedSet(type)]),
+    );
+
+    expect(closedSets.get('class.level')).toEqual([...LEVELS]);
+    expect(closedSets.get('page.route')).toEqual([...ROUTE_VALUES]);
+    expect(closedSets.get('siteSettings.social[].platform')).toEqual([...SOCIAL_PLATFORMS]);
+  });
+
+  it('declares no withdrawn value as a closed set, wherever the values come from', () => {
+    /**
+     * **Layer 3, and the guarantee since MUSE-95.**
+     *
+     * The three layers before this one read what the schema *says* — a field's name, a
+     * field's `options`, the text of the files the fingerprint covers. All three can be
+     * stepped around at once by declaring the values somewhere else and importing them:
+     * `src/lib/vibe.ts` exporting `['traditional', 'moderna', 'sensual']`, a field
+     * validated with `oneOf(Rule, [...VIBES])`, `npm run sanity:types` — and the build
+     * gate exited 0 with every test in this file green, against a set Sanity's validator
+     * really enforced. Reproduced before this test existed.
+     *
+     * This asks the resolved schema instead, so the question is no longer *where were the
+     * values written* but *what does the Studio refuse* — see `declaredClosedSet`, which
+     * also records what it cannot see. A field name is not needed, a literal is not
+     * needed, and no list of files is involved, so there is nothing here for the next
+     * escape to be one import away from.
+     */
+    for (const withdrawn of WITHDRAWN_OPTION_SETS) {
+      const offering = resolvedNodes()
+        .map(({ path, type }) => ({
+          path,
+          found: declaredClosedSet(type).filter((value) =>
+            withdrawn.values.includes(value.toLowerCase()),
+          ),
+        }))
+        .filter(({ found }) => found.length > 0)
+        .map(({ path, found }) => `${path} allows only ${found.join(', ')}`);
+
+      expect(
+        offering,
+        'the Studio enforces the withdrawn values as a closed set. ' +
+          `${withdrawnPreamble(withdrawn)}` +
+          'Where the values are declared makes no difference to this check: it reads the ' +
+          'rules `@sanity/validation` resolves, not the schema source.',
+      ).toEqual([]);
+    }
+  });
+
+  it('names no withdrawn value anywhere the schema is built from, list or not', () => {
+    /**
+     * Layer 4, and a tripwire rather than a model of the schema (the same role the
      * comment-blanked text scan plays in `test/helpers/source-guard.ts`).
      *
      * It exists because "a closed set" is not the same thing as "an `options.list`".
      * `oneOf(Rule, ROUTE_VALUES)` declares one through `Rule.valid()` and this repo uses
      * it on `page.route`; `initialValue: 'sensual'` declares one by habit; a field
      * *description* naming the three styles puts the dimension in front of Mina with no
-     * field at all. None of those is reachable by walking `options`, and `validation` is
-     * a function that cannot be read without being called.
+     * field at all. None of the three is reachable by walking `options`, and the last one
+     * is not reachable by the layer above either — a description is not a validation rule,
+     * and it is the one of the three that reaches Mina without a field at all.
      *
-     * Scanned over the files the schema fingerprint already covers, derived from
-     * `SOURCE_GLOBS` so that a new schema source is scanned without being listed twice.
-     * The failure names `file:line`, which a whole-schema assertion cannot.
+     * Scanned over the files the schema fingerprint covers **and every module the schema
+     * imports** (MUSE-95), both derived — `SOURCE_GLOBS` and `schemaModules()` — so a new
+     * schema source is scanned without being listed anywhere. The union is what makes the
+     * failure a `file:line` in the module that holds the values, which is the thing a
+     * whole-schema assertion cannot say and the reason this layer survives the one above
+     * it. The next test is the other half: a module in the graph and not in the
+     * fingerprint is a schema change nothing would make you regenerate.
      *
      * One exemption, and it is the registry itself — the one place the values are allowed
      * to be written down. Two things about it are asserted rather than assumed (MUSE-42's
@@ -585,7 +922,7 @@ describe('the closed sets stay in code, not in the CMS', () => {
      * whole of MUSE-36.
      */
     const REGISTRY = 'sanity/schemaTypes/enums.ts';
-    const files = fingerprintedFiles();
+    const files = [...new Set([...fingerprintedFiles(), ...schemaModules()])].sort();
     expect(files, `${REGISTRY} is no longer a schema source — move the registry`).toContain(
       REGISTRY,
     );
@@ -621,11 +958,56 @@ describe('the closed sets stay in code, not in the CMS', () => {
       expect(
         hits,
         'the schema source names a withdrawn value. ' +
-          `${withdrawn.ticket} withdrew the ${withdrawn.dimension} dimension: ` +
-          `${withdrawn.because}\n` +
+          `${withdrawnPreamble(withdrawn)}` +
           `The values belong in \`WITHDRAWN_OPTION_SETS\` (${REGISTRY}) and nowhere else.`,
       ).toEqual([]);
     }
+  });
+
+  it('fingerprints every module the schema imports, so a new one is not a blind spot', () => {
+    /**
+     * MUSE-95's other half. The scan above now reads the import graph whether or not
+     * anybody has listed it, so the values cannot hide in a new module — but the
+     * *fingerprint* is still `SOURCES`, and a module outside it is a module whose edits
+     * are not a schema change: change the three values in it tomorrow and
+     * `scripts/check-sanity.mjs` says the artefacts are current, CI does not regenerate,
+     * and `studio.yml` does not redeploy the Studio that is now a schema behind.
+     *
+     * So the two are held to each other, in the one direction that is a defect.
+     * `SOURCES` may legitimately be wider — `src/lib/sanity/queries.ts` is in it because
+     * `sanity typegen` reads the query text, and the schema imports none of it — but it
+     * may not be narrower than what the schema is built from.
+     *
+     * The fix for a failure here is `SOURCES` in `scripts/check-sanity.mjs`, which is one
+     * line and is where the cost belongs; it is deliberately not a widening of the glob
+     * to `src/lib/**`, for the reason written out above `SOURCES` itself.
+     *
+     * The positive control is the three modules the schema imports today. Without it a
+     * walk that resolved nothing — a parser handed the wrong script kind, an entry point
+     * that moved — would report an empty graph and pass, which is the failure mode of
+     * every derived list in this repository.
+     */
+    const graph = schemaModules();
+
+    for (const module of [
+      SCHEMA_ENTRY,
+      'sanity/schemaTypes/enums.ts',
+      'src/lib/events.ts',
+      'src/lib/pages.ts',
+      'src/lib/schedule.ts',
+    ]) {
+      expect(graph, `the schema import graph has stopped reaching ${module}`).toContain(module);
+    }
+
+    const unfingerprinted = graph.filter(
+      (module) => !SOURCE_GLOBS.some((glob) => matchesGlob(module, glob as string)),
+    );
+    expect(
+      unfingerprinted,
+      'the schema imports a module the fingerprint does not cover, so editing it is not ' +
+        'a schema change and nothing would make you regenerate. Add it to `SOURCES` in ' +
+        'scripts/check-sanity.mjs — see the note above that list, and MUSE-95.',
+    ).toEqual([]);
   });
 
   it('offers exactly the weekdays the schedule grid knows, Monday first', () => {

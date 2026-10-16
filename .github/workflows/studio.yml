@@ -20,7 +20,9 @@ on:
       # schema imports its closed sets out of — levels and weekdays, the route list, the
       # event kinds (MUSE-24).
       #
-      # The first seven entries are `SOURCE_GLOBS` in `scripts/check-sanity.mjs`, in order.
+      # The entries above the studio-only block are `SOURCE_GLOBS` in
+      # `scripts/check-sanity.mjs`, in order — a property rather than a count, because the
+      # count was "seven" until MUSE-95 added `src/lib/i18n.ts` to both lists.
       # A comment used to say "keep them together" and they had already drifted — the
       # fingerprint covered `src/lib/sanity/queries.ts` and this filter did not, and this
       # filter covered `sanity/structure.ts` as a single file while the fingerprint walked
@@ -33,6 +35,7 @@ on:
       - 'src/lib/schedule.ts'
       - 'src/lib/pages.ts'
       - 'src/lib/events.ts'
+      - 'src/lib/i18n.ts'
       - 'src/lib/sanity/queries.ts'
       #
       # `sanity/**` is a schema glob and nothing else, which is why `content/seed.ndjson`
