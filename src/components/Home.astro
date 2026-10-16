@@ -43,8 +43,44 @@ interface Props {
    * a class the timetable does not have even for one build.
    */
   entries: ClassEntry[];
+  /**
+   * **The hero's video and its poster, as URLs the wrapper imported** (MUSE-133).
+   *
+   * Same rule as everything above, and it is the reason these are strings rather than an
+   * `import` here: `import hero from '../assets/hero.webm?url'` is an import, and this
+   * file's import list cannot grow. The page wrappers own both imports, so Vite still
+   * emits the content-hashed asset and the base prefix is still applied at build time —
+   * which is the half `public/` plus a hand-written path gets wrong (MUSE-35).
+   */
+  hero: { video: string; poster: string };
+  /**
+   * The studio story — `studioStory`, already resolved to this page's locale.
+   *
+   * Resolved by the wrapper rather than handed over whole, for the import rule again:
+   * the locale pick is `story.heading[locale]`, which needs no type from the read path.
+   * The words are Mina's and are placeholder prose in the dataset until she types over
+   * them (MUSE-60); nothing here describes the studio.
+   */
+  story: { heading: string; paragraphs: string[] };
+  /**
+   * The rate card — every `pricingTier`, formatted by `src/lib/pricing.ts` in the wrapper.
+   *
+   * Formatted there and not here for two reasons: the import rule, and the rule that
+   * currency formatting is code (`formatPrice`, `periodName`) rather than something each
+   * surface spells its own way. **No price is written in this file** — `/pricing` is the
+   * page that publishes the rate card (MUSE-73), and this is the same three documents.
+   */
+  rates: { name: string; price: string; period: string }[];
+  /**
+   * Who teaches — `instructor`, name and role, resolved by the wrapper.
+   *
+   * Name and role are the whole of it. `portrait` and `bio` are optional because no real
+   * value exists for them, and a `required()` field with no value can only be filled with
+   * fiction, which is how MUSE-36 happened.
+   */
+  people: { name: string; role: string }[];
 }
-const { locale, address, entries } = Astro.props;
+const { locale, address, entries, hero, story, rates, people } = Astro.props;
 
 /** As on `/schedule`: the class length is read off the rows, never typed (MUSE-36). */
 const minutes = uniformDuration(entries);
@@ -62,12 +98,22 @@ const t = {
     schedule: 'Pogledaj raspored',
     startHere: 'Nova si u plesu?',
     startLede: 'Dvoja vrata, ne šest. Odaberi ono koje ti odgovara.',
+    week: 'Tjedni raspored',
+    weekLede: 'Kad se pleše',
+    about: 'O studiju',
+    aboutMore: 'Više o nama',
+    rates: 'Cijene',
+    ratesLede: 'Što košta',
+    ratesMore: 'Cijeli cjenik',
+    teachers: 'Tko predaje',
     where: 'Gdje smo',
     openMaps: 'Otvori u Google Maps',
     trial: 'Dođi na probni sat',
     // MUSE-71 removed this sentence's first half, which priced the first class at
     // nothing. The second half is the whole of what the studio has actually said.
     trialLede: 'Javi nam se i dogovorit ćemo termin.',
+    playVideo: 'Pokreni video',
+    pauseVideo: 'Zaustavi video',
     doorNudge: { beginner: 'Počni ovdje.' },
   },
   en: {
@@ -82,10 +128,20 @@ const t = {
     schedule: 'See the schedule',
     startHere: 'New to dancing?',
     startLede: 'Two doors, not six. Pick the one that fits.',
+    week: 'Weekly schedule',
+    weekLede: 'When we dance',
+    about: 'About the studio',
+    aboutMore: 'More about us',
+    rates: 'Prices',
+    ratesLede: 'What it costs',
+    ratesMore: 'The whole price list',
+    teachers: 'Who teaches',
     where: 'Where we are',
     openMaps: 'Open in Google Maps',
     trial: 'Come to a trial class',
     trialLede: 'Get in touch and we will find you a slot.',
+    playVideo: 'Play the video',
+    pauseVideo: 'Pause the video',
     doorNudge: { beginner: 'Start here.' },
   },
 }[locale];
@@ -205,22 +261,82 @@ if (doors.length === 0) {
       `check that their slots are switched on in the Studio.`,
   );
 }
+
+/**
+ * **The week, in the order it happens** (MUSE-133).
+ *
+ * The same rows as the doors and as `/schedule`, flattened: `groupByDay` is week-ordered
+ * and sorts each day by start time, so this is the timetable reading downwards. It is a
+ * preview and not a second timetable — no instructor, no duration, no level description,
+ * and `/schedule` is one link away — because two renderings of one dataset is how the
+ * homepage drifted from the schedule in the first place (MUSE-11).
+ */
+const week = groupByDay(entries).flatMap((group) =>
+  group.entries.map((entry) => ({
+    level: entry.level,
+    name: LEVEL_NAME[locale][entry.level],
+    when: `${WEEKDAY_NAME[locale][group.day]} · ${formatTime(entry.start)}`,
+  })),
+);
 ---
 
+{/*
+  **The hero carries the studio's own footage** (MUSE-133).
+
+  `aria-hidden` and an empty `alt`-equivalent: the video says nothing the copy does not,
+  so it is decorative and stays out of the accessibility tree. The poster is required by
+  design system §7.4 and has to look complete on its own — it is the first frame, so the
+  swap when playback starts is invisible, and it is what a visitor sees when motion is
+  not wanted.
+
+  `<source>` rather than `src` on the element is deliberate: `assetRefs` in
+  `test/helpers/build.ts` reads `<source>` and does not read `<video>`, so written this
+  way the hero's URL is checked against both deploy targets like every other asset
+  (MUSE-8). Written the other way it would be the one asset nothing checks.
+*/}
 <section class="hero">
-  <p class="eyebrow">{t.eyebrow}</p>
-  <h1 class="display">{t.h1}</h1>
-  <p class="lede">{t.lede}</p>
-  <div class="actions">
-    <a class="btn btnPrimary" href={localeUrl(CTA.route, locale)}>{CTA.label[locale]}</a>
-    <a class="btn btnSecondary" href={localeUrl('/schedule', locale)}>{t.schedule}</a>
+  <video
+    class="heroVideo"
+    poster={hero.poster}
+    muted
+    loop
+    playsinline
+    preload="none"
+    aria-hidden="true"
+    data-hero-video
+  >
+    <source src={hero.video} type="video/webm" />
+  </video>
+  <div class="heroScrim" aria-hidden="true"></div>
+
+  <div class="heroContent">
+    <p class="eyebrow">{t.eyebrow}</p>
+    <h1 class="display">{t.h1}</h1>
+    <p class="lede">{t.lede}</p>
+    <div class="actions">
+      <a class="btn btnPrimary" href={localeUrl(CTA.route, locale)}>{CTA.label[locale]}</a>
+      <a class="btn btnSecondary" href={localeUrl('/schedule', locale)}>{t.schedule}</a>
+    </div>
   </div>
+
+  <button
+    class="heroToggle"
+    type="button"
+    data-hero-toggle
+    data-play={t.playVideo}
+    data-pause={t.pauseVideo}
+    aria-label={t.playVideo}
+  >
+    <span class="heroToggleGlyph" aria-hidden="true"></span>
+  </button>
 </section>
 
 <section class="section sunken">
   <div class="wrap">
-    <p class="eyebrow">{t.startHere}</p>
-    <h2 class="displayM">{t.startLede}</h2>
+    <div class="head">
+      <p class="eyebrow">{t.startHere}</p>
+      <h2 class="displayM">{t.startLede}</h2>
+    </div>
     <ul class="cards two">
       {
         doors.map((d) => (
@@ -241,6 +357,28 @@ if (doors.length === 0) {
   </div>
 </section>
 
+<section class="section">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">{t.week}</p>
+      <h2 class="displayM">{t.weekLede}</h2>
+    </div>
+    <ul class="slots">
+      {
+        week.map((slot) => (
+          <li class="slot">
+            <p class="slotWhen">{slot.when}</p>
+            <p class="slotName" data-level-name={slot.level}>{slot.name}</p>
+          </li>
+        ))
+      }
+    </ul>
+    <div class="actions">
+      <a class="btn btnSecondary" href={localeUrl('/schedule', locale)}>{t.schedule}</a>
+    </div>
+  </div>
+</section>
+
 {/*
   **„Tri okusa, jedan ples" was here, and nothing replaces it** (MUSE-36).
 
@@ -251,17 +389,81 @@ if (doors.length === 0) {
   dimension at all. Copy that is well written about something untrue is worse than no copy,
   because it reads as authoritative.
 
-  Nothing takes its place on purpose. The honest candidates were all facts the page already
-  carries — the two doors name the days and times, `/schedule` is one click from the hero,
-  the address is two sections down — and writing a section about what a class is like would
-  be inventing the next thing somebody has to come back and delete. A section here is a
-  content decision for Mina, not a gap to be filled by whoever happened to notice it.
+  What stands here now is the studio's own story, out of the CMS (MUSE-133) — the same
+  `studioStory` document `/aboutus` renders, which is Mina's placeholder prose until she
+  types over it and asserts nothing checkable. The section is hers to fill, which is what
+  MUSE-36 asked for; it is not a paragraph written here about what a class is like.
 */}
+
+<section class="section">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">{t.about}</p>
+      <h2 class="displayM">{story.heading}</h2>
+      {story.paragraphs.map((paragraph) => <p class="prose">{paragraph}</p>)}
+    </div>
+    <div class="actions">
+      <a class="btn btnSecondary" href={localeUrl('/aboutus', locale)}>{t.aboutMore}</a>
+    </div>
+  </div>
+</section>
+
+<section class="section sunken">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">{t.rates}</p>
+      <h2 class="displayM">{t.ratesLede}</h2>
+    </div>
+    <ul class="rates">
+      {
+        rates.map((rate) => (
+          <li class="rate">
+            <p class="rateName">{rate.name}</p>
+            <p class="ratePrice">{rate.price}</p>
+            <p class="ratePeriod">{rate.period}</p>
+          </li>
+        ))
+      }
+    </ul>
+    <div class="actions">
+      <a class="btn btnSecondary" href={localeUrl('/pricing', locale)}>{t.ratesMore}</a>
+    </div>
+  </div>
+</section>
+
+{/*
+  The teachers, and why this section has an eyebrow and no heading.
+
+  Every heading that fits would be a claim this file is not allowed to make: naming them
+  spells out `instructor.name`, which is a CMS-owned value and belongs in Sanity
+  (`test/contentdrift.test.ts`), and counting them („dvoje instruktora") is a sentence that
+  goes stale the day a third person teaches. The names are the heading, and they arrive
+  from the dataset.
+*/}
+<section class="section">
+  <div class="wrap">
+    <div class="head">
+      <p class="eyebrow">{t.teachers}</p>
+    </div>
+    <ul class="people">
+      {
+        people.map((person) => (
+          <li class="person">
+            <p class="personName">{person.name}</p>
+            <p class="personRole">{person.role}</p>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</section>
 
 <section class="section invert" id="trial">
   <div class="wrap">
-    <p class="eyebrow">{t.trial}</p>
-    <h2 class="displayM">{t.trialLede}</h2>
+    <div class="head">
+      <p class="eyebrow">{t.trial}</p>
+      <h2 class="displayM">{t.trialLede}</h2>
+    </div>
     {/*
       MUSE-7: the form itself, not a "coming soon" email address. Every CTA on the site
       points here, so this is the conversion path. `:target { scroll-margin-top }` in
@@ -273,24 +475,145 @@ if (doors.length === 0) {
 
 <section class="section">
   <div class="wrap">
-    <p class="eyebrow">{t.where}</p>
-    <h2 class="displayM">{address}</h2>
-    <a class="btn btnSecondary" href={STUDIO.maps} target="_blank" rel="noopener noreferrer">
-      {t.openMaps}
-    </a>
+    <div class="head">
+      <p class="eyebrow">{t.where}</p>
+      <h2 class="displayM">{address}</h2>
+    </div>
+    <div class="actions">
+      <a class="btn btnSecondary" href={STUDIO.maps} target="_blank" rel="noopener noreferrer">
+        {t.openMaps}
+      </a>
+    </div>
   </div>
 </section>
 
 <style>
+  /*
+    The page is centred (MUSE-133): one measure, `text-align: center` on each section's
+    header block, and every grid centred inside it. The reference the ticket names does
+    the same thing with a container plus a narrow centred header per section, and this is
+    that construction with this site's own measure.
+  */
   .hero {
-    max-width: 1280px;
-    margin-inline: auto;
-    padding: var(--space-9) var(--space-5) var(--space-8);
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    min-height: 100svh;
+    padding: var(--space-9) var(--space-5);
+    text-align: center;
   }
   @media (min-width: 768px) {
     .hero {
-      padding: var(--space-11) var(--space-7) var(--space-10);
+      /* Design system §7.2: 100svh mobile, 88vh desktop — `svh`, so a phone's collapsing
+         toolbar does not resize the hero mid-scroll. */
+      min-height: 88svh;
+      padding: var(--space-10) var(--space-7);
     }
+  }
+
+  .heroVideo,
+  .heroScrim {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+  }
+  .heroVideo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  /*
+    §7.2's scrim, and the plum tint the ticket asks for: `--band-surface` is plum-ink in
+    *both* themes — the same role the masthead and the footer sit on — so the hero does not
+    invert with the page. Written with `color-mix()` over a role token because a component
+    may not name a brand colour (`npm run ds`).
+
+    **82% to 70%, not §7.2's 78% to 30%, and the difference is measured.** axe reports
+    `color-contrast` as *incomplete* over a moving ground, so nothing machine-checks this;
+    it was measured off the rendered screenshots instead, sampling the background between
+    the glyphs and compositing. At the specified stops this footage — a bright daylight
+    studio, not the warm low-lit register §9 describes — gave the lede **3.81:1** and the
+    ghost button's gold **1.79:1**, both of which fail AA for text that size. The video
+    under the lede is rgb(193, 171, 159) and under the buttons rgb(244, 207, 157); holding
+    gold to 4.5:1 over the second one is what sets the floor at 70%.
+
+    So the gradient survives as a gradient and its range is narrow, because the range is
+    what the contrast pays for. Measured again at these stops, on the rendered page in
+    both themes: eyebrow **5.86:1**, headline **11.12:1**, lede **6.60:1**, and the ghost
+    button's lettering **5.57:1** at its worst sample. The next time the footage changes,
+    re-measure — these are properties of this clip, not of the design.
+  */
+  .heroScrim {
+    background: linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--band-surface) 82%, transparent),
+      color-mix(in srgb, var(--band-surface) 70%, transparent)
+    );
+  }
+
+  .heroContent {
+    max-width: 48rem;
+    margin-inline: auto;
+  }
+  /* The hero sits on footage in both themes, so its text takes the band roles rather than
+     the page's — cream on plum-ink, gold accent, identical light and dark. */
+  .hero .eyebrow {
+    color: var(--band-accent);
+  }
+  .hero .display {
+    color: var(--band-text);
+  }
+  .hero .lede {
+    color: var(--band-muted);
+  }
+  .hero .btnPrimary {
+    background: var(--band-fill);
+    color: var(--band-fill-text);
+  }
+  /*
+    The ghost button gets a ground of its own, which it does not need anywhere else on the
+    site. Gold is the hardest colour to read over this footage — 1.79:1 against the
+    brightest frames — and the scrim alone cannot fix that without taking the video down
+    to a texture. A fill of the band's own surface keeps the shape a ghost button while
+    giving its lettering something fixed to sit on.
+  */
+  .hero .btnSecondary {
+    border-color: var(--band-accent);
+    color: var(--band-accent);
+    background: color-mix(in srgb, var(--band-surface) 72%, transparent);
+  }
+
+  /* §7.4: the control is 44px, an accent hairline circle, bottom-right. */
+  .heroToggle {
+    position: absolute;
+    right: var(--space-5);
+    bottom: var(--space-5);
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--band-line-accent);
+    border-radius: var(--radius-full);
+    background: transparent;
+    color: var(--band-accent);
+    cursor: pointer;
+  }
+  /* Two bars while it plays, a triangle while it does not — one element, no icon file. */
+  .heroToggleGlyph {
+    width: 11px;
+    height: 12px;
+    background: linear-gradient(
+      to right,
+      currentColor 0 35%,
+      transparent 35% 65%,
+      currentColor 65% 100%
+    );
+  }
+  .heroToggle[aria-pressed='false'] .heroToggleGlyph {
+    background: currentColor;
+    clip-path: polygon(0 0, 100% 50%, 0 100%);
   }
 
   .section {
@@ -305,8 +628,20 @@ if (doors.length === 0) {
     background: var(--surface-sunken);
   }
   .wrap {
-    max-width: 1280px;
+    max-width: var(--measure-page);
     margin-inline: auto;
+    text-align: center;
+  }
+
+  /* A section's header block: narrow, centred, and the prose inside it centred with it. */
+  .head {
+    max-width: 44rem;
+    margin-inline: auto;
+  }
+  .prose {
+    margin: var(--space-5) auto 0;
+    color: var(--text-muted);
+    line-height: 1.6;
   }
 
   .eyebrow {
@@ -345,12 +680,13 @@ if (doors.length === 0) {
     font-size: 1.125rem;
     line-height: 1.6;
     color: var(--text-muted);
-    margin-top: var(--space-5);
+    margin: var(--space-5) auto 0;
   }
 
   .actions {
     display: flex;
     flex-wrap: wrap;
+    justify-content: center;
     gap: var(--space-4);
     margin-top: var(--space-7);
   }
@@ -392,39 +728,69 @@ if (doors.length === 0) {
     color: var(--accent);
   }
 
-  .cards {
+  .cards,
+  .slots,
+  .rates,
+  .people {
     list-style: none;
     display: grid;
     gap: var(--space-4);
     margin-top: var(--space-7);
+    padding: 0;
   }
   @media (min-width: 768px) {
-    .cards {
+    .cards,
+    .slots,
+    .rates,
+    .people {
       gap: var(--space-6);
     }
     .cards.two {
       grid-template-columns: repeat(2, 1fr);
     }
   }
+  /* Auto-fitting rather than a fixed column count, so a fourth rate or a third teacher
+     needs no breakpoint — the track count follows the content. */
+  .slots,
+  .rates,
+  .people {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  }
+  .people,
+  .rates {
+    max-width: 58rem;
+    margin-inline: auto;
+  }
 
   /* No drop shadows anywhere in this system — depth is surface value plus hairlines. */
-  .card {
+  .card,
+  .slot,
+  .rate,
+  .person {
     border: 1px solid var(--line-accent);
     border-radius: var(--radius-sm);
     padding: var(--space-5);
   }
   @media (min-width: 768px) {
-    .card {
+    .card,
+    .slot,
+    .rate,
+    .person {
       padding: var(--space-6);
     }
   }
-  .cardName {
+  .cardName,
+  .rateName,
+  .personName {
     font-family: var(--font-display);
     font-size: clamp(1.625rem, 3vw, 2.125rem);
     line-height: 1.15;
     margin: 0;
   }
-  .cardWhen {
+  .cardWhen,
+  .slotWhen,
+  .ratePeriod,
+  .personRole {
     font-family: var(--font-label);
     font-size: 0.6875rem;
     letter-spacing: 0.2em;
@@ -433,9 +799,104 @@ if (doors.length === 0) {
     color: var(--accent);
     margin: var(--space-2) 0 0;
   }
+  .cardWhen {
+    margin-top: var(--space-2);
+  }
   .cardWho {
     font-size: 0.9375rem;
     color: var(--text-muted);
-    margin-top: var(--space-3);
+    margin: var(--space-3) auto 0;
+  }
+  .slotWhen {
+    margin: 0;
+  }
+  /* Cormorant's floor is 26px — below it the đ crossbar disappears and „Dođi" reads as
+     „Dodi" (`src/styles/fonts.css`). 1.625rem is that floor. */
+  .slotName {
+    font-family: var(--font-display);
+    font-size: clamp(1.625rem, 2.5vw, 1.875rem);
+    line-height: 1.15;
+    margin: var(--space-2) 0 0;
+  }
+  .ratePrice {
+    font-family: var(--font-display);
+    font-size: clamp(2.125rem, 4vw, 3rem);
+    line-height: 1.05;
+    margin: var(--space-2) 0 0;
   }
 </style>
+
+<script>
+  /**
+   * **The hero video, and the one decision CSS cannot make** (MUSE-133).
+   *
+   * `prefers-reduced-motion: reduce` is answered once, globally, in
+   * `src/styles/base.css` — and what it answers there is `animation`, `transition` and
+   * `scroll-behavior`. A playing `<video>` is none of those: no stylesheet can pause it.
+   * So this is not a second copy of that decision, it is the half of it that has to be
+   * script, and it is written here rather than in a component stylesheet for exactly that
+   * reason. Design system §8: *"disable video autoplay and show the poster with a play
+   * control."*
+   *
+   * Which is also why the element carries no `autoplay` attribute. With one, a visitor who
+   * has asked for less motion gets a frame or two of it before any script runs; without
+   * one, playback is something this file decides.
+   *
+   * **`preload="none"` is load-bearing and was measured** (MUSE-133). It was `auto` first,
+   * so that the browser fetched the file whether or not anything played it and the
+   * performance budget could keep weighing it. What that produced, with scripting off, is
+   * a media request nobody ever consumes: Chromium opens it, suspends it, and the page
+   * reaches `networkidle` only sometimes — four identical loads of `/` with JavaScript
+   * disabled timed out three times at 30 s, which `test/trialform.test.ts`'s no-script
+   * cases found first. With `none`, a page with no scripting asks for no video at all and
+   * shows the poster, which is what §7.4 requires the poster to be good for; `play()`
+   * below is what fetches it, so the budget still measures the whole file at both
+   * viewports — `npm run budget`'s `media` column says 1,250 KB on `/`, and a zero there
+   * is the signal that this went wrong again.
+   *
+   * The control is real either way: a visitor who wants the loop stopped, or started, can
+   * do it, and the label follows the state rather than being announced once.
+   */
+  const video = document.querySelector<HTMLVideoElement>('[data-hero-video]');
+  const toggle = document.querySelector<HTMLButtonElement>('[data-hero-toggle]');
+
+  if (video && toggle) {
+    const { play = '', pause = '' } = toggle.dataset;
+
+    const show = (playing: boolean) => {
+      toggle.setAttribute('aria-pressed', String(playing));
+      toggle.setAttribute('aria-label', playing ? pause : play);
+    };
+
+    const calm = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+    const start = () => {
+      // `play()` rejects when the browser declines to autoplay — a muted, inline video is
+      // normally allowed, but the poster staying put is the correct outcome either way, so
+      // the state follows what actually happened rather than what was asked for.
+      video.play().then(
+        () => show(true),
+        () => show(false),
+      );
+    };
+
+    if (calm.matches) show(false);
+    else start();
+
+    // A visitor who turns reduced motion on while the page is open gets the same answer as
+    // one who had it on when it loaded.
+    calm.addEventListener('change', (event) => {
+      if (!event.matches) return;
+      video.pause();
+      show(false);
+    });
+
+    toggle.addEventListener('click', () => {
+      if (video.paused) start();
+      else {
+        video.pause();
+        show(false);
+      }
+    });
+  }
+</script>

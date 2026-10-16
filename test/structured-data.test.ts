@@ -886,7 +886,10 @@ const SRC = fileURLToPath(new URL('../src', import.meta.url));
  */
 const CODE_EXTENSIONS = ['.ts'] as const;
 const MARKUP_EXTENSIONS = ['.astro'] as const;
-const INERT_EXTENSIONS = ['.css', '.png', '.woff2'] as const;
+// `.webm` and `.webp` are the hero video and its poster (MUSE-133) — inert for the same
+// reason the fonts and the lockup are: a JSON-LD block cannot hide in a binary, and the
+// test below keeps this list from rotting into fiction by asserting each one is still here.
+const INERT_EXTENSIONS = ['.css', '.png', '.webm', '.webp', '.woff2'] as const;
 
 type Kind = 'code' | 'markup' | 'inert';
 

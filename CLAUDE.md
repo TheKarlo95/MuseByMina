@@ -136,6 +136,13 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   right mark and a smudge. All five tab files carry **`?url&no-inline`**; the masthead mark
   must **not**. Both colour schemes, mutually exclusive `media`, plus a default opaque tile
   — an unknown media feature is *false*, not ignored (MUSE-75). → `design-and-assets.md`
+- **The hero video is the one piece of media in this repository, and `BUDGET.bytes.media`
+  holds it** (MUSE-133). `src/assets/hero.webm`, 1,250 KB, imported by the two homepage
+  wrappers because `Home.astro`'s import list cannot grow, and written
+  `<video><source></video>` — `assetRefs` reads `<source>`, not `<video>`. The plum tint is
+  §7.2's scrim over `--band-surface` via `color-mix()`, never a brand colour, and
+  **`prefers-reduced-motion` is answered in script**: no CSS rule can pause a video.
+  → `design-and-assets.md`
 - **A shared link shows a picture, and `siteSettings.shareImage` decides which** (MUSE-69).
   `shareCard()` is the one decision point. The URL is `new URL(card.src, Astro.site)` —
   **derived, never written**. `og:image:width`/`height` are required, not padding. No

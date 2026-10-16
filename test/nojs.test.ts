@@ -60,10 +60,25 @@ describe('the built site ships no JavaScript files and no CMS client', () => {
     // the output's PNGs are *exactly* the registered icons, content-hashed by Vite.
     // Keep the two together — the allow-list alone is now a weaker statement than it
     // reads as.
+    //
+    // `webm` joined it in MUSE-133, with the hero video: the first media file the site has
+    // shipped, and the first entry that is not a page, a style, a face or a picture. It
+    // gives nothing up from the no-script claim above, which is asserted directly against
+    // the extensions a script has and not inferred from this list. What it does give up is
+    // „no video anywhere", so the test below carries that instead.
     const extensions = [
       ...new Set(build.allFiles().map((file) => file.replace(/^.*\./, ''))),
     ].sort();
-    expect(extensions).toEqual(['css', 'html', 'png', 'txt', 'webp', 'woff2', 'xml']);
+    expect(extensions).toEqual(['css', 'html', 'png', 'txt', 'webm', 'webp', 'woff2', 'xml']);
+  });
+
+  it('emits exactly one video, the hero, through the asset graph', () => {
+    // The content hash is the claim, as it is for the PNGs below: a file Vite emitted has
+    // one, a file copied into the tree by hand does not. One video, because the budget's
+    // `media` line is a per-page sum sized for this file and nothing in the content model
+    // can add a second (MUSE-133).
+    const videos = build.allFiles().filter((file) => file.endsWith('.webm'));
+    expect(videos).toEqual([expect.stringMatching(/^_astro\/hero\.[A-Za-z0-9_-]+\.webm$/)]);
   });
 
   /**

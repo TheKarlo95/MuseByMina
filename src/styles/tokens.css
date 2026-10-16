@@ -47,6 +47,14 @@
   --space-1: 4px;   --space-2: 8px;   --space-3: 12px;  --space-4: 16px;
   --space-5: 24px;  --space-6: 32px;  --space-7: 48px;  --space-8: 64px;
   --space-9: 96px;  --space-10: 128px; --space-11: 160px;
+
+  /* The page measure, design system §5: content stops at 1280px and is centred in what
+     is left. It is a token as of MUSE-133 because the homepage was about to write the
+     literal for a third time; the ten components that still spell `max-width: 1280px`
+     were deliberately left alone, so this is the one place a new surface should read it
+     from rather than a migration half done. Prose keeps its own 68ch measure, which is
+     narrower and set on `p` in base.css. */
+  --measure-page: 1280px;
 }
 
 /* ---------- 2 · role tokens ----------

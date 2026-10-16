@@ -526,10 +526,22 @@ describe('MUSE-63: a page over budget names itself', () => {
    * suite owns "no script file is in `dist`", against the output and with an extension
    * allow-list, and two answers to one question is how this repository's worst bugs have
    * started. What the budget adds is the same defect seen from the wire, plus every *other*
-   * kind nobody has thought of: a `.wasm`, a `.webm`, a tracking pixel from a third party.
+   * kind nobody has thought of: a `.wasm`, an `.mp4`, an audio response, a tracking pixel
+   * from a third party.
+   *
+   * **`.webm` was the example here and is now a declared kind** (MUSE-133): the hero video
+   * has a line of its own in `BUDGET.bytes`. The examples above are its *siblings* on
+   * purpose — declaring one container did not declare video, and `KIND_BY_RESOURCE_TYPE`
+   * was deliberately left without a `media` entry, so an `.mp4` or a media response with
+   * no extension to read still arrives as `other:media` with no number under it.
    */
   it('refuses a resource kind that has no budget at all', () => {
     expect(BUDGET.bytes).not.toHaveProperty('js');
+    // The declared half, so „refuses an undeclared kind" cannot come to be satisfied by
+    // refusing the hero as well.
+    expect(BUDGET.bytes).toHaveProperty('media');
+    // And the undeclared sibling, which is what the paragraph above claims.
+    expect(kindOf('http://h/MuseByMina/hero.mp4', 'media')).toBe('other:media');
     // `image` is also not in `BUDGET.bytes` — it is budgeted per response (MUSE-25) — and
     // it must **not** be reported as unbudgeted, which would be a true sentence about a
     // kind that now has a stricter budget than it used to.
@@ -1177,6 +1189,11 @@ describe('MUSE-63: the budget is accounted for, number by number', () => {
       'BUDGET.bytes.css',
       'BUDGET.bytes.font',
       'BUDGET.bytes.html',
+      // MUSE-133. The hero video is a per-page sum rather than a per-response ceiling:
+      // nothing in the content model can add a second one, so the multiplier is ours and a
+      // sum refuses what a ceiling would pass. It is out of `total` for the reason written
+      // beside that line.
+      'BUDGET.bytes.media',
       'BUDGET.fonts.max',
       'BUDGET.fonts.min',
       // MUSE-25. `bytes.image` was here and is gone: photography is budgeted per response

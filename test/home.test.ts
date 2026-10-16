@@ -4,11 +4,12 @@ import { fileURLToPath } from 'node:url';
 
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { buildSite, PAGES_DEPLOY, type Build } from './helpers/build';
+import { assetFile, buildSite, linkHrefs, PAGES_DEPLOY, type Build } from './helpers/build';
 import { claimOutDir } from './helpers/scratch';
-import { seedDocs, seededSchedule } from './helpers/seed';
+import { seedDocs, seedDocsOfType, seededSchedule } from './helpers/seed';
 import { FORM_COPY } from '../src/lib/forms';
 import { LOCALES, type Locale } from '../src/lib/i18n';
+import { formatPrice } from '../src/lib/pricing';
 import {
   LEVELS,
   LEVEL_NAME,
@@ -444,6 +445,23 @@ function pauseLevelFixture(level: string): string {
 
 let build: Build;
 const page = {} as Record<Locale, { home: string; schedule: string }>;
+
+/**
+ * Every rule the homepage actually loads — its inline blocks *and* its stylesheets.
+ *
+ * Both halves, because which one a rule lands in is Astro's decision and not this page's:
+ * the component's block was inlined until MUSE-133 made it bigger than the threshold, and
+ * a test that reads only one half goes quietly vacuous the day that flips back.
+ */
+function homeCss(locale: Locale): string {
+  const html = page[locale].home;
+  const inline = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1]!);
+  const linked = linkHrefs(html, 'stylesheet')
+    .map((href) => assetFile(build, href))
+    .filter((file): file is string => file !== undefined && build.isFile(file))
+    .map((file) => build.read(file));
+  return [...inline, ...linked].join('\n');
+}
 /** The same site with the beginner class paused in the "Studio" — see the suite below. */
 let paused: Build;
 
@@ -527,8 +545,10 @@ describe('AC2: every level name in the output comes from LEVEL_NAME', () => {
         checked += 1;
       }
     }
-    expect(checked, 'found no level names to check — is the markup contract still there?')
-      .toBeGreaterThan(0);
+    expect(
+      checked,
+      'found no level names to check — is the markup contract still there?',
+    ).toBeGreaterThan(0);
   });
 
   it('names all three levels on /schedule in both locales', () => {
@@ -536,8 +556,10 @@ describe('AC2: every level name in the output comes from LEVEL_NAME', () => {
     for (const locale of LOCALES) {
       const byLevel = namesByLevel(page[locale].schedule);
       for (const level of LEVELS) {
-        expect([...(byLevel.get(level) ?? [])], `${level} missing from /schedule (${locale})`)
-          .toEqual([LEVEL_NAME[locale][level]]);
+        expect(
+          [...(byLevel.get(level) ?? [])],
+          `${level} missing from /schedule (${locale})`,
+        ).toEqual([LEVEL_NAME[locale][level]]);
       }
     }
   });
@@ -605,9 +627,10 @@ describe('the trial form’s level options are covered by the same mechanism', (
     }
     // `/` and `/pricing` render the same component; a single hit would mean the
     // matcher found the one page somebody remembered rather than the contract.
-    expect(pagesWithLevelSelect().length, 'the form is rendered on one page only').toBeGreaterThan(
-      2,
-    );
+    expect(
+      pagesWithLevelSelect().length,
+      'the form is rendered on one page only',
+    ).toBeGreaterThan(2);
   });
 
   it('marks every level option with data-level-name, on every page that has the form', () => {
@@ -615,8 +638,10 @@ describe('the trial form’s level options are covered by the same mechanism', (
       const [notSure, ...levels] = levelSelectOptions(build.read(file));
 
       expect(notSure!.value, `${file}: the first option is not the blank one`).toBe('');
-      expect(notSure!.level, `${file}: the "not sure yet" option claims to be a level`)
-        .toBeUndefined();
+      expect(
+        notSure!.level,
+        `${file}: the "not sure yet" option claims to be a level`,
+      ).toBeUndefined();
 
       expect(
         levels.map((option) => option.level),
@@ -628,16 +653,19 @@ describe('the trial form’s level options are covered by the same mechanism', (
   it('submits the level key as the option value, so there is one string per level', () => {
     for (const file of pagesWithLevelSelect()) {
       for (const option of levelSelectOptions(build.read(file)).slice(1)) {
-        expect(option.value, `${file}: the ${option.level} option submits "${option.value}"`).toBe(
-          option.level,
-        );
+        expect(
+          option.value,
+          `${file}: the ${option.level} option submits "${option.value}"`,
+        ).toBe(option.level);
         expect(LEVELS, `${file}: "${option.value}" is not a level key`).toContain(option.value);
       }
     }
   });
 
   it('keeps the blank option’s wording translated, since it is prose and not a level', () => {
-    const [hr, en] = LOCALES.map((locale) => levelSelectOptions(build.read(CONTACT_PAGE[locale]))[0]!);
+    const [hr, en] = LOCALES.map(
+      (locale) => levelSelectOptions(build.read(CONTACT_PAGE[locale]))[0]!,
+    );
     expect(hr!.label.trim(), 'the blank option lost its wording').not.toBe('');
     expect(en!.label, 'the "not sure yet" option is not translated').not.toBe(hr!.label);
   });
@@ -877,8 +905,10 @@ describe('AC3: the guard — a level name may not be hardcoded outside LEVEL_NAM
       `  intermediate: 'Plešeš oko godinu dana.',`,
     ];
     for (const sample of caught) {
-      expect(spellsOut(sample, 'Advanced') || spellsOut(sample, 'Plešeš oko godinu dana.'), sample)
-        .toBe(true);
+      expect(
+        spellsOut(sample, 'Advanced') || spellsOut(sample, 'Plešeš oko godinu dana.'),
+        sample,
+      ).toBe(true);
     }
   });
 
@@ -917,10 +947,12 @@ describe('the homepage no longer describes three styles of bachata', () => {
     it(`keeps no three-up grid rule in its stylesheet (${locale})`, () => {
       // The `.cards.three` rule had one user. A rule with no user is where the section
       // comes back from.
-      const styles = [...page[locale].home.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)]
-        .map((m) => m[1]!)
-        .join('\n');
-      expect(styles).not.toMatch(/\.cards\.three\b/);
+      //
+      // Read through `homeCss` rather than off the `<style>` blocks (MUSE-133): the
+      // homepage's rules outgrew Astro's inline threshold with the hero, so the page
+      // carries a `<link>` and no `<style>` at all. Written the old way this assertion
+      // passed over an empty string, which is the worst way for a guard to be green.
+      expect(homeCss(locale)).not.toMatch(/\.cards\.three\b/);
     });
   }
 });
@@ -981,18 +1013,17 @@ describe('the two beginner doors', () => {
       const html = paused.read(HOME[locale]);
       const remaining = doors(html);
 
-      expect(remaining.map((d) => d.level), 'the paused level still has a door').not.toContain(
-        'beginner',
-      );
+      expect(
+        remaining.map((d) => d.level),
+        'the paused level still has a door',
+      ).not.toContain('beginner');
       expect(remaining.length, 'every door vanished — the section is empty').toBeGreaterThan(0);
 
       // And the doors that survive still point at classes that run.
       for (const door of remaining) {
         const start = HH_MM.exec(door.when)?.[1];
         expect(
-          seededSchedule().some(
-            (row) => row.start === start && row.level === door.level,
-          ),
+          seededSchedule().some((row) => row.start === start && row.level === door.level),
           `the ${door.level} door points at ${door.when}, which is not a ${door.level} class`,
         ).toBe(true);
       }
@@ -1005,4 +1036,205 @@ describe('the two beginner doors', () => {
       }
     });
   }
+});
+
+/* ------------------------------------------------------------ the hero and the sections */
+
+/**
+ * **MUSE-133 — the homepage is centred, and its hero plays the studio's own footage.**
+ *
+ * Three things are asserted here that nothing else can see. The **video's shape**, because
+ * a `<video>` that is not muted, not looping or not `playsinline` is a different element
+ * on a phone than it is on a desk, and because the element is written with a `<source>`
+ * rather than a `src` for a reason that is invisible if you do not know it: `assetRefs`
+ * reads `<source>` and not `<video>`, so only this spelling is checked against both deploy
+ * targets (MUSE-8). The **scrim**, because `npm run ds` checks that a component names no
+ * brand colour and cannot check that the tint is the one §7.2 specifies. And the **reduced
+ * motion** path, because the global rule in `src/styles/base.css` collapses animations and
+ * transitions and can do nothing at all to a playing video — so that half is script, and a
+ * script is only a decision if something reads it.
+ *
+ * The sections are asserted against the seed rather than against copy: what the page says
+ * about rates, teachers and the studio has to be what the documents say, or the page is
+ * back to the invented content MUSE-36 is about.
+ */
+describe('the hero video and the sections the dataset fills (MUSE-133)', () => {
+  const heroVideo = (html: string): string => {
+    const found = /<video\b[\s\S]*?<\/video>/.exec(html);
+    expect(found, 'the homepage renders no <video> at all').not.toBeNull();
+    return found![0];
+  };
+
+  for (const locale of LOCALES) {
+    it(`plays one muted, looping, inline video with a poster (${locale})`, () => {
+      const html = page[locale].home;
+      expect([...html.matchAll(/<video\b/g)], 'more than one video').toHaveLength(1);
+
+      const video = heroVideo(html);
+      for (const attribute of ['muted', 'loop', 'playsinline']) {
+        expect(video, `the hero video is not ${attribute}`).toMatch(
+          new RegExp(`\\b${attribute}\\b`),
+        );
+      }
+      // Decorative: it says nothing the copy does not, so it stays out of the
+      // accessibility tree and axe's `video-caption` has nothing to caption.
+      expect(video).toMatch(/aria-hidden="true"/);
+
+      // No `autoplay` attribute, deliberately: playback is the script's decision, because
+      // `prefers-reduced-motion` has to be able to refuse it before the first frame.
+      expect(video).not.toMatch(/\bautoplay\b/);
+
+      // And `preload="none"`, which is not a tuning choice. With `auto`, a page loaded
+      // with scripting off asks for 1.25 MB that nothing ever consumes, and Chromium
+      // leaves that request open: `/` reached `networkidle` on one of four identical
+      // loads, and `test/trialform.test.ts`'s no-script cases timed out at 30 s. The
+      // budget still weighs the file because `play()` fetches it — the `media` column on
+      // `/` is the thing to check if this is ever loosened.
+      expect(video).toMatch(/preload="none"/);
+
+      // The poster is required by §7.4 and has to be the thing a visitor sees when motion
+      // is not wanted, so it is a real emitted asset rather than a frame grabbed at
+      // runtime from a video that may never play.
+      const poster = /poster="([^"]*)"/.exec(video)?.[1];
+      expect(poster, 'the hero video has no poster').toBeDefined();
+      expect(poster).toMatch(/^\/MuseByMina\/_astro\/hero-poster\.[A-Za-z0-9_-]+\.webp$/);
+    });
+
+    it(`points at the video through a <source>, which is the half that is checked (${locale})`, () => {
+      const video = heroVideo(page[locale].home);
+      expect(video, 'a bare src is the one asset nothing checks (MUSE-8)').not.toMatch(
+        /<video[^>]*\bsrc=/,
+      );
+      const source = /<source\b[^>]*>/.exec(video)?.[0] ?? '';
+      expect(source).toMatch(/type="video\/webm"/);
+      expect(source).toMatch(/src="\/MuseByMina\/_astro\/hero\.[A-Za-z0-9_-]+\.webm"/);
+    });
+
+    it(`tints the hero with the band's own plum, in both themes (${locale})`, () => {
+      const css = homeCss(locale);
+
+      // §7.2's scrim: `--band-surface` is plum-ink in *both* themes, so the hero does not
+      // invert with the page. The stops are 82% and 70% rather than the specified 78% and
+      // 30%, and the component says why in full: this footage is bright daylight, and at
+      // the specified stops the lede measured 3.81:1 and the ghost button's gold 1.79:1.
+      // Both are below AA, and axe cannot see either — `color-contrast` over a moving
+      // ground is reported as *incomplete* and never failed on.
+      expect(css).toMatch(/color-mix\(in srgb,\s*var\(--band-surface\)\s*82%/);
+      expect(css).toMatch(/color-mix\(in srgb,\s*var\(--band-surface\)\s*70%/);
+
+      // The same rule `npm run ds` applies, asserted on the delivered stylesheet rather
+      // than on the source: a brand colour that reached the browser is the defect, however
+      // it got there.
+      const scrim = /\.heroScrim[^{]*\{[^}]*\}/.exec(css)?.[0] ?? '';
+      expect(scrim, 'no .heroScrim rule in the delivered CSS').not.toBe('');
+      expect(scrim).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+      expect(scrim).not.toMatch(/\brgba?\(|\bhsla?\(/);
+      expect(scrim).not.toMatch(/var\(--(plum|gold|cream)[\w-]*\s*[,)]/);
+
+      // A full-bleed hero crops rather than letterboxes; without this the 16:9 file sits
+      // in a letterbox on a phone.
+      expect(css).toMatch(/\.heroVideo[^{]*\{[^}]*object-fit:\s*cover/);
+    });
+
+    it(`answers prefers-reduced-motion in script, where the video can hear it (${locale})`, () => {
+      const scripts = [...page[locale].home.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)]
+        .map((m) => m[1]!)
+        .join('\n');
+
+      // The query and the thing it does. `base.css`'s global block sets
+      // `animation-duration` and `transition-duration`, neither of which a `<video>` has,
+      // so this is not a second copy of that decision — it is the half CSS cannot make.
+      expect(scripts).toMatch(/prefers-reduced-motion:\s*reduce/);
+      expect(scripts).toMatch(/\.pause\(\)/);
+    });
+  }
+
+  it('publishes the rate card the documents hold, and no price of its own', () => {
+    const tiers = seedDocsOfType('pricingTier');
+    expect(tiers.length, 'the seed holds no pricing tier').toBeGreaterThan(0);
+
+    for (const locale of LOCALES) {
+      const html = page[locale].home;
+      for (const tier of tiers) {
+        const name = (tier.name as Record<Locale, string>)[locale];
+        expect(html, `${locale} homepage never names the ${tier._id} tier`).toContain(name);
+        // The amount as `formatPrice` writes it on `/pricing`, which is the point of
+        // formatting in `src/lib/pricing.ts` rather than here or in the component.
+        expect(html).toContain(formatPrice(tier.priceEur as number, locale));
+      }
+    }
+
+    // Not a price written in a component, in either language. MUSE-36's failure was
+    // plausible invented content; a wrong price is that plus something somebody budgets
+    // around, which is why `/pricing` reads every figure from Sanity and so does this.
+    const component = readFileSync(join(ROOT, 'src/components/Home.astro'), 'utf8');
+    expect(component).not.toMatch(/\d+\s*€/);
+  });
+
+  it('names the people who teach, with the roles the dataset gives them', () => {
+    const instructors = seedDocsOfType('instructor');
+    expect(instructors.length, 'the seed holds no instructor').toBeGreaterThan(0);
+
+    for (const locale of LOCALES) {
+      for (const person of instructors) {
+        expect(page[locale].home).toContain(person.name as string);
+        expect(page[locale].home).toContain((person.role as Record<Locale, string>)[locale]);
+      }
+    }
+  });
+
+  it("tells the studio's story in Mina's words, not the component's", () => {
+    const [story] = seedDocsOfType('studioStory');
+    expect(story, 'the seed holds no studioStory').toBeDefined();
+
+    for (const locale of LOCALES) {
+      const heading = (story!.heading as Record<Locale, string>)[locale];
+      expect(page[locale].home, `${locale} homepage drops the story heading`).toContain(
+        heading,
+      );
+      for (const paragraph of story!.story as Record<Locale, string>[]) {
+        expect(page[locale].home).toContain(paragraph[locale]);
+      }
+    }
+  });
+
+  it('shows the week in the order it happens, from the same rows as /schedule', () => {
+    const rows = seededSchedule();
+    for (const locale of LOCALES) {
+      const html = page[locale].home;
+      // Every active slot is previewed. The level names are already held to `LEVEL_NAME`
+      // by AC1 above — this is the count, which is what says the preview is the timetable
+      // rather than a hand-picked two.
+      const slots = [...html.matchAll(/<li\b[^>]*class="[^"]*\bslot\b[^"]*"/g)];
+      expect(slots, `${locale} homepage previews the wrong number of slots`).toHaveLength(
+        rows.length,
+      );
+    }
+  });
+
+  it('never sets Cormorant below its 26px floor', () => {
+    // Below 26px the `đ` crossbar vanishes and *Dođi* renders as "Dodi" (§4). Every other
+    // page has this guard; the homepage did not until MUSE-133 gave it four new headings.
+    const blocks = [...homeCss('hr').matchAll(/\{[^{}]*\}/g)].map((m) => m[0]!);
+    const display = blocks.filter((b) => /font-family:\s*var\(--font-display\)/.test(b));
+    expect(
+      display.length,
+      'no --font-display rule found — is the CSS being read?',
+    ).toBeGreaterThan(0);
+
+    const offenders = display.filter((block) => {
+      const size = /font-size:\s*(?:clamp\(\s*)?([\d.]+)rem/.exec(block);
+      return size !== null && Number(size[1]) * 16 < 26;
+    });
+    expect(offenders).toEqual([]);
+  });
+
+  it('centres the page, which is the whole of what the ticket asked for', () => {
+    const css = homeCss('hr');
+    expect(css).toMatch(/\.wrap[^{]*\{[^}]*text-align:\s*center/);
+    expect(css).toMatch(/\.hero[^{]*\{[^}]*text-align:\s*center/);
+    expect(css).toMatch(/\.actions[^{]*\{[^}]*justify-content:\s*center/);
+    // The measure is a token now rather than a fourth copy of `1280px` in this file.
+    expect(css).toMatch(/max-width:\s*var\(--measure-page\)/);
+  });
 });

@@ -152,6 +152,84 @@ a successor only moves the staleness to the next close (MUSE-114).
   because the thing the line protects against is a page growing a *feature*, and a feature
   is still 48 KB whatever the album is.
 
+  **The hero video is the third time a kind was admitted, and the first that is not a
+  picture** (MUSE-133). A `.webm` was `other:media` before it, which fails three ways at
+  once: no budget declared for the kind, the 360 KB `total`, and nothing subtracting it.
+  What it got is a **declared `media` kind with a per-page sum**, `1536 KB`, and the shape
+  is deliberately *not* `imageResponse`'s. A per-response ceiling exists because the
+  multiplier is editorial — how many photographs is Mina's, taken in a Studio. Nothing in
+  the content model declares a file, video or mux field, so **nobody but us can add a
+  second video**: the count is one and it is a line in a diff, and with the multiplier ours
+  a sum is the stronger instrument. It refuses the 5.3 MB master re-exported by accident
+  *and* the second clip nobody weighed, where a per-response ceiling at the same figure
+  would pass three of them. `.webm` is declared by **extension only** —
+  `KIND_BY_RESOURCE_TYPE` deliberately has no `media` entry, so an `.mp4` or an
+  extensionless media stream still arrives as `other:media` with no number under it, and
+  „we budgeted video" never becomes true by accident.
+
+  `total` stays 360 KB and the video comes out of it, which needs a different argument
+  from photography's. The hero is not a function of anything an editor does; what makes it
+  uninheritable by that line is arithmetic — 1.2 MB against a 360 KB page. Put it in and
+  either the ceiling goes to ~1.6 MB, which is 1.2 MB of slack on the twenty-one pages
+  with no video and a number that can no longer say „this page has grown a feature", or it
+  becomes a different number on one route, which is the per-route exemption this file
+  exists without. **So the ceiling has now not moved three times** — MUSE-64's lockup,
+  MUSE-25's gallery, this — and each time it was the measurement underneath that moved.
+
+  What the hero actually costs, measured: **1,250 KB** of video and a **26.9 KB** poster,
+  one request each, and the homepage went from 10 requests to 14 against a ceiling of 14
+  plus the per-`<img>` allowance. The poster buys no allowance — it is a `poster=`
+  attribute and `imagesIn` counts elements — and the homepage's own stylesheet became the
+  third render-blocking request on `/` when it outgrew Astro's inline threshold, which is
+  the other thing the hero spent. The file ships from `src/assets/` and is imported, like
+  every other asset (MUSE-35), and it is the one piece of media committed to this
+  repository: a cross-origin video would be invisible to every number in that table, which
+  is the whole reason the exception is in git rather than on a CDN.
+
+  **The encode, so the next one is the same encode.** The camera masters are 1080 × 1920
+  HLG/BT.2020 off a phone and are *not* in the repository — the first derivative of them
+  that was handed over was the portrait video pillarboxed into 16:9 with a blurred copy of
+  itself filling the sides, which is unusable full-bleed, so the shipped file is cut from
+  the master rather than from it. Two-pass VP9 at 700 kbit/s — 14.5 s at 866 kbit/s *is*
+  1,536 KB, so the ceiling and the bitrate are one decision — tone-mapped out of HLG,
+  because an 8-bit `yuv420p` file tagged BT.2020 paints washed-out on an SDR display:
+
+  ```
+  CHAIN="zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,\
+  zscale=t=bt709:m=bt709:r=tv,format=yuv420p,crop=1080:608:0:420,scale=1280:720:flags=lanczos"
+  ffmpeg -i <master>.mov -an -sn -dn -map_metadata -1 -map_chapters -1 -vf "$CHAIN" -r 30 \
+    -c:v libvpx-vp9 -b:v 700k -minrate 300k -maxrate 1000k -g 240 -row-mt 1 -tile-columns 2 \
+    -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv \
+    -pass {1,2} -passlogfile /tmp/hero-vp9 src/assets/hero.webm
+  ffmpeg -ss 0 -i src/assets/hero.webm -frames:v 1 -vf scale=1280:720:flags=lanczos \
+    -c:v libwebp -quality 80 -compression_level 6 src/assets/hero-poster.webp
+  ```
+
+  **The scrim is 82% → 70%, not §7.2's 78% → 30%, and that is a measurement rather than a
+  preference.** axe reports `color-contrast` as *incomplete* over a moving ground and
+  never fails on it, so the hero is the one place on this site where text contrast is not
+  machine-checked. Measured off the rendered screenshots instead — sampling the background
+  between the glyphs and compositing the text colour over it — the specified stops gave
+  the lede **3.81:1** and the ghost button's gold **1.79:1** against this footage, which is
+  a bright daylight studio rather than the warm low-lit register §9 describes. The video
+  under the lede is rgb(193, 171, 159) and under the buttons rgb(244, 207, 157), and
+  holding gold to 4.5:1 over the second is what sets the floor. At 82% → 70% the same
+  samples read 5.86, 11.12, 6.60 and 5.57:1. The hero's secondary button also takes a
+  72% band-surface fill, which it has nowhere else: gold is the hardest colour to read
+  over bright footage, and the alternative was taking the video down to a texture.
+
+  `-an` is the no-audio guarantee, which is also what keeps axe's `no-autoplay-audio`
+  quiet. **`preload="none"` is also load-bearing** and cost a suite-wide flake to find: with
+  `preload="auto"` a page loaded with scripting off asks for 1.25 MB that nothing ever
+  plays, Chromium leaves that request open, and `networkidle` settles only sometimes —
+  three of four identical no-script loads of `/` timed out at 30 s. The script's `play()`
+  is what fetches the file, so the budget still weighs the whole of it. `crop=1080:608:0:420` is the 16:9 window out of the portrait frame and it is a
+  framing decision, not a parameter: at the vertical centre it cuts heads off the dancers,
+  420 keeps faces. The poster is extracted from the **finished** file so it is the frame
+  the video paints rather than a differently tone-mapped cousin, and its quality is tuned
+  until it clears `imageResponse` — 32 KB, which a 1280 × 720 photographic WebP at the
+  lockup's `quality={80}` would not.
+
   The **font count has a floor, and the floor is the half that finds things.** It is
   MUSE-35: all six faces 404ed under `astro dev` for the life of the project, so
   reproduced against a build that is six requests and **zero faces served** — which is why

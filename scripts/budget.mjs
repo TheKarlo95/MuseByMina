@@ -77,9 +77,10 @@ import {
  * The page's weight, split the way a reader thinks about it.
  *
  * Kinds, not MIME types: `woff2` and a future variable font are one line in the budget
- * because they are one decision. Order is the order the table prints in.
+ * because they are one decision. `media` is the hero video and is last because it is the
+ * only line that is not on every page. Order is the order the table prints in.
  */
-export const KINDS = ['html', 'css', 'font', 'image'];
+export const KINDS = ['html', 'css', 'font', 'image', 'media'];
 
 /** What a file extension means. Deterministic, and derived from the URL rather than reported. */
 const KIND_BY_EXTENSION = {
@@ -98,6 +99,10 @@ const KIND_BY_EXTENSION = {
   '.gif': 'image',
   '.svg': 'image',
   '.ico': 'image',
+  // One container, the one the site ships (MUSE-133). `.mp4` and `.mov` are deliberately
+  // absent: a second video format is a decision nobody has taken, and `other:media` is a
+  // better answer to one arriving than a number it is quietly under.
+  '.webm': 'media',
   '.js': 'js',
   '.mjs': 'js',
 };
@@ -108,6 +113,12 @@ const KIND_BY_EXTENSION = {
  * Only the document has one on this site — a page URL ends in a slash (MUSE-9). The rest
  * of the table is there so that a resource arriving from somewhere unexpected is named
  * rather than silently pooled.
+ *
+ * `media` is deliberately **not** here (MUSE-133). A media response with no extension to
+ * read is something nobody put in this build, and `other:media` is the right answer to it:
+ * `checkBudget` refuses a kind nobody declared, naming it. Mapping the type would hand it
+ * the hero's own line instead — extension-first is what keeps `.webm` declared and video
+ * as a whole undeclared.
  */
 const KIND_BY_RESOURCE_TYPE = {
   document: 'html',
@@ -137,12 +148,13 @@ export const BUDGET = {
   /** Decompressed bytes per resource kind, per page. */
   bytes: {
     /**
-     * HTML: measured worst is `/` at 30.9 KB, the homepage — its own markup plus the
-     * theme stamp, the language redirect and the JSON-LD block, all of which are inline by
-     * design (`src/lib/theme.ts` has to run before first paint). `/contact/` is 29.5 KB
-     * with the trial form in it; `/privacy/` is the lightest at 18.4 KB.
+     * HTML: measured worst is `/pricing/` at 37.2 KB, with `/` at 36.6 KB behind it — the
+     * homepage's own markup plus the theme stamp, the language redirect and the JSON-LD
+     * block, all of which are inline by design (`src/lib/theme.ts` has to run before first
+     * paint), and since MUSE-133 eight sections rather than four. `/privacy/` is the
+     * lightest at 22.3 KB.
      *
-     * 48 KB is ~1.55× the worst page, 17.1 KB of headroom. Not looser than that, because
+     * 48 KB is ~1.29× the worst page, 10.8 KB of headroom. Not looser than that, because
      * HTML here is hand-written markup rendered at build time: a page needing 48 KB of it
      * has grown a feature, not a paragraph, and a feature is a decision worth noticing.
      *
@@ -155,11 +167,14 @@ export const BUDGET = {
      */
     html: 48 * 1024,
     /**
-     * CSS: measured worst is `/schedule/` at 24.6 KB — the shared `BaseLayout` chunk
-     * (17.9 KB, which carries the globals plus the header's and footer's scoped styles)
-     * plus `Schedule`'s own 6.7 KB. `/privacy/` loads the shared chunk alone at 17.9 KB.
+     * CSS: measured worst is `/` at 28.5 KB — the shared `BaseLayout` chunk (17.8 KB,
+     * which carries the globals plus the header's and footer's scoped styles) plus
+     * `TrialForm`'s and the homepage's own. The homepage is **three** stylesheets as of
+     * MUSE-133: its own block outgrew Astro's inline threshold with the hero and the four
+     * new sections, so it is a `<link>` now rather than a `<style>`. `/privacy/` loads the
+     * shared chunk alone at 17.8 KB.
      *
-     * 40 KB is ~1.63×, 15.4 KB of headroom — about two more component stylesheets the
+     * 40 KB is ~1.40×, 11.5 KB of headroom — about two more component stylesheets the
      * size of `Schedule`'s. The failure this guards is MUSE-43's cousin: a component that
      * stops being scoped, or the globals ending up in the shared chunk twice. Both roughly
      * double this number while every page still renders perfectly correctly.
@@ -189,6 +204,35 @@ export const BUDGET = {
      * well as weighing them. Two instruments, because this one cannot see that case.
      */
     font: 288 * 1024,
+    /**
+     * **Video: the hero `.webm`, as a page sum** (MUSE-133).
+     *
+     * A sum rather than a per-response ceiling like `imageResponse`, and the reason is the
+     * reason that line is per response. A sum conflates *how many* with *how big each one
+     * is*, and that only matters when the first half is editorial — album size is Mina's,
+     * taken in a Studio, with no pull request. **There is no video field in the content
+     * model**: nothing under `sanity/schemaTypes/` declares a file, video or mux field, so
+     * no editor can add a second one. The count is ours, it is one, and it is a line in a
+     * diff. With the multiplier ours the sum is the stronger instrument — it refuses the
+     * re-export at the master's own 5.3 MB *and* the second clip nobody weighed, where a
+     * per-response ceiling at the same figure would pass three of them.
+     *
+     * Measured: `src/assets/hero.webm` is **1,250 KB** — VP9, 1280 × 720, 30 fps, 14.5 s,
+     * **no audio stream**, two-pass at 700 kbit/s from the 1080 × 1920 camera master,
+     * tone-mapped out of HLG. `docs/decisions/design-and-assets.md` carries the command.
+     *
+     * **1536 KB** is ~1.23× that. It is the figure the encode was specified against rather
+     * than a round number: 14.5 s at 866 kbit/s *is* 1,536 KB, so the ceiling and the
+     * bitrate are one decision, and a re-encode that overruns it is one that changed the
+     * bitrate. Not looser, because this is already five times the whole rest of the
+     * heaviest page and it is the one thing on this site a visitor pays for in seconds
+     * rather than in bytes.
+     *
+     * Out of `total` below, for the reason written there. The `<video>`'s own markup is on
+     * the `html` line, and the poster is an `<img>` — photography, held by `imageResponse`
+     * at 32 KB per response like every other picture, and measured at 26.9 KB.
+     */
+    media: 1536 * 1024,
   },
   /**
    * **What one more image on a page is allowed to add, per `<img>` the document holds**
@@ -305,19 +349,38 @@ export const BUDGET = {
    * budget can actually hold. The `perImage.total` term is still here because a
    * photograph's `srcset` is paid in the **document**, and that part is not photography.
    *
+   * **Why the video comes out as well, and it is not photography's reason** (MUSE-133).
+   * The hero is not a function of anything an editor does — it is one asset, chosen in a
+   * pull request. What makes it uninheritable by this line is arithmetic: it is 1.2 MB
+   * against a 360 KB page. Including it means one of two things, and both end this line.
+   * Either the ceiling goes to about 1.6 MB — 1.2 MB of pure slack on the twenty-one pages
+   * that have no video, and a number that can no longer say „this page has grown a
+   * feature", which is the one thing it is for. Or it becomes a different number on the one
+   * route with a hero on it, which is the per-route exemption this file exists without.
+   * Excluded, the line keeps its full value for every page and every byte that is ours to
+   * decide, and the video is held by `bytes.media` above — **per page, whole, with no
+   * multiplier**, which is a stricter instrument than the one holding photography.
+   *
    * **The ceiling did not move when the lockup landed** (MUSE-64) and it has not moved for
-   * the gallery either — the measurement under it moved, twice, and the headroom absorbed
-   * it both times. That is the line doing its job rather than needing maintenance.
+   * the gallery or for the hero video either — the measurement under it moved, three times,
+   * and the headroom absorbed it every time. That is the line doing its job rather than
+   * needing maintenance.
    */
   total: 360 * 1024,
   /**
    * Requests a page makes, counting only the ones the host answered 200.
    *
-   * Measured 6 (`/en/privacy/`: the document, one stylesheet, three faces, the lockup) to
-   * 10 (`/`: the document, two stylesheets, six faces, the lockup). 14 is the ceiling, 4
-   * of headroom — MUSE-64 spent one of the five on an image every page shares, which is
-   * the cheapest shape an image can have here: one more request for the whole site
-   * rather than one per surface.
+   * Measured 7 (`/en/privacy/`: the document, one stylesheet, three faces, the masthead
+   * mark, the footer lockup) to 14 (`/`: the document, three stylesheets, six faces, the
+   * two brand marks, the hero poster and the hero video). 14 is the ceiling and `/` is at
+   * it, with 2 left over from the per-`<img>` allowance — MUSE-64 spent one on an image
+   * every page shares, which is the cheapest shape an image can have here, and MUSE-133
+   * spent three on the hero and the homepage's own stylesheet.
+   *
+   * **The poster does not pay for itself.** It is a `poster=` attribute rather than an
+   * `<img>`, so it costs a request and buys no allowance; `imagesIn` counts elements. That
+   * is the right way round — the allowance exists for a photograph ladder in the markup —
+   * but it is worth knowing before adding a second video.
    *
    * Budgeted beside the bytes rather than instead of them, because the two fail in
    * opposite directions: an unoptimised image moves the bytes and not this, and a gallery
@@ -335,10 +398,11 @@ export const BUDGET = {
   /**
    * Render-blocking requests: the stylesheets in `<head>`, plus any synchronous script.
    *
-   * Measured 1 on `/privacy/` (the shared chunk alone) and 2 everywhere else (the shared
-   * chunk plus one component's). 4 is the ceiling, 2 of headroom: a third component
-   * stylesheet on one page is ordinary, a fifth means the scoping is leaking or somebody
-   * added a blocking script.
+   * Measured 1 on `/privacy/` (the shared chunk alone), 2 on most pages (the shared chunk
+   * plus one component's) and **3 on `/`** since MUSE-133, where the homepage's own
+   * stylesheet outgrew the inline threshold and joined `TrialForm`'s. 4 is the ceiling, 1
+   * of headroom: a third component stylesheet on one page is ordinary, a fifth means the
+   * scoping is leaking or somebody added a blocking script.
    *
    * There is no `js` line in `bytes` and none here, on purpose: **the site ships zero
    * JavaScript files and `test/nojs.test.ts` owns that claim** against `dist`, extension
@@ -1141,12 +1205,13 @@ export function checkBudget(page) {
     );
   }
 
-  // Photography out of the total, for the reason written beside `BUDGET.total`: with it in,
-  // this number is a function of how many pictures are published.
-  const unphotographed = page.total - (page.bytes.image ?? 0);
-  const everything = ceiling('total', 'total', formatBytes(unphotographed));
-  if (everything !== null && unphotographed > allowed('total', everything))
-    over('total', unphotographed, allowed('total', everything));
+  // Photography and video out of the total, for the reasons written beside `BUDGET.total`:
+  // with either one in, this number stops being about the page and becomes a number about
+  // one asset.
+  const ours = page.total - (page.bytes.image ?? 0) - (page.bytes.media ?? 0);
+  const everything = ceiling('total', 'total', formatBytes(ours));
+  if (everything !== null && ours > allowed('total', everything))
+    over('total', ours, allowed('total', everything));
 
   const fetches = ceiling('requests', 'requests', page.requests);
   if (fetches !== null && page.requests > allowed('requests', fetches))
@@ -1214,9 +1279,9 @@ export function report(pages) {
   const allowance = (/** @type {string} */ kind, /** @type {number} */ base) =>
     base + (perImage?.[kind] ?? 0) * mostImages;
 
-  /** What `total` is compared against: the page without its photography. */
+  /** What `total` is compared against: the page without its photography or its video. */
   const unphotographed = (/** @type {Measurement} */ page) =>
-    page.total - (page.bytes.image ?? 0);
+    page.total - (page.bytes.image ?? 0) - (page.bytes.media ?? 0);
   /** The single heaviest image response on a page, which is how `image` is budgeted. */
   const heaviestImage = (/** @type {Measurement} */ page) =>
     Math.max(
@@ -1336,7 +1401,8 @@ export function report(pages) {
   lines.push(
     `\u2020 image is budgeted per response, not per page, and total is compared without ` +
       `photography: how many pictures a page shows is an editorial decision, how big each ` +
-      `one is, is ours (MUSE-25). The page row shows each page's real figures; budget and ` +
+      `one is, is ours (MUSE-25). total is also compared without the hero video, which has ` +
+      `a page line of its own (MUSE-133). The page row shows each page's real figures; budget and ` +
       `headroom show what the gate compares. html, total and requests additionally allow ` +
       `${formatBytes(BUDGET.perImage?.html ?? 0)}, ${formatBytes(BUDGET.perImage?.total ?? 0)} ` +
       `and ${BUDGET.perImage?.requests ?? 0} per <img> \u2014 shown here at the worst page's ` +
