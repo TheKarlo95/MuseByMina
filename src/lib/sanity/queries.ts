@@ -167,6 +167,11 @@ export const SCHEDULE_QUERY = defineQuery(`
 /**
  * The classes themselves, independently of when they run.
  *
+ * MUSE-124: no page calls `getClasses`; only `test/projections.test.ts` does. This query is
+ * the only reader of `class.description` and `class.image`, so removing it would leave
+ * those two schema fields with no reader at all. Whether to keep it, remove it or give it a
+ * page is a content decision for the studio owner and is not made here.
+ *
  * `description` and `image` are both **optional** as of MUSE-36 and project `undefined`
  * for a class that has neither — which is every class today: the homepage style cards
  * were the only thing that rendered either, and they went with `class.style`. See the
@@ -388,6 +393,12 @@ export const POSTS_QUERY = defineQuery(`
   }
 `);
 
+/**
+ * Groundwork: no page reads this yet (MUSE-124). `/faq` is one of MUSE-27's trust pages and
+ * is blocked on the studio owner, so `getFaqs` waits for it. A query no build issues is not
+ * a dead query: `scripts/sanity-read-check.mjs` reads this file as text and executes every
+ * query in it against the dataset, so `npm run sanity:read` is a reader of this one.
+ */
 export const FAQS_QUERY = defineQuery(`
   *[_type == "faq"] | order(coalesce(order, 999) asc, question.hr asc){
     _id,
@@ -400,9 +411,10 @@ export const FAQS_QUERY = defineQuery(`
  * A liveness probe: how many documents of each type the dataset holds.
  *
  * Exists so that "nothing came back" can be told apart from "the query is broken"
- * without guessing — see `countDocuments` in `./client.ts` and
- * `scripts/sanity-read-check.mjs`. A dataset that is legitimately empty answers this
- * with zeros; a dataset that cannot be reached, or a GROQ error, does not answer at all.
+ * without guessing — see `countDocuments` in `./index.ts` and
+ * `scripts/sanity-read-check.mjs`. A build never issues it: its live consumer is
+ * `npm run sanity:read`, which reads the query text (MUSE-124).
+ * A dataset that is legitimately empty answers this with zeros; a dataset that cannot be reached, or a GROQ error, does not answer at all.
  */
 export const DOCUMENT_COUNTS_QUERY = defineQuery(`
   {
