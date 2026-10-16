@@ -46,8 +46,11 @@
  *   3. **Cormorant's `latin-ext`, on every Croatian page.** *Not* structural — three
  *      Croatian pages do not paint a diacritic in the display face today — but preloaded
  *      unconditionally anyway. See the next section; this is the deliberate cost.
- *   4. **English pages: the `latin` three, plus whatever `EN_LATIN_EXT` names.** The only
- *      hand-maintained table left, and the only additive one.
+ *   4. **Declared English routes: the `latin` three, plus whatever `EN_LATIN_EXT`
+ *      names.** The only hand-maintained table left, and the only additive one.
+ *   5. **English routes whose path comes from a document: all six, like a Croatian
+ *      page.** `/en/blog/<slug>/` and `/en/events/<slug>/` have no key a table can be
+ *      given an entry under. See *Content-keyed routes* below (MUSE-88).
  *
  * ## Why there is no list that can say "does not need"
  *
@@ -110,18 +113,80 @@
  * be taken honestly: in a browser, with the preload tags stripped out of the document
  * first, by `test/fonts.test.ts`, per page, per locale, per deploy target.
  *
+ * ## Content-keyed routes, where the premise of a route table does not hold (MUSE-88)
+ *
+ * Part 4 rests on something true of every route MUSE-74 knew about: **a human can be
+ * given a key to add an entry under, and a browser can be made to check he did.** A
+ * developer routes `/en/privacy`, `test/fonts.test.ts` opens it in three environments on
+ * every pull request with the preload tags stripped, and an omission is red CI before
+ * anything deploys. The table is small, additive, and *watched*.
+ *
+ * `/en/blog/<slug>/` and `/en/events/<slug>/` hold none of that. **Their path is a field
+ * of a document**, so:
+ *
+ *   - there is no key — the set of slugs is Mina's, decided in a Studio with no pull
+ *     request, so an entry per slug is a table she would have to maintain in a file she
+ *     cannot open;
+ *   - listing the *parent* route instead would hand the subsets to every post and event
+ *     including the ones that do not need them, which is the waste part 4 exists to
+ *     refuse, and would still be a claim about documents nobody has written;
+ *   - and the guard cannot see either mistake. `content/seed.ndjson` holds zero posts
+ *     and zero events — deliberately, because seeding one publishes it (MUSE-24,
+ *     MUSE-26) — so no build in the suite emits such a page at all. QA built against a
+ *     fixture of its own to find this: `/en/events/<slug>/` with „DJ Ćiro" in the line-up
+ *     asked for `inter-400-600-latin-ext` and was handed three faces, none of them it.
+ *
+ * So these routes get **all six**, in both locales, which is the Croatian rule applied
+ * for the English reason. Not a measured subset, because the measurement cannot be taken:
+ * which *face* paints a given proper noun is the cascade model this file already rejects
+ * two sections up, and the fields that carry proper nouns — an event's title, its venue,
+ * its line-up, a post's title and its byline — are set across all three families by the
+ * page's own CSS. A per-role answer here would be a list saying "this document will not
+ * need the display face", which is the shape that was wrong twice in one day.
+ *
+ * **This is MUSE-74's English rule deliberately amended, and here is the cost.** The
+ * three latin-ext files are 33,736 + 17,104 + 85,068 = **135,908 bytes**, and an English
+ * post or event whose copy turns out to be pure ASCII transfers all of it unpainted.
+ * MUSE-74 refused that number for the English side and was right to: there it was the
+ * cost of defaulting **all seven** declared English pages, every one of which the browser
+ * arm measures, so the table could stay minimal and honest. Here it is the per-page cost
+ * on **two route shapes that no gate can measure**, and the choice is not "a table or a
+ * default" but "a default or a guess". MUSE-74's own ruling says which way to be wrong:
+ * waste is counted in bytes with a ceiling over them — `scripts/budget.mjs` already sets
+ * `bytes.font` at the whole declared set, 288 KB against 242.6 KB, because every Croatian
+ * page transfers all six — while a missing face is a word painted in two typefaces at a
+ * display size for 221 ms on a throttled cold load, on a page that is what a shared link
+ * opens. Today the shipped cost is **zero bytes**, because no post and no event exists;
+ * it becomes real on Mina's first one, at which point her copy is a thing we cannot see.
+ *
+ * `contentKeyed` below derives the condition instead of listing it, off `ROUTES` — so a
+ * third dynamic template landing next year is covered the day it lands, and `/events/
+ * archive`, a *declared* child of a content-keyed parent, is not swept up by a prefix
+ * match. `test/fonts.test.ts` asserts both halves against `src/pages/`, with no build.
+ *
  * ## The residual risk, stated rather than buried
  *
  * `test/fonts.test.ts` runs on pull requests. **The scheduled rebuild (MUSE-21) runs
  * `npm run build` and nothing else**, so a *Sanity* edit can stale `EN_LATIN_EXT` and
  * deploy: an instructor named „Željka" on `/en/aboutus/` would want Inter's latin-ext and
  * not get it. Both strings that broke the old tables were in code and so were gated; a
- * Studio edit is not. Croatian pages are immune by construction now — parts 2 and 3 cover
- * all three faces whatever Mina writes — so the exposure is exactly "a Croatian proper
- * noun entering English copy from the CMS". That is the thing to fix next if it bites.
+ * Studio edit is not. Croatian pages are immune by construction — parts 2 and 3 cover all
+ * three faces whatever Mina writes — and MUSE-88 closed the two routes whose *whole* copy
+ * comes from the CMS, so what is left is exactly "a Croatian proper noun entering the
+ * English copy of a **declared** page from the CMS": `/en/aboutus/`'s instructor names and
+ * bios, `/en/whatisbachata/`'s prose, a reworded `/en/pricing/`. Those routes have keys
+ * and are watched; what is not watched is Mina editing one of them between pull requests.
  */
 
 import type { Locale } from './i18n';
+/**
+ * **Which routes this repository declares** — the discriminator `contentKeyed` reads.
+ *
+ * `ROUTES` is the structural half of the page registry and nothing else: no copy, no
+ * titles, no CSS, so importing it here cannot move the built `<head>` (MUSE-43) and
+ * cannot pull content into this module.
+ */
+import { ROUTES } from './pages';
 
 /**
  * The files, imported rather than named as paths.
@@ -209,10 +274,12 @@ export const FACES: readonly Face[] = [
 /**
  * **English routes that paint a latin-ext character, and the face that paints it.**
  *
- * This is the only route table left, and it is **additive**: a route not listed here gets
- * no latin-ext subset at all. That is the uncomfortable direction — an omission is a
- * missing preload, which is this ticket's defect — and it is accepted here and nowhere
- * else, for a reason the measurement settles. Defaulting an English page to all three
+ * This is the only route table left, and it is **additive**: a *declared* route not
+ * listed here gets no latin-ext subset at all. That is the uncomfortable direction — an
+ * omission is a missing preload, which is this ticket's defect — and it is accepted here
+ * and nowhere else, for a reason the measurement settles. A route keyed on content is not
+ * governed by this table at all; see `contentKeyed` and the MUSE-88 section above, which
+ * is where the omission stops being acceptable. Defaulting an English page to all three
  * latin-ext subsets costs **135.9 KB** against a current English font payload of 109.8 KB,
  * and six of the seven English pages genuinely need none of them. More than doubling
  * every English page to cover one is not a trade; on the Croatian side, where the same
@@ -243,6 +310,34 @@ const EN_LATIN_EXT: ReadonlyMap<
   ],
 ]);
 
+/** Every role there is, which is every `latin-ext` subset there is. */
+const ALL_ROLES: readonly FontRole[] = ['display', 'label', 'body'];
+
+/**
+ * **Is this route's path a field of a document rather than a line in this repository?**
+ * (MUSE-88)
+ *
+ * Derived from `ROUTES` rather than listed, and the derivation is the claim: `ROUTES` is
+ * *which pages the site serves as structure*, so a route the layout is rendering that is
+ * **not** in it got its last segment from a `post` or an `event`. That is exactly the
+ * condition under which `EN_LATIN_EXT` has no key to be given an entry under and
+ * `test/fonts.test.ts` has no page to measure — see the section above.
+ *
+ * Why derived and not `route.startsWith('/blog/') || route.startsWith('/events/')`: a
+ * prefix match is wrong on `/events/archive`, which is a declared static child of a
+ * content-keyed parent (it is what reserves the slug `archive` — `reservedChildSlugs` in
+ * `./pages`), and it goes stale the day a third dynamic template lands. `src/pages/` is
+ * the only list that cannot lie (MUSE-46) and `ROUTES` is held to it by
+ * `test/routes.test.ts`, so this reads the one copy that is already gated.
+ *
+ * It answers `true` for `/404` as well, which is harmless and worth knowing: `404.astro`
+ * is `locale="hr"`, so it never reaches the English branch, and the Croatian branch
+ * already gives it all six. The same goes for a `MUSE_PREVIEW_ROUTES` entry.
+ */
+function contentKeyed(route: string): boolean {
+  return !ROUTES.some((entry) => entry.route === route);
+}
+
 /**
  * The faces `route` needs to paint its first screen in `locale`.
  *
@@ -250,11 +345,18 @@ const EN_LATIN_EXT: ReadonlyMap<
  * above is keyed by route rather than by URL.
  */
 export function preloadFaces(route: string, locale: Locale): readonly Face[] {
+  // Three cases, and only the third consults a table:
+  //
+  //   - Croatian: all three, by construction and with no route able to opt out.
+  //   - English, path decided by a document: all three as well. No table can be keyed on
+  //     it and no gate can measure it, so the default is the honest answer (MUSE-88).
+  //   - English, declared route: the additive table, which the browser arm of
+  //     `test/fonts.test.ts` measures on every pull request.
+  //
+  // `ALL_ROLES` subsumes anything `EN_LATIN_EXT` could name, so the first two cases need
+  // no union with it.
   const latinExt: readonly FontRole[] =
-    locale === 'en'
-      ? (EN_LATIN_EXT.get(route)?.roles ?? [])
-      : // Croatian: all three, by construction and with no route able to opt out.
-        ['display', 'label', 'body'];
+    locale !== 'en' || contentKeyed(route) ? ALL_ROLES : (EN_LATIN_EXT.get(route)?.roles ?? []);
 
   return FACES.filter((face) => face.subset === 'latin' || latinExt.includes(face.role));
 }

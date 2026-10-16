@@ -6,6 +6,9 @@ import type { Browser } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { launchChecks, localeOfRoute, openCheckPage } from '../scripts/browser-checks.mjs';
+import { FACES, preloadFaces } from '../src/lib/fonts';
+import { routeKey } from '../src/lib/i18n';
+import { ROUTES } from '../src/lib/pages';
 import {
   APEX_DEPLOY,
   basePath,
@@ -366,13 +369,26 @@ describe.each(ENVIRONMENTS.map((name, index) => ({ name, index })))(
      *
      *   - a `latin` subset that the page does not ask for — impossible by part 1 of the
      *     rule, so if it happens the rule has broken;
-     *   - **any** unused preload on an English page — English is additive-only, so an
-     *     unused face there means the table gained an entry that measurement does not
-     *     support;
+     *   - **any** unused preload on a *declared* English page — English is additive-only
+     *     there, so an unused face means the table gained an entry that measurement does
+     *     not support;
      *   - anything that is not one of the six declared faces at all.
      *
      * The permitted case therefore stays exactly as wide as the rule that creates it: a
-     * `latin-ext` subset, on a Croatian page. Preload all six on `/en/` and this fails.
+     * `latin-ext` subset, on a Croatian page — or on a page whose route came from a
+     * document. Preload all six on `/en/` and this fails.
+     *
+     * **That second half is MUSE-88's amendment, and it is narrower than it looks.** It
+     * permits a latin-ext over-preload on `/en/blog/<slug>/` and `/en/events/<slug>/` and
+     * on nothing else, because `contentKeyed` reads `ROUTES` — so `/en/events/archive/`,
+     * a declared child of a content-keyed parent, is still held to the line above. The
+     * cost is 135,908 bytes on an English post or event whose copy turns out to be pure
+     * ASCII, and the reason it is paid rather than measured is that **this suite has no
+     * such page and must not have one**: the seed holds no posts and no events, because
+     * seeding one publishes it (MUSE-24, MUSE-26). The whole argument is in
+     * `src/lib/fonts.ts`. Without the amendment this assertion is green today — the
+     * routes do not exist in the build — and goes red on Mina's first post, naming a
+     * waste the rule creates on purpose.
      *
      * ## Every route, not a chosen one
      *
@@ -417,15 +433,19 @@ describe.each(ENVIRONMENTS.map((name, index) => ({ name, index })))(
           );
         }
 
-        // The direction the budget counts. Permitted only in the one shape the rule in
-        // `src/lib/fonts.ts` creates: a latin-ext subset on a Croatian page.
+        // The direction the budget counts. Permitted only in the two shapes the rule in
+        // `src/lib/fonts.ts` creates: a latin-ext subset on a Croatian page, or one on a
+        // page whose path came from a document (MUSE-88). `routeKey` because `routes`
+        // holds served spellings — `en/blog/x/` — and `ROUTES` holds route keys.
         const croatian = localeOfRoute(route) !== 'en';
+        const contentKeyed = !ROUTES.some((entry) => entry.route === routeKey(`/${route}`));
         for (const url of preloaded.filter((u) => !needed.includes(u))) {
           const name = faceName(url);
-          if (croatian && name.endsWith('-latin-ext')) continue;
+          if ((croatian || contentKeyed) && name.endsWith('-latin-ext')) continue;
           problems.push(
-            `${route}: preloads ${name}, which it never requests and which is not the ` +
-              `deliberate Croatian latin-ext over-preload (${asks})`,
+            `${route}: preloads ${name}, which it never requests and which is neither ` +
+              `the deliberate Croatian nor the content-keyed latin-ext over-preload ` +
+              `(${asks})`,
           );
         }
       }
@@ -490,5 +510,151 @@ describe('MUSE-35 AC2: no stylesheet hard-codes a deploy-root asset path', () =>
 
   it('leaves no root-absolute url() in any stylesheet under src/', () => {
     expect(sourceUrls().filter((line) => /url\(\//.test(line))).toEqual([]);
+  });
+});
+
+/**
+ * MUSE-88 — **the two routes whose key is a document, and the subsets no table can name.**
+ *
+ * `EN_LATIN_EXT` in `src/lib/fonts.ts` is keyed by *route*, and that premise holds for
+ * every page whose existence is declared in this repository: a developer adds the route,
+ * the browser arm above measures it under three environments on every pull request, and
+ * an omission is red CI before anything deploys. `/en/blog/<slug>/` and
+ * `/en/events/<slug>/` break the premise — **their path comes from a `post` or an `event`
+ * document**, so there is no key to hold an entry and no finite set of keys to enumerate.
+ *
+ * ## Why this block is not a browser measurement
+ *
+ * Because there is no page to measure, and there must not be. `content/seed.ndjson` holds
+ * zero events and zero posts, which is a decision rather than an oversight — seeding one
+ * would publish it to the live site, which MUSE-24 and MUSE-26 both forbid. So the
+ * defect's own page cannot exist in any build this suite performs, and the heavyweight
+ * census has zero headroom besides (`test/helpers/concurrency.ts`).
+ *
+ * What is left is the function. `preloadFaces` is pure, it is the only place the per-page
+ * set is decided, and the question MUSE-88 asks of it — "what does an English page get
+ * when its route is not one of the declared ones" — is answerable with no server, no
+ * build and no browser. The *route shapes* come off `src/pages/` rather than being
+ * written down here, so a third dynamic template landing next year is covered the day it
+ * lands: `src/pages/` is the one list that cannot lie (MUSE-46).
+ *
+ * What this cannot see, stated rather than implied: it does not measure which faces such a
+ * page actually paints with. Nothing can, until a document exists. That is the whole
+ * reason the rule gives those routes all six rather than a measured subset.
+ */
+describe('MUSE-88: a route keyed on content preloads the subsets no table can name', () => {
+  const PAGES = fileURLToPath(new URL('../src/pages', import.meta.url));
+
+  /**
+   * A slug to stand in for the parameter — the ticket's own, so the failure reads like
+   * the URL QA measured. Slugs are ASCII by construction; the Croatian characters this
+   * ticket is about are in the document's *fields*, not in its path.
+   */
+  const SAMPLE_SLUG = '2026-noc-bachate';
+
+  /** Every route under `src/pages/` whose path carries a `[param]` segment. */
+  function contentKeyedRoutes(): string[] {
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = join(dir, entry.name);
+        return entry.isDirectory() ? walk(full) : [full];
+      });
+
+    const shapes = walk(PAGES)
+      .map((file) => relative(PAGES, file).replace(/\\/g, '/'))
+      .filter((file) => file.endsWith('.astro') && file.includes('['))
+      // `routeKey` drops the locale prefix, so the HR and EN templates of one route
+      // collapse to the same entry — which is the point: HR and EN share slugs.
+      .map((file) => routeKey(`/${file.replace(/\.astro$/, '')}`))
+      .map((route) => route.replace(/\[[^\]]+\]/g, SAMPLE_SLUG));
+
+    return [...new Set(shapes)].sort();
+  }
+
+  /** The faces, by the name a reader can look up — never the hashed filename. */
+  const ids = (faces: readonly { id: string }[]): string[] => faces.map((face) => face.id);
+
+  it('finds the templates it is about, so finding nothing cannot pass', () => {
+    const routes = contentKeyedRoutes();
+    expect(routes, 'no [param] page template found under src/pages/').not.toEqual([]);
+    expect(routes).toContain(`/blog/${SAMPLE_SLUG}`);
+    expect(routes).toContain(`/events/${SAMPLE_SLUG}`);
+  });
+
+  /**
+   * The direction a visitor reads, for the one page shape the browser arm cannot reach.
+   *
+   * A Croatian proper noun in an English post or event — „Ožegovića", a Zagreb street, a
+   * Croatian DJ in a line-up — needs the `latin-ext` half of whichever face paints it,
+   * and **which face that is cannot be answered from the document**: attributing a
+   * character to a face is the cascade model MUSE-74 rejected with a measurement. So all
+   * three, which is the same set a Croatian page gets.
+   */
+  it('gives an English content-keyed route every face, in both locales', () => {
+    const problems: string[] = [];
+
+    for (const route of contentKeyedRoutes()) {
+      for (const locale of ['hr', 'en'] as const) {
+        const got = ids(preloadFaces(route, locale));
+        const missing = ids(FACES).filter((id) => !got.includes(id));
+        if (missing.length > 0) {
+          problems.push(
+            `${locale === 'hr' ? '' : '/en'}${route}/: does not preload ` +
+              `${missing.join(', ')} — its copy is a document, so no table can say it ` +
+              `will not need them (MUSE-88)`,
+          );
+        }
+      }
+    }
+
+    expect(problems).toEqual([]);
+  });
+
+  /**
+   * The other half of the keying, and the half a prefix match gets wrong.
+   *
+   * `/events/archive` is a *declared* child of a content-keyed parent (`ROUTES`, and it is
+   * what reserves the slug `archive`), so an implementation testing `route.startsWith
+   * ('/events/')` would hand it all six and nobody would see it — the declared English
+   * routes are exactly the ones the browser arm above measures, and over-preloading one of
+   * them is the waste MUSE-74 refuses.
+   */
+  it('leaves every declared English route to the additive table', () => {
+    const everything = ids(FACES);
+    const over = ROUTES.map(({ route }) => route).filter(
+      (route) => ids(preloadFaces(route, 'en')).length === everything.length,
+    );
+
+    expect(
+      over,
+      'a declared English route preloads the whole declared set: either the ' +
+        'content-keyed arm is matching a route `src/pages/` declares, or `EN_LATIN_EXT` ' +
+        'gained an entry naming all three roles — which the browser arm above has to show',
+    ).toEqual([]);
+
+    // Pinned by name, because these two are what the table says today and the arm above
+    // measures: `/en/privacy/` is the one declared English route with an entry (MUSE-72).
+    expect(ids(preloadFaces('/pricing', 'en'))).toEqual([
+      'cormorant-garamond-latin',
+      'jost-300-500-latin',
+      'inter-400-600-latin',
+    ]);
+    expect(ids(preloadFaces('/privacy', 'en'))).toEqual([
+      'cormorant-garamond-latin',
+      'jost-300-500-latin',
+      'inter-400-600-latin',
+      'inter-400-600-latin-ext',
+    ]);
+    expect(ids(preloadFaces('/events/archive', 'en'))).toEqual([
+      'cormorant-garamond-latin',
+      'jost-300-500-latin',
+      'inter-400-600-latin',
+    ]);
+  });
+
+  it('still gives every Croatian page all six, declared or not', () => {
+    for (const route of ['/', '/pricing', '/events/archive', `/blog/${SAMPLE_SLUG}`]) {
+      expect(ids(preloadFaces(route, 'hr')), route).toEqual(ids(FACES));
+    }
   });
 });
