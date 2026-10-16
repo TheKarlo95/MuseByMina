@@ -404,13 +404,52 @@ ticket (MUSE-114 is the open instance).
   cards including the retired rate; delete-first publishes a truthful page one rate short.
   As with the import, **an agent runs neither command.**
 
-  What the gate still cannot see, stated rather than left to be rediscovered: a document
-  that is in the dataset and in **neither** seed. Both scripts fetch by `_id` from the
-  seed, so a document created in the Studio, or dropped from the seed by some earlier
-  branch and never deleted, is invisible to the comparison entirely — MUSE-60's unseeded
-  `studioStory` was exactly that. Finding those needs a query for everything the dataset
-  holds rather than for named ids, it belongs in `npm run sanity:seed:check` where it
-  cannot block, and it is not in MUSE-83.
+  What the gate still cannot see, and MUSE-83 deliberately left for its own ticket: a
+  document that is in the dataset and in **neither** seed. Both scripts fetch by `_id`
+  from the seed, so a document created in the Studio, or dropped from the seed by some
+  earlier branch and never deleted, was invisible to the comparison entirely. That is the
+  bullet below.
+
+- **`sanity:seed:check` asks what the dataset *holds*, because a document in neither seed
+  is in no comparison at all** (MUSE-123). Both scripts fetched by `_id` *taken from the
+  seed* — `*[_id in $ids]` — so MUSE-83's union of the base and head seeds makes a
+  **dropped** document visible and leaves an id no seed has ever held outside both
+  queries, however carefully either output is read. Two ways that happens, and one has
+  already happened:
+
+  - **Created in the Studio and never seeded.** MUSE-60's `studioStory`, carrying
+    `foundedOn: "2025-01-01"` — a founding date nobody has confirmed — and paragraphs
+    reading „PLACEHOLDER … nije istinit". It published nothing only because `/aboutus`
+    was not yet a route. Had the route landed without the seed import, the build would
+    not have *failed* on that document; it would have **rendered** it.
+  - **Dropped by an older branch and never deleted.** `npm run sanity:seed` is
+    `--replace` and never deletes, so a document a past branch retired is still live —
+    and that branch merged long ago, so no diff against a merge base mentions it.
+
+  So the check asks a second question, `*[_type in $types]{_id, _type}`, and subtracts the
+  seed's ids: a third finding, `UNSEEDED`, beside `MISSING` and `DRIFTED`. **It is in the
+  non-blocking check and not in the gate, and that placement is the decision** — a
+  document Mina created in the Studio is exactly the case MUSE-45 says must never fail a
+  pull request, and „the dataset holds something the seed does not describe" is a report
+  rather than a verdict. The scope is `READ_CONTRACT`'s keys, because Sanity's own
+  `sanity.imageAsset` and `sanity.fileAsset` records are in every dataset legitimately and
+  are not content; that list is the one the schema gate already keeps exhaustive
+  (MUSE-66), so a new document type joins this scope by joining the contract rather than
+  by being added to a filter here. Drafts stay invisible for a different and equally
+  deliberate reason: reading one needs a token, and there is none.
+
+  **Proven read-only, with no write of any kind.** The live dataset holds `studioStory`,
+  so dropping that one line from a local copy of the seed *is* the older-branch case:
+  before, 26 `SAME` and exit 0 with no mention of it; after, the same 26 plus `UNSEEDED
+  studioStory (studioStory)`. That is also why the comparison is a pure function of the
+  seed, the dataset's two replies and the type scope — `seedVerdict` — with
+  `test/seedcheck.test.ts` driving it against fixtures the way `test/seedrelease.test.ts`
+  drives the release verdict: **a test that needs a dataset write is a test that cannot
+  run**, and the asset exclusion has no live instance to assert against at all, because
+  nothing has been uploaded yet. An unreachable API prints what happened and exits 0, for
+  the release gate's reason — `npm run build` fetches the dataset in two `ci.yml` jobs and
+  in `deploy.yml`, so an outage is already red everywhere it matters, and a second red for
+  it teaches people to ignore this one.
 
 - **An optional field is a decision, not laziness.** `instructor.portrait`,
   `instructor.instagram`, `instructor.bio`, `class.description`, `class.image`,

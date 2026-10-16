@@ -528,8 +528,11 @@ path and no fallback (a path that does not resolve *fails* the build), the build
 which source it read with `FIXTURE` in capitals, and `test/content.test.ts` asserts that no
 workflow and no npm script *assigns* the variable. What *can* still drift is the seed
 against the dataset once Mina edits in the Studio — the deploy publishes her words either
-way, and `npm run sanity:seed:check` diffs the two, field by field. CI runs it
-`continue-on-error`, so drift is reported and never blocks a pull request.
+way, and `npm run sanity:seed:check` diffs the two, field by field. It also asks the
+dataset what it *holds* — a document in the dataset and in no seed is in no comparison by
+`_id`, which is how MUSE-60's unreviewed `studioStory` sat there unnoticed (MUSE-123). CI
+runs the whole thing `continue-on-error`, so all of it is reported and none of it blocks a
+pull request.
 
 Two consequences worth knowing before they surprise you:
 
