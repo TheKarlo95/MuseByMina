@@ -51,6 +51,29 @@
 
 import { LOCKUP_CAP_HEIGHT_RATIO } from './lockup';
 
+/**
+ * **`?url&no-inline`, on all five tab files, and the suffix is load-bearing.**
+ *
+ * `?url` for the reason every asset here is imported rather than named as a path: Vite
+ * emits the file with a content hash and resolves the reference under `astro dev` and in
+ * a build alike, with no base-path join anyone can get wrong (MUSE-8, MUSE-35).
+ *
+ * `no-inline` because all five are under Vite's 4 KB threshold, so without it every one
+ * becomes a `data:` URI in the markup — the icons out of the budget's `image` line, out
+ * of `test/assets.test.ts`'s reach, and shipped to every visitor on every page whether
+ * their browser wants one or not. The cost, by arithmetic over the committed files
+ * (base64 is `4 × ⌈bytes ÷ 3⌉`, plus 22 for `data:image/png;base64,`, less the hashed
+ * paths it replaces): **12,578 bytes per page**, which is what MUSE-103 also measured
+ * against a real build, `dist/index.html` going 35,366 → 47,944 with the five suffixes
+ * removed. Note why that is more than the 8,256 the five files sum to — the tile is
+ * referenced **twice** since MUSE-75 added the scheme-less entry, so the page carries six
+ * URIs over five files.
+ *
+ * `test/icon.test.ts` is the guard, and it fails naming the file and *"resolves to no
+ * file in the output"*. `npm run budget` is **not**, and MUSE-103 measured that too: the
+ * bytes land on the `html` line, where they take the headroom from 13.2 KB to 941 B and
+ * the run still prints every page within budget.
+ */
 import plum16 from '../assets/icon/muse-icon-plum-16.png?url&no-inline';
 import plum32 from '../assets/icon/muse-icon-plum-32.png?url&no-inline';
 import white16 from '../assets/icon/muse-icon-white-16.png?url&no-inline';
@@ -177,10 +200,16 @@ export const ICON_DIR = 'src/assets/icon';
  *
  * The iOS tile and MUSE-75's scheme-less default are the same artwork for the same
  * reason — an icon that brings its own ground does not have to ask what it is drawn on —
- * so they are one file and one decision. Named rather than written twice because it is
- * also the predicate the pixel assertions in `test/icon.test.ts` need: everything *else*
- * in `ICONS` is the transparent mark, and the rules about stroke weight, ink colour and a
- * shared alpha channel are rules about that mark, not about a tile.
+ * so they are one file and one decision. Named rather than written twice so that the two
+ * entries below cannot drift apart into two files, which would be two decisions nobody
+ * took.
+ *
+ * It is the predicate the pixel assertions need too — everything *else* in `ICONS` is the
+ * transparent mark, and the rules about stroke weight, ink colour and a shared alpha
+ * channel are rules about that mark, not about a tile — but `test/icon.test.ts` spells
+ * that filename itself rather than importing this (MUSE-103): its list is the oracle and
+ * may take nothing from here. The two spellings are held together by the committed files
+ * in `ICON_DIR`, which both are checked against.
  */
 export const TILE_FILE = 'muse-apple-touch.png';
 
@@ -206,11 +235,13 @@ export interface IconLink {
 /**
  * **Every icon the site declares, in document order.**
  *
- * A registry rather than five tags written out in the layout, so that "the page declares
- * what this file says it declares" is a thing a test can assert in both directions —
- * nothing missing, and nothing extra that slipped in beside it.
+ * A registry rather than six tags written out in the layout, so there is one emission
+ * point and a change to the set is one edit. It is **not** also the thing that says what
+ * the set ought to be: `REQUIRED_ICONS` in `test/icon.test.ts` is written out by hand and
+ * is the oracle, because an expectation read off this array moves with it and could not
+ * fail — MUSE-103, and the entry it let somebody delete in silence was the iOS tile.
  *
- * ## Both schemes, and why each has an explicit `media`
+ * ## One account of the colour schemes, and why there are three `rel="icon"` and not two
  *
  * The supplied artwork is **white**, including the file called "no background", which is
  * white on transparency rather than a dark mark. A white icon is invisible on a light tab
@@ -221,50 +252,49 @@ export interface IconLink {
  * two variants therefore have byte-identical alpha channels, which is an assertion in
  * `test/icon.test.ts` rather than a claim here.
  *
- * Both schemes carry an explicit, mutually exclusive `media`, rather than one of them
- * being a scheme-less default. That is deliberate and it is a trade:
+ * So the registry carries three kinds of `rel="icon"`, and each one answers a different
+ * UA rather than being a variation on the last:
  *
- *   - **Mutually exclusive**, exactly one candidate matches per scheme, so which icon a
- *     browser picks does not depend on how it breaks a tie between two matching links.
- *     With a scheme-less default plus a dark override, *both* match in dark mode and the
- *     answer is whatever that browser's tie-break happens to be.
- *   - The cost is a browser that does not implement `media` on an icon link at all: it
- *     sees every candidate match and takes the last, which is the white one, which is
- *     invisible on a light tab strip. That is Chrome before 80 and equivalents — long
- *     past the floor anything else here is written against, and the failure is a tab with
- *     no visible icon, which is what the whole site had before this ticket.
+ *   1. **The scheme pair, each half with an explicit and mutually exclusive `media`.**
+ *      Exactly one candidate matches per scheme, so which coloured mark a browser paints
+ *      is not decided by how it breaks a tie between two matching links. The alternative
+ *      — one of the pair left scheme-less as a default, with the other overriding it —
+ *      has *both* matching in one of the two schemes, and the answer is then whatever
+ *      that browser's tie-break happens to be.
+ *   2. **One scheme-less candidate, for a UA that evaluates `media` and does not
+ *      implement `prefers-color-scheme`** (MUSE-75). Such a UA matches **neither** half
+ *      of the pair: an unknown media feature is false, not ignored, so it sees two
+ *      candidates it has ruled out and none it has not, and gets no icon at all. Every
+ *      current browser matches one of the two, so the population is small; the failure,
+ *      for anyone in it, is total.
  *
- * ## The default branch, and the one case the pair above cannot serve (MUSE-75)
+ *      It is the **opaque tile** — the same file the iOS entry points at, white mark on
+ *      §12's plum — and that is the argument rather than a convenience. The pair needs a
+ *      `media` *because it is transparent*, so what the tab strip is made of decides
+ *      whether either half is visible; a tile brings its own ground and is legible on a
+ *      light strip and a dark one alike, which is exactly what a default has to be when
+ *      the UA asking for it cannot say which it has. It is also why the iOS tile is
+ *      opaque (`APPLE_TOUCH_INSET`), so this is one decision and not two.
  *
- * There is a **second** cost, and it is the sharper one: a user agent that evaluates
- * `media` but does not implement `prefers-color-scheme` matches **neither** branch. An
- * unknown media feature is false, not ignored, so such a UA sees two candidates it has
- * ruled out and no candidate it has not — and gets no icon at all. Every current browser
- * matches one of the two, so the population is small; the failure, for anyone in it, is
- * total. MUSE-40's argument that a `public/favicon.ico` cannot cover this still **stands
- * and is not revisited**: on the Pages sub-path it would publish at
- * `/MuseByMina/favicon.ico` while the bare probe goes to the *origin* root. This is the
- * other, cheap half.
+ *      **And it does not re-create the tie point 1 avoids**, because that tie is only
+ *      ever between candidates of the same declared size. This one declares 180×180
+ *      against the pair's 16 and 32, and a browser picks the closest declared size to
+ *      the box it is filling before it considers anything else, so a 16 or 32 pixel tab
+ *      never reaches for it. It wins when it is the only candidate left, which is
+ *      precisely the case it exists for.
  *
- * So the registry carries one scheme-less `rel="icon"`, and it is the **opaque tile** —
- * the same file the iOS entry points at, white mark on §12's plum. That is the whole
- * argument rather than a convenience: the four icons above need a `media` *because they
- * are transparent*, so what the tab strip is made of decides whether they are visible. A
- * tile brings its own ground and is legible on a light strip and a dark one alike, which
- * is exactly what a default has to be when the UA asking for it is one that cannot tell
- * us which it has. It is also why the iOS tile is opaque (`APPLE_TOUCH_INSET`), so there
- * is one decision here and not two.
+ * The cost not covered by any of the three is a browser that does not implement `media`
+ * on an icon link at all: it sees every candidate match, still prefers the closest
+ * declared size, and so takes the last 16 or 32 — the white one, invisible on a light tab
+ * strip. That is Chrome before 80 and equivalents, long past the floor anything else here
+ * is written against, and the failure is a tab with no visible icon, which is what the
+ * whole site had before MUSE-40.
  *
- * **Its size is what keeps the scheme pair deterministic.** The concern above — a tie the
- * browser breaks however it likes — is real only between candidates of the same declared
- * size. This one declares 180×180 against the pair's 16 and 32, and a browser picks the
- * closest declared size to the box it is filling before it considers anything else, so a
- * 16 or 32 pixel tab never reaches for it. It wins when it is the only candidate left,
- * which is precisely the case it exists for.
- *
- * **MUSE-29 changes this calculus.** On an apex domain a `public/favicon.ico` *would*
- * answer the origin-root probe, which covers one more class again — a UA that reads no
- * `<link>` at all. Worth adding with that move; worth nothing before it.
+ * **A `public/favicon.ico` is not the missing piece, and that has not changed.** On the
+ * Pages sub-path it would publish at `/MuseByMina/favicon.ico` while the bare probe goes
+ * to the *origin* root, so it would answer nothing. **MUSE-29 changes the calculus**: on
+ * an apex domain it *would* answer that probe, which covers one more class again — a UA
+ * that reads no `<link>` at all. Worth adding with that move; worth nothing before it.
  *
  * Note that the icon tags are **not** gated on `indexable`: unlike the canonical and the
  * JSON-LD block, an icon is not a claim about a URL, and the error page gets a tab icon

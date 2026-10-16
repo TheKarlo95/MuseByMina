@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -9,10 +9,9 @@ import {
   ICON_DIR,
   ICON_INK,
   ICON_SOURCE,
-  ICONS,
+  MASTHEAD_MARK_FILE,
   MEASURED_MEAN_ALPHA,
   MIN_STROKE_RATIO,
-  TILE_FILE,
 } from '../src/lib/icon';
 import {
   APEX_DEPLOY,
@@ -64,6 +63,32 @@ import {
  * icon to catch. What it cannot do is notice that the tags are *absent*: "every icon
  * reference resolves" is trivially true of a page with no icons, which is exactly the
  * page this ticket started from. The vacuity guard is here.
+ *
+ * ## And the guard needs an oracle that is not the thing it is guarding (MUSE-103)
+ *
+ * It did not have one. Every expectation below was read off `ICONS`, and `ICONS` is also
+ * what `BaseLayout.astro` emits the tags from — so deleting an entry moved both sides of
+ * the comparison together and the suite stayed green. QA dropped the `apple-touch-icon`
+ * entry and this file passed with no iOS tile declared anywhere, which is the one tag
+ * MUSE-40 argued for by name (`APPLE_TOUCH_INSET`, an opaque tile, *"iOS composites a
+ * transparent one unpredictably"*). Same defect as MUSE-95 and MUSE-96: a check whose
+ * matching rule reads the thing it is supposed to be independent of.
+ *
+ * So `REQUIRED_ICONS` below is **written out by hand** — every rel, size, media and
+ * filename spelled here and imported from nothing — and is the oracle; `ICONS` is the
+ * subject and is reached only through the built markup. The hand-written list is then
+ * held to something external in its turn, which is MUSE-66's shape: the files committed
+ * in `ICON_DIR` have to be exactly the files it names, so an icon cannot be shipped into
+ * the repository and declared by nothing, and the list cannot name artwork that is not
+ * there.
+ *
+ * **What is still not covered, stated rather than discovered later.** Two tags point at
+ * one file, so dropping *either* tile entry from the registry **and** from the list below
+ * leaves the committed artwork still named by the other and the directory check still
+ * satisfied — the comparison against the markup is what fails, and it only fails because
+ * the list is a separate edit in a separate file. That is the whole of the defence: it is
+ * two deliberate deletions rather than none, and the second one has to delete a sentence
+ * saying what it is for. Nothing here can tell a UA what it rendered.
  */
 
 let pages: Build;
@@ -93,14 +118,117 @@ function declaredSize(sizes: string): number {
 }
 
 /**
- * The transparent mark — everything in the registry that is not the opaque tile.
+ * The opaque tile, spelled here rather than imported as `TILE_FILE`.
+ *
+ * Two of the required tags point at it, so it is written once — but written *in this
+ * file*, because the list below is the oracle and nothing in it may come from the module
+ * it is checking (MUSE-103). The committed-artwork check is what holds this spelling to
+ * the directory, so a rename over there cannot make this quietly name nothing.
+ */
+const TILE = 'muse-apple-touch.png';
+
+/** One tag this suite requires of every built page, and the reason it is required. */
+interface RequiredIcon {
+  rel: 'icon' | 'apple-touch-icon';
+  sizes: string;
+  /** The `media` attribute, or `''` for a tag that carries none at all. */
+  media: string;
+  /** The artwork in `ICON_DIR` the tag has to resolve to. */
+  file: string;
+  /** Why the site declares it — so deleting the line has to disagree with a sentence. */
+  why: string;
+}
+
+/**
+ * **The tags every page has to carry, in document order, written out (MUSE-103).**
+ *
+ * This list is deliberately *not* derived from `src/lib/icon.ts`. It is the oracle, and
+ * the registry over there is the subject: the only route from one to the other is the
+ * built page, so a registry entry that disappears has nothing to take its expectation
+ * with it. The cost is that this is a second place to edit when the set legitimately
+ * changes, and that is the trade — the previous version cost nothing to maintain and
+ * could not fail.
+ *
+ * Each line is a decision somebody argued, which is what a hand-written list is for:
+ *
+ *   - the **scheme pair**, twice over, because the supplied artwork is white-only and a
+ *     white mark is invisible on a light tab strip (§11, §12, MUSE-40);
+ *   - the **scheme-less tile**, because a UA that evaluates `media` but has no
+ *     `prefers-color-scheme` matches neither half of that pair and would get no icon at
+ *     all — an unknown media feature is false, not ignored (MUSE-75);
+ *   - the **iOS tile**, which is the home-screen icon and the entry MUSE-40 reasoned
+ *     about explicitly when it made the tile opaque.
+ *
+ * Order matters and is asserted: it is what a UA that ignores `media` falls back on.
+ */
+const REQUIRED_ICONS: readonly RequiredIcon[] = [
+  {
+    rel: 'icon',
+    sizes: '16x16',
+    media: '(prefers-color-scheme: light)',
+    file: 'muse-icon-plum-16.png',
+    why: 'the plum mark, which is the one of the two legible on a light tab strip',
+  },
+  {
+    rel: 'icon',
+    sizes: '32x32',
+    media: '(prefers-color-scheme: light)',
+    file: 'muse-icon-plum-32.png',
+    why: 'the same, at the size a 2× tab strip asks for',
+  },
+  {
+    rel: 'icon',
+    sizes: '16x16',
+    media: '(prefers-color-scheme: dark)',
+    file: 'muse-icon-white-16.png',
+    why: '§12 artwork as supplied, for the dark strip the plum one vanishes on',
+  },
+  {
+    rel: 'icon',
+    sizes: '32x32',
+    media: '(prefers-color-scheme: dark)',
+    file: 'muse-icon-white-32.png',
+    why: 'the same, at the size a 2× tab strip asks for',
+  },
+  {
+    rel: 'icon',
+    sizes: '180x180',
+    media: '',
+    file: TILE,
+    why:
+      'MUSE-75: without a scheme-less candidate a UA that cannot evaluate ' +
+      'prefers-color-scheme rules out all four above and shows no icon at all',
+  },
+  {
+    rel: 'apple-touch-icon',
+    sizes: '180x180',
+    media: '',
+    file: TILE,
+    why:
+      'MUSE-40: the iOS home-screen tile, which is why that file is opaque — iOS ' +
+      'composites a transparent one against an unpredictable ground',
+  },
+];
+
+/** `rel|sizes|media`, the shape `iconLinks` reads off a built tag. */
+function keyOf(icon: RequiredIcon): string {
+  return `${icon.rel}|${icon.sizes}|${icon.media}`;
+}
+
+const REQUIRED_KEYS = REQUIRED_ICONS.map(keyOf);
+
+/** Each distinct file the required set names, in the order the set names them. */
+const REQUIRED_FILES = [...new Set(REQUIRED_ICONS.map((icon) => icon.file))];
+
+/**
+ * The transparent mark — everything required that is not the opaque tile.
  *
  * Keyed on the **file** rather than on `rel`, which is what it was until MUSE-75 added a
  * scheme-less `rel="icon"` pointing at that same tile. Every rule below this line is
  * about the mark: one brand colour, a shared alpha channel, more ink than the plain crop
  * would carry. A tile satisfies none of them and is not supposed to.
  */
-const TAB_ICONS = ICONS.filter((icon) => icon.file !== TILE_FILE);
+const TAB_ICONS = REQUIRED_ICONS.filter((icon) => icon.file !== TILE);
 
 /* ------------------------------------------------------------------ *
  * 1. The mark is the supplied artwork, cropped — nothing drawn.
@@ -180,9 +308,38 @@ describe('MUSE-40: the icon is a crop of the supplied lockup', () => {
  * ------------------------------------------------------------------ */
 
 describe('MUSE-40: the committed icons', () => {
-  it.each(ICONS.map((icon) => [icon.file, icon] as const))(
-    '%s is a square PNG of exactly the size it declares',
-    (_file, icon) => {
+  /**
+   * **MUSE-103: the hand-written list is held to the directory, in both directions.**
+   *
+   * `REQUIRED_ICONS` is this file's own list, so nothing stops it from quietly losing a
+   * line the same way the registry could — which is MUSE-66's problem and this is
+   * MUSE-66's answer: the committed artwork is external to both, and it is what the list
+   * is measured against. A file in `ICON_DIR` that no required tag names is an icon
+   * shipped into the repository and declared by nobody; a required tag naming a file that
+   * is not there would fail further down, but says so here with the shorter message.
+   *
+   * `MASTHEAD_MARK_FILE` is the one exemption and it is not a tab icon at all — it is the
+   * mark drawn on the page (MUSE-67), goes through `astro:assets` rather than a `?url`
+   * import, and is measured by `test/lockup.test.ts`. The exemption is asserted still
+   * live rather than listed: if that file leaves the directory, the subtraction below
+   * stops subtracting anything and this says so.
+   */
+  it('requires exactly the tab artwork committed in src/assets/icon', () => {
+    const committed = readdirSync(ICON_DIR).filter((file) => file.endsWith('.png'));
+
+    expect(
+      committed,
+      `${MASTHEAD_MARK_FILE} is exempted from the set below and is not in ${ICON_DIR}`,
+    ).toContain(MASTHEAD_MARK_FILE);
+
+    expect([...REQUIRED_FILES].sort(), 'a committed icon that no page declares').toEqual(
+      committed.filter((file) => file !== MASTHEAD_MARK_FILE).sort(),
+    );
+  });
+
+  it.each(REQUIRED_ICONS.map((icon) => [keyOf(icon), icon] as const))(
+    '%s points at a square PNG of exactly the size it declares',
+    (_key, icon) => {
       const head = header(iconFile(icon.file));
       const size = declaredSize(icon.sizes);
       expect({ width: head.width, height: head.height }).toEqual({
@@ -276,7 +433,7 @@ describe('MUSE-40: the committed icons', () => {
    * takes the question away from the operating system.
    */
   it('the apple-touch tile is fully opaque', () => {
-    const tile = iconFile('muse-apple-touch.png');
+    const tile = iconFile(TILE);
     const head = header(tile);
     expect(
       head.colourType === COLOUR_TYPE.rgb || head.colourType === COLOUR_TYPE.palette,
@@ -306,20 +463,32 @@ describe('MUSE-40 AC1: every page declares the studio mark, in both colour schem
       });
   }
 
-  const expected = ICONS.map((icon) => `${icon.rel}|${icon.sizes}|${icon.media ?? ''}`);
-
   for (const [name, build] of TARGETS) {
-    it(`declares exactly the registered icon set, on every page (${name})`, () => {
+    it(`declares exactly the required icon set, on every page (${name})`, () => {
       const target = build();
       const wrong = target
         .htmlFiles()
         .map((page) => ({ page, keys: iconLinks(target, page).map((link) => link.key) }))
-        .filter(({ keys }) => keys.join('\n') !== expected.join('\n'))
-        .map(({ page, keys }) => `${page}: ${keys.join(', ') || '— no icon tags —'}`);
+        .filter(({ keys }) => keys.join('\n') !== REQUIRED_KEYS.join('\n'))
+        .map(({ page, keys }) => {
+          const missing = REQUIRED_ICONS.filter((icon) => !keys.includes(keyOf(icon)));
+          const extra = keys.filter((key) => !REQUIRED_KEYS.includes(key));
+          return [
+            `${page}: ${keys.join(', ') || '— no icon tags —'}`,
+            ...missing.map((icon) => `    missing ${keyOf(icon)} — ${icon.why}`),
+            ...extra.map((key) => `    not required: ${key}`),
+          ].join('\n');
+        });
 
       expect(
         wrong,
-        `every page must declare the five tags in src/lib/icon.ts ICONS, in order`,
+        `every page must declare these ${REQUIRED_KEYS.length} tags, in this order:\n` +
+          REQUIRED_KEYS.map((key) => `    ${key}`).join('\n') +
+          `\nThat list is REQUIRED_ICONS in this file and is written out by hand on ` +
+          `purpose (MUSE-103). It is the oracle; src/lib/icon.ts ICONS is the subject. ` +
+          `Reading the expectation off the registry — which is also what emits the tags ` +
+          `— moved both sides together, so the iOS tile could be deleted with this file ` +
+          `green and no apple-touch-icon anywhere in the output.`,
       ).toEqual([]);
     });
 
@@ -395,7 +564,7 @@ describe('MUSE-40 AC1: every page declares the studio mark, in both colour schem
 
         const tile = target
           .allFiles()
-          .find((file) => file.includes(TILE_FILE.replace(/\.png$/, '')));
+          .find((file) => file.includes(TILE.replace(/\.png$/, '')));
         expect(
           ungated[0]!.href,
           `${page}: the default branch must be the opaque tile`,
@@ -432,14 +601,14 @@ describe('MUSE-40 AC1: every page declares the studio mark, in both colour schem
     });
 
     /** The emitted file is the artwork in `src/assets/icon/`, not some other PNG. */
-    it(`emits each registered icon file into the output (${name})`, () => {
+    it(`emits each required icon file into the output (${name})`, () => {
       const target = build();
       const emitted = target.allFiles();
 
-      const missing = ICONS.filter((icon) => {
-        const stem = icon.file.replace(/\.png$/, '');
+      const missing = REQUIRED_FILES.filter((file) => {
+        const stem = file.replace(/\.png$/, '');
         return !emitted.some((f) => f.includes(stem) && f.endsWith('.png'));
-      }).map((icon) => icon.file);
+      });
 
       expect(missing).toEqual([]);
     });
