@@ -209,7 +209,7 @@ describe('the form copy table', () => {
     }
   });
 
-  it('says nothing in the failure lines about what technically failed', () => {
+  it('says nothing anywhere in the table about what technically failed', () => {
     /**
      * MUSE-15 — the failure block used to end with `Error.message`, so the Croatian page
      * read `PUBLIC_FORM_ENDPOINT is not configured` / `HTTP 500 Internal Server Error`.
@@ -218,15 +218,26 @@ describe('the form copy table', () => {
      * `test/trialform.test.ts` proves no diagnostic is *rendered*; this keeps one out of
      * the copy table, which is the other way it could come back.
      */
+    /**
+     * **Every string in the table, rather than the four failure lines** (MUSE-101).
+     *
+     * This named `failTitle`, `failBody`, `failOffline` and `undeliverable.fail`, which
+     * are the keys a diagnostic was in and the keys the next one will not be in.
+     * `test/trialform.test.ts`'s residue guard subtracts the *whole* table from the page,
+     * so a diagnostic moved into any other key — `sentBody`, `invalid`, `noscript`, or
+     * one added next year — is subtracted away there and was outside the list here. The
+     * two guards between them covered every key except the ones nobody thought of.
+     *
+     * Nothing in this table has any business naming an HTTP status or a build-time
+     * variable, so the list is the table. The floor is `declares exactly the same strings
+     * in HR and EN` above, which fails if `leaves` stops finding them.
+     */
     for (const copy of Object.values(FORM_COPY)) {
-      // `undeliverable.fail` is the failure line the build with no endpoint shows
-      // (MUSE-110), and the diagnostic it must not carry is the one that was rendered
-      // verbatim: the name of the environment variable that is unset.
-      for (const path of ['failTitle', 'failBody', 'failOffline', 'undeliverable.fail']) {
-        const text = leaves(copy).get(path);
-        expect(text, `${path} is missing from the copy table`).toBeDefined();
-        expect(text!, `${path} names an HTTP status`).not.toMatch(/\b[1-5]\d\d\b/);
-        expect(text!, `${path} names a build-time variable`).not.toMatch(
+      const strings = leaves(copy);
+      expect(strings.size, 'the copy table has no strings to check').toBeGreaterThan(0);
+      for (const [path, text] of strings) {
+        expect(text, `${path} names an HTTP status`).not.toMatch(/\b[1-5]\d\d\b/);
+        expect(text, `${path} names a build-time variable`).not.toMatch(
           /[A-Z][A-Z0-9]*_[A-Z0-9_]+/,
         );
       }

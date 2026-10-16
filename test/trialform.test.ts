@@ -35,15 +35,49 @@ interface Target {
   locale: Locale;
   contact: string;
   home: string;
+  /**
+   * `/pricing`, which carries the same form plus the package `<select>` (MUSE-22).
+   *
+   * It was outside every browser run until MUSE-101: `TARGETS` named `/contact` and `/`,
+   * so the residue run, the no-JavaScript run and the structural check all skipped the
+   * one page whose form has a field the other two do not. `test/pricing.test.ts` has its
+   * own residue guard over the rendered component, so the copy half was covered and the
+   * browser half was not. `visits every form page in the browser` below is what stops
+   * the next embedding being missed the same way.
+   */
+  pricing: string;
   copy: FormCopy;
   /** The other locale's copy — used to prove a page is not serving both. */
   other: FormCopy;
 }
 
 const TARGETS: Target[] = [
-  { locale: 'hr', contact: '/contact', home: '/', copy: FORM_COPY.hr, other: FORM_COPY.en },
-  { locale: 'en', contact: '/en/contact', home: '/en', copy: FORM_COPY.en, other: FORM_COPY.hr },
+  {
+    locale: 'hr',
+    contact: '/contact',
+    home: '/',
+    pricing: '/pricing',
+    copy: FORM_COPY.hr,
+    other: FORM_COPY.en,
+  },
+  {
+    locale: 'en',
+    contact: '/en/contact',
+    home: '/en',
+    pricing: '/en/pricing',
+    copy: FORM_COPY.en,
+    other: FORM_COPY.hr,
+  },
 ];
+
+/**
+ * Every route of this locale that renders the form, `/contact` first.
+ *
+ * One list, read by the structural check, the no-JavaScript run and the residue run, so
+ * a page cannot be inside one and outside another — which is how `/pricing` came to be
+ * in `TARGETS`'s neighbourhood and in none of the three runs.
+ */
+const formRoutes = (target: Target): string[] => [target.contact, target.home, target.pricing];
 
 const FORM = '[data-trial-form]';
 const VALID = {
@@ -215,6 +249,83 @@ function residue(rendered: string, copy: FormCopy, extras: string[]): string {
   return left.replace(/[^\p{L}\p{N}_]+/gu, '');
 }
 
+/**
+ * **The attributes a visitor or assistive technology reads as words** (MUSE-101).
+ *
+ * `residue` answers "is every character the visitor can read something we wrote", and it
+ * was asked of `innerText` alone — so the whole property was re-delivered by one
+ * attribute. Two lines after `const offline = …` in `TrialForm.astro`:
+ *
+ * ```js
+ * status?.setAttribute('title', String(error));
+ * status?.setAttribute('aria-description', String(error));
+ * ```
+ *
+ * and the visitor gets `PUBLIC_FORM_ENDPOINT is not configured` as a tooltip, a screen
+ * reader reads it out as the status block's description, and all 96 tests pass. The
+ * second assertion beside the first — "so a diagnostic cannot simply move one element
+ * out" — guards against another *element*; an attribute on the same element is a third
+ * place.
+ *
+ * So the surface is painted text **plus** every attribute whose value is text rather
+ * than a name, a number or a reference: `title` and the four `aria-*` strings are
+ * announced, `alt` replaces an image, `placeholder` is painted inside a field, and
+ * `label` is what an `<option>` renders when it has one.
+ *
+ * **`data-*` is deliberately not here.** `data-endpoint` holds a URL and `data-msg-*`
+ * holds the copy table, and neither is anything the visitor reads; they have their own
+ * guards (`MUSE-110` below reads every `data-msg-*` on every form page). Nor is `value`:
+ * the level keys are language-independent on purpose (MUSE-18).
+ */
+const READABLE_ATTRIBUTES = [
+  'title',
+  'alt',
+  'placeholder',
+  'label',
+  'aria-label',
+  'aria-description',
+  'aria-placeholder',
+  'aria-roledescription',
+  'aria-valuetext',
+] as const;
+
+/**
+ * Everything inside `selector` that a visitor or assistive technology can read.
+ *
+ * The painted text, every text-bearing attribute on the subtree, and whatever
+ * `aria-labelledby` / `aria-describedby` point at — the indirection is included because
+ * an accessible name assembled from an element elsewhere in the document is read aloud
+ * exactly like one written in place, and `innerText` of this subtree cannot see it.
+ *
+ * Asked of the real document rather than of the markup: the attributes the defect writes
+ * are set at runtime, so a check over the served HTML could not see them.
+ */
+async function readable(page: Page, selector: string): Promise<string> {
+  return await page.evaluate(
+    ({ selector: sel, attributes }) => {
+      const root = document.querySelector(sel);
+      if (root === null) return '';
+      const parts: string[] = [
+        root instanceof HTMLElement ? root.innerText : (root.textContent ?? ''),
+      ];
+      for (const element of [root, ...root.querySelectorAll('*')]) {
+        for (const name of attributes) {
+          const value = element.getAttribute(name);
+          if (value !== null) parts.push(value);
+        }
+        for (const name of ['aria-labelledby', 'aria-describedby']) {
+          for (const id of (element.getAttribute(name) ?? '').split(/\s+/)) {
+            if (id === '') continue;
+            parts.push(document.getElementById(id)?.textContent ?? '');
+          }
+        }
+      }
+      return parts.join('\n');
+    },
+    { selector, attributes: [...READABLE_ATTRIBUTES] },
+  );
+}
+
 interface Failure {
   label: string;
   /** Which build drives it: the stub endpoint, or no endpoint at all. */
@@ -305,9 +416,21 @@ interface Failed {
   status: string;
   /** The same for the whole form block, so a diagnostic cannot just move elements. */
   wrap: string;
+  /** The status block as `readable` reads it: painted text and every text attribute. */
+  statusReadable: string;
+  /** The same for the form block — an attribute anywhere inside it is on this string. */
+  wrapReadable: string;
   console: Visit['console'];
   /** The studio address, read off the page rather than hard-coded — it is content. */
   email: string;
+  /**
+   * The package `<select>`'s option labels, where the page has one.
+   *
+   * Content, like the address: they are `pricingTier` documents, so they are not in the
+   * copy table and `residue` would read them as a leak. Read off the page for the same
+   * reason the address is — a literal here would be a second place the rate card lives.
+   */
+  packages: string[];
   /** True if the submit took the visitor off the page it was on. */
   navigated: boolean;
 }
@@ -399,23 +522,34 @@ async function awaitFailureBlock(
   }
 }
 
-async function failOnce(failure: Failure, target: Target): Promise<Failed> {
+async function failOnce(
+  failure: Failure,
+  target: Target,
+  /** Which of this locale's form pages to drive it on. */
+  route: string = target.contact,
+): Promise<Failed> {
   const preview = failure.build === 'none' ? unconfigured : configured;
   if (failure.reply) preview.reply(failure.reply);
-  const seen = await visit(preview, target.contact);
+  const seen = await visit(preview, route);
   try {
     await fillForm(seen.page);
     const mail = seen.page.locator('[data-form-wrap] a[href^="mailto:"]').first();
     const email = (await mail.getAttribute('href')) ?? '';
+    const packages = await seen.page
+      .locator(`${FORM} [name="package"] option`)
+      .allTextContents();
     if (failure.offline) await seen.offline(true);
     const sent = preview.requests.length;
     await seen.page.click('[data-submit]');
-    await awaitFailureBlock(seen, preview, `${target.locale}: ${failure.label}`, sent);
+    await awaitFailureBlock(seen, preview, `${target.locale} ${route}: ${failure.label}`, sent);
     return {
       status: await seen.page.locator('[data-form-status]').innerText(),
       wrap: await seen.page.locator('[data-form-wrap]').innerText(),
+      statusReadable: await readable(seen.page, '[data-form-status]'),
+      wrapReadable: await readable(seen.page, '[data-form-wrap]'),
       console: [...seen.console],
       email: email.replace(/^mailto:/, ''),
+      packages,
       navigated: seen.page.url() !== seen.url,
     };
   } finally {
@@ -429,31 +563,71 @@ async function failOnce(failure: Failure, target: Target): Promise<Failed> {
  * localised explanation and no raw `Error.message`, variable name, or HTTP status text.
  */
 describe('D1: a failed submit says only things the site wrote, in the visitor’s language', () => {
+  /**
+   * The whole assertion, so the pages beyond `/contact` are asked the same question.
+   *
+   * `seen.statusReadable` rather than `seen.status`: painted text **and** every attribute
+   * a visitor or assistive technology reads — see `READABLE_ATTRIBUTES`. The language
+   * assertions below stay on the painted text, which is what they are about.
+   */
+  function saysOnlyOurWords(seen: Failed, target: Target): void {
+    // The failure block, character by character, is the site's own copy plus the
+    // studio address. Whatever is left over is a diagnostic that leaked.
+    expect(
+      residue(seen.statusReadable, target.copy, [seen.email]),
+      `the failure block rendered text the copy table does not declare: ${flatten(seen.statusReadable)}`,
+    ).toBe('');
+
+    // And the form block around it, so a diagnostic cannot simply move one element out.
+    expect(
+      residue(seen.wrapReadable, target.copy, [
+        seen.email,
+        ...seen.packages,
+        ...Object.values(VALID),
+      ]),
+      `the form block rendered text the copy table does not declare: ${flatten(seen.wrapReadable)}`,
+    ).toBe('');
+
+    // It is still an explanation, not a blank box, and it is in one language.
+    expect(flatten(seen.status)).toContain(flatten(target.copy.failTitle));
+    expect(flatten(seen.status), 'failed in the wrong language').not.toContain(
+      flatten(target.other.failTitle),
+    );
+    expect(seen.navigated, 'the page navigated away').toBe(false);
+  }
+
   for (const target of TARGETS) {
     for (const failure of FAILURES) {
       it(`${target.locale}: ${failure.label} — nothing untranslated is rendered`, async () => {
-        const seen = await failOnce(failure, target);
-
-        // The failure block, character by character, is the site's own copy plus the
-        // studio address. Whatever is left over is a diagnostic that leaked.
-        expect(
-          residue(seen.status, target.copy, [seen.email]),
-          `the failure block rendered text the copy table does not declare: ${flatten(seen.status)}`,
-        ).toBe('');
-
-        // And the form block around it, so a diagnostic cannot simply move one element out.
-        expect(
-          residue(seen.wrap, target.copy, [seen.email, ...Object.values(VALID)]),
-          `the form block rendered text the copy table does not declare: ${flatten(seen.wrap)}`,
-        ).toBe('');
-
-        // It is still an explanation, not a blank box, and it is in one language.
-        expect(flatten(seen.status)).toContain(flatten(target.copy.failTitle));
-        expect(flatten(seen.status), 'failed in the wrong language').not.toContain(
-          flatten(target.other.failTitle),
-        );
-        expect(seen.navigated, 'the page navigated away').toBe(false);
+        saysOnlyOurWords(await failOnce(failure, target), target);
       });
+    }
+
+    /**
+     * **The same property on the other pages that render the form** (MUSE-101).
+     *
+     * Every failure mode above is driven on `/contact`, because that is where the form's
+     * configuration is varied and the matrix is nine cases wide. `/` and `/pricing`
+     * render the same component and were in no browser run at all, so they get two
+     * cases each rather than nine: the 500 that returns the provider's own error page —
+     * the failure whose diagnostic was `HTTP 500 Internal Server Error` — and being
+     * offline, which is the other branch of the `catch`. Two pages times two cases is
+     * eight tests over builds this file already performs; `test/helpers/concurrency.ts`
+     * is untouched, and it has no headroom (see `DECLARED`).
+     */
+    const ELSEWHERE = [
+      FAILURES.find(
+        (failure) => failure.reply?.kind === 'error' && failure.reply.status === 500,
+      )!,
+      FAILURES.find((failure) => failure.offline === true && failure.build === 'stub')!,
+    ];
+
+    for (const route of formRoutes(target).filter((route) => route !== target.contact)) {
+      for (const failure of ELSEWHERE) {
+        it(`${target.locale} ${route}: ${failure.label} — nothing untranslated is rendered`, async () => {
+          saysOnlyOurWords(await failOnce(failure, target, route), target);
+        });
+      }
     }
 
     /**
@@ -503,6 +677,53 @@ describe('D1: a failed submit says only things the site wrote, in the visitor’
  * `mailto:` route, and native submission is made structurally impossible rather than
  * pointed at a provider whose non-AJAX behaviour nobody here can verify. See the PR.
  */
+/**
+ * One attribute off one start tag, whatever its value is quoted with — or `''` for an
+ * attribute written with no value at all, which is what the parser gives it.
+ *
+ * `\s` in front of the name rather than `\b`, because `\baction` matches inside
+ * `formaction` and the difference between those two is the whole of D2.
+ */
+const attrOf = (tag: string, name: string): string | undefined => {
+  const match = new RegExp(
+    `\\s${name}(?=[\\s=>/])(?:\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>=]+)))?`,
+    'i',
+  ).exec(tag);
+  if (match === null) return undefined;
+  return match[1] ?? match[2] ?? match[3] ?? '';
+};
+
+/** The element a start tag opens. */
+const tagName = (tag: string): string =>
+  (/^<\s*([a-z0-9]+)/i.exec(tag)?.[1] ?? '').toLowerCase();
+
+/**
+ * Whether this start tag is a **submitter** — a control that can submit the form it is in.
+ *
+ * `<button>`'s missing *and* invalid value default is `submit`, so a `<button>` with no
+ * `type` submits; `<input>` submits only as `submit` or `image`.
+ */
+const isSubmitter = (tag: string): boolean => {
+  const type = (attrOf(tag, 'type') ?? '').trim().toLowerCase();
+  if (tagName(tag) === 'button') return type !== 'button' && type !== 'reset';
+  if (tagName(tag) === 'input') return type === 'submit' || type === 'image';
+  return false;
+};
+
+/**
+ * The method a submission would use, given what the tag declares and the form's own.
+ *
+ * `undefined` means the attribute is absent and the form's method stands. A value that
+ * is present but not one of the three states is **GET** — the invalid value default in
+ * the form-submission algorithm — rather than the form's method, so `formmethod="pst"`
+ * is a GET of a name, an email and a phone number and fails below like any other.
+ */
+const methodOf = (declared: string | undefined, fallback: string): string => {
+  if (declared === undefined) return fallback;
+  const method = declared.trim().toLowerCase();
+  return method === 'post' || method === 'dialog' ? method : 'get';
+};
+
 describe('D2: without JavaScript, the form is replaced by something that works', () => {
   const BUILDS = [
     { label: 'no endpoint configured', preview: () => unconfigured },
@@ -529,111 +750,183 @@ describe('D2: without JavaScript, the form is replaced by something that works',
 
   for (const target of TARGETS) {
     for (const build of BUILDS) {
-      it(`${target.locale}, ${build.label}: no form on the page declares a native submit to this host`, async () => {
+      /**
+       * **The form *and* every submitter inside it** (MUSE-101).
+       *
+       * This read the `<form>` start tag and nothing else, which is the second way
+       * MUSE-15's property was re-delivered by one attribute:
+       *
+       * ```html
+       * <button class="submit" id="trial-submit" type="submit" formmethod="post" formaction="" data-submit>
+       * ```
+       *
+       * A submitter's `formmethod` **overrides** the form's method per the
+       * form-submission algorithm, so `method="dialog"` on the form above stops aborting
+       * the submission and the native POST — and the 405 — is back, with all 96 tests
+       * green. `formmethod` and `formaction` are the only two attributes that can do
+       * this, so parsing both is the whole of it.
+       *
+       * It bites in exactly the fallback the MUSE-15 PR identifies: an engine with no
+       * `@media (scripting: none)` support and JavaScript off. The behavioural test
+       * below cannot see it, because where that media feature *is* supported the form is
+       * `display: none`, the button is never `:visible` and it is never clicked. So this
+       * check is the one that has to be complete, and it is read off the served markup
+       * rather than from a browser for the same reason.
+       */
+      it(`${target.locale}, ${build.label}: no form or submitter declares a native submit to this host`, async () => {
         const preview = build.preview();
-        for (const route of [target.contact, target.home]) {
+        for (const route of formRoutes(target)) {
           const html = await (await fetch(preview.url(route))).text();
-          const forms = html.match(/<form\b[^>]*>/g) ?? [];
+          const forms = [...html.matchAll(/(<form\b[^>]*>)([\s\S]*?)<\/form>/gi)];
           expect(forms.length, `${route} renders no form at all`).toBeGreaterThan(0);
+          // Every start tag was paired with its `</form>`. Without this, a form whose
+          // body could not be isolated would have its submitters silently skipped.
+          expect(
+            forms.length,
+            `${route}: a <form> that could not be paired with its </form>`,
+          ).toBe((html.match(/<form\b[^>]*>/gi) ?? []).length);
 
-          for (const tag of forms) {
-            const attr = (name: string): string | undefined =>
-              new RegExp(`\\b${name}\\s*=\\s*"([^"]*)"`, 'i').exec(tag)?.[1];
-            const method = (attr('method') ?? 'get').toLowerCase();
+          const here = new URL(preview.url(route));
+
+          for (const [, tag, inner] of forms) {
+            const method = methodOf(attrOf(tag!, 'method'), 'get');
             // An absent or empty action submits to the page itself.
-            const action = new URL(attr('action') || preview.url(route), preview.url(route));
-            const here = new URL(preview.url(route));
+            const action = new URL(attrOf(tag!, 'action') || here.href, here);
+
+            /**
+             * What each control inside the form would submit, and with what.
+             *
+             * A tag carrying `formmethod` or `formaction` is included whether or not it
+             * parses as a submitter: an override on a control that cannot submit is
+             * dead markup one `type` away from being live, and it has no other purpose.
+             */
+            const submitters = (inner!.match(/<[a-z][^>]*>/gi) ?? []).filter(
+              (control) =>
+                isSubmitter(control) ||
+                attrOf(control, 'formmethod') !== undefined ||
+                attrOf(control, 'formaction') !== undefined,
+            );
+
+            const declarations = [
+              { what: tag!, method, action },
+              ...submitters.map((control) => {
+                const override = attrOf(control, 'formaction');
+                return {
+                  what: control,
+                  method: methodOf(attrOf(control, 'formmethod'), method),
+                  // An empty `formaction` is the page itself, exactly like an empty
+                  // `action` — it overrides the form's action rather than deferring.
+                  action:
+                    override === undefined ? action : new URL(override || here.href, here),
+                };
+              }),
+            ];
 
             // The property, rather than a check for today's markup: nothing on this
             // site may declare a native submission to the deploy origin. A POST is the
             // 405; a GET would put a name, an email and a phone number in a URL, in
             // history and in every log on the way. Once MUSE-12 lands, an `action` on
             // the provider's own origin is still free to exist.
-            const nativeToUs =
-              action.origin === here.origin && method !== 'dialog';
+            for (const declaration of declarations) {
+              const nativeToUs =
+                declaration.action.origin === here.origin && declaration.method !== 'dialog';
+              expect(
+                nativeToUs,
+                `${route}: ${declaration.what} submits natively to this host ` +
+                  `(method=${declaration.method} action=${declaration.action.href})`,
+              ).toBe(false);
+            }
+          }
+        }
+      });
+
+      for (const route of formRoutes(target)) {
+        it(`${target.locale} ${route}, ${build.label}: with JavaScript disabled, the inbox is offered and nothing can 405`, async () => {
+          const preview = build.preview();
+          const seen = await visit(preview, route, { javaScript: false });
+          try {
+            // The enhanced form is not shown: it cannot be sent, so it is not offered.
             expect(
-              nativeToUs,
-              `${route}: a form submits natively to this host (method=${method} action=${action.href})`,
+              await seen.page.locator(FORM).isVisible(),
+              'the form that cannot be sent is still on display',
             ).toBe(false);
-          }
-        }
-      });
 
-      it(`${target.locale}, ${build.label}: with JavaScript disabled, the inbox is offered and nothing can 405`, async () => {
-        const preview = build.preview();
-        const seen = await visit(preview, target.contact, { javaScript: false });
-        try {
-          // The enhanced form is not shown: it cannot be sent, so it is not offered.
-          expect(
-            await seen.page.locator(FORM).isVisible(),
-            'the form that cannot be sent is still on display',
-          ).toBe(false);
-
-          // What replaces it names the studio inbox, as a link that works.
-          const block = flatten((await seen.page.locator('[data-form-wrap]').innerText()) ?? '');
-          expect(block).toContain(flatten(target.copy.noscript));
-          expect(block, 'the no-JS alternative is in the wrong language').not.toContain(
-            flatten(target.other.noscript),
-          );
-          // `:visible`, because the failure block's own mailto is in the DOM too — it
-          // is part of the form that is no longer on display.
-          const mail = seen.page.locator('[data-form-wrap] a[href^="mailto:"]:visible');
-          expect(await mail.count(), 'no reachable mailto link').toBeGreaterThan(0);
-
-          // Nothing it says is about the enhanced path: there is no in-page
-          // confirmation to come, and no send button that could send anything.
-          for (const promise of [target.copy.sentTitle, target.copy.sentBody, target.copy.submit]) {
-            expect(block, 'the no-JS copy promises the enhanced path').not.toContain(
-              flatten(promise),
+            // What replaces it names the studio inbox, as a link that works.
+            const block = flatten(
+              (await seen.page.locator('[data-form-wrap]').innerText()) ?? '',
             );
-          }
+            expect(block).toContain(flatten(target.copy.noscript));
+            expect(block, 'the no-JS alternative is in the wrong language').not.toContain(
+              flatten(target.other.noscript),
+            );
+            // `:visible`, because the failure block's own mailto is in the DOM too — it
+            // is part of the form that is no longer on display.
+            const mail = seen.page.locator('[data-form-wrap] a[href^="mailto:"]:visible');
+            expect(await mail.count(), 'no reachable mailto link').toBeGreaterThan(0);
 
-          // Every link offered is the one route that works without JavaScript. Read as
-          // attributes rather than through `evaluateAll`, which needs page scripting.
-          const links = await seen.page.locator('[data-form-wrap] a:visible').all();
-          expect(links.length).toBeGreaterThan(0);
-          for (const link of links) {
-            const href = (await link.getAttribute('href')) ?? '';
-            expect(href.startsWith('mailto:'), `a link that is not the inbox: ${href}`).toBe(true);
-          }
+            // Nothing it says is about the enhanced path: there is no in-page
+            // confirmation to come, and no send button that could send anything.
+            for (const promise of [
+              target.copy.sentTitle,
+              target.copy.sentBody,
+              target.copy.submit,
+            ]) {
+              expect(block, 'the no-JS copy promises the enhanced path').not.toContain(
+                flatten(promise),
+              );
+            }
 
-          /**
-           * And the 405 itself. Every control that could still submit is clicked for
-           * real — with JavaScript genuinely disabled, so nothing intercepts it — and
-           * the browser must not have navigated anywhere, least of all to a 405.
-           *
-           * This is what gives the test teeth in the reverted state: put `method="post"`
-           * back and the submit is visible, the click reaches the host, and the
-           * navigation that lands is the 405 this defect is named after.
-           */
-          const clickable = seen.page.locator(
-            '[data-form-wrap] [type="submit"]:visible, [data-form-wrap] [data-submit]:visible',
-          );
-          for (const control of await clickable.all()) {
-            await control.click({ timeout: 4_000 }).catch(() => null);
+            // Every link offered is the one route that works without JavaScript. Read as
+            // attributes rather than through `evaluateAll`, which needs page scripting.
+            const links = await seen.page.locator('[data-form-wrap] a:visible').all();
+            expect(links.length).toBeGreaterThan(0);
+            for (const link of links) {
+              const href = (await link.getAttribute('href')) ?? '';
+              expect(href.startsWith('mailto:'), `a link that is not the inbox: ${href}`).toBe(
+                true,
+              );
+            }
+
             /**
-             * A quiet network, not half a second (MUSE-54).
+             * And the 405 itself. Every control that could still submit is clicked for
+             * real — with JavaScript genuinely disabled, so nothing intercepts it — and
+             * the browser must not have navigated anywhere, least of all to a 405.
              *
-             * This is a negative claim — nothing may have navigated — and the only
-             * observable that can support one is that no document request is still in
-             * the air. `scripted: false` because JavaScript is genuinely disabled in this
-             * context, so there is no frame loop to run in the page; the network is all
-             * there is. Unlike a sleep, any activity restarts the quiet window, so this
-             * gets more patient as the machine gets busier rather than less.
+             * This is what gives the test teeth in the reverted state: put `method="post"`
+             * back and the submit is visible, the click reaches the host, and the
+             * navigation that lands is the 405 this defect is named after.
              */
-            await settleInteraction(seen.page, 'a native submission to land or not', {
-              scripted: false,
-            });
+            const clickable = seen.page.locator(
+              '[data-form-wrap] [type="submit"]:visible, [data-form-wrap] [data-submit]:visible',
+            );
+            for (const control of await clickable.all()) {
+              await control.click({ timeout: 4_000 }).catch(() => null);
+              /**
+               * A quiet network, not half a second (MUSE-54).
+               *
+               * This is a negative claim — nothing may have navigated — and the only
+               * observable that can support one is that no document request is still in
+               * the air. `scripted: false` because JavaScript is genuinely disabled in this
+               * context, so there is no frame loop to run in the page; the network is all
+               * there is. Unlike a sleep, any activity restarts the quiet window, so this
+               * gets more patient as the machine gets busier rather than less.
+               */
+              await settleInteraction(seen.page, 'a native submission to land or not', {
+                scripted: false,
+              });
+            }
+            expect(
+              seen.navigations.filter((status) => status === 405),
+              'submitting without JavaScript left the visitor on a 405',
+            ).toEqual([]);
+            expect(seen.page.url(), 'submitting without JavaScript navigated away').toBe(
+              seen.url,
+            );
+          } finally {
+            await seen.close();
           }
-          expect(
-            seen.navigations.filter((status) => status === 405),
-            'submitting without JavaScript left the visitor on a 405',
-          ).toEqual([]);
-          expect(seen.page.url(), 'submitting without JavaScript navigated away').toBe(seen.url);
-        } finally {
-          await seen.close();
-        }
-      });
+        });
+      }
     }
   }
 });
@@ -943,6 +1236,24 @@ describe('the pages the class needles are asked of', () => {
       'no page under ROUTES renders [data-trial-form] — has the form or the attribute ' +
         'been renamed? Every assertion that loops over the form pages reads this list',
     ).toBeGreaterThanOrEqual(6);
+  });
+
+  /**
+   * **And the browser runs visit every one of them** (MUSE-101).
+   *
+   * `formPages` is derived and `TARGETS` is written out, which is the gap `/pricing` fell
+   * into: it rendered the form, the `data-msg-*` guards below covered it because they
+   * read this list, and the three browser runs above named `/contact` and `/` and
+   * skipped it. The lists cannot be merged — `TARGETS` is read at collection time and
+   * this one is built in a `beforeAll` — so they are compared instead, which is the same
+   * move `test/routes.test.ts` makes for the route lists (MUSE-46).
+   */
+  it('visits every form page in the browser', () => {
+    const visited = new Set(TARGETS.flatMap((target) => formRoutes(target)));
+    expect(
+      formPages.map(({ route }) => route).filter((route) => !visited.has(route)),
+      'a page renders the form and no browser run opens it — add it to TARGETS',
+    ).toEqual([]);
   });
 });
 
