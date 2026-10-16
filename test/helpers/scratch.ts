@@ -282,8 +282,10 @@ const ASTRO_ERROR_CONTEXT = /^\s*(?:at\s|[╭╰│├┬─└┌]|Hint:|Locati
  *
  *   1. `[ERROR] [vite] ✗ Build failed in 212ms` / `[UNRESOLVED_IMPORT] Could not resolve
  *      '…' in src/lib/icon.ts` — a deleted asset. The banner, then the cause.
- *   2. `[ERROR] [muse-staging-guard] An unhandled error occurred …` / `outDir must live
- *      under the project root (MUSE-41).` — same shape, our own integration.
+ *   2. `[ERROR] [muse-staging-guard] An unhandled error occurred …` / `outDir must start
+ *      with the project root path, and may not be the root (MUSE-41, MUSE-92).` — same
+ *      shape, our own integration. (MUSE-92 reworded that line; the shape is unchanged,
+ *      and it is why the guard's headline is one line and carries the ticket refs.)
  *   3. `[ERROR] SanityContentError: There is no \`siteSettings\` document …` / `    at
  *      requireDocument (…)` — the cause is *on* the marker line and what follows is a
  *      stack frame.

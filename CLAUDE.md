@@ -771,6 +771,35 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   **`SCRATCH` being inside the repository is therefore a requirement, not a preference**:
   moving it to `os.tmpdir()` was harmless before MUSE-35 emitted any assets, and now puts
   all ten builds back on one staging path.
+
+  **The rule is a test on `outDir` against the root, and asking it about the staging
+  directory instead is what deleted a project** (MUSE-92). `stagingFault` used to ask
+  *"does this build stage inside its own output?"* — the same question as the rule for a
+  descendant and the **opposite** one for an ancestor, because Astro's fallback
+  `<cwd>/.astro/.prerender` *is* inside an `outDir` above the root. So the guard allowed
+  the one shape its own message ruled out, and QA's `outDir = <root>/..` was emptied by
+  Astro and Vite with the project root inside it: sources, caches and all gone, Vite's own
+  generic warning the only thing that objected and only after the fact.
+
+  The rule now enforced, and stated, is **`outDir`'s path must start with the project
+  root's path and may not be the root itself** — which is *not* „under the project root",
+  and the difference is the half that is easy to undo twice. The prefix is **Astro's own
+  raw string test**, the one `prerenderStagingDir` models, so a sibling whose name extends
+  the root's (`<root>-other/dist`) is allowed: it is outside the root as a *tree* and
+  inside it as a *string*, Astro therefore stages it under its own output, and
+  `path.relative` would refuse a safe build for nothing. And the root itself is **refused**
+  rather than admitted by that prefix — Astro's `validateConfig` refuses the build too, so
+  no outcome changed, but a guard against deleting the project may not rest on a check
+  inside a dependency.
+
+  **So the message says the prefix rule, says it is Astro's, and names the sibling it
+  admits.** MUSE-41's wording outlived MUSE-41's predicate and reads as proof the defect
+  was impossible; leaving it would have been the same mistake one case narrower, with the
+  allowance this ticket asserted as the counterexample. `test/isolation.test.ts` pins the
+  headline — the line `buildErrorHeadline` carries into a failed build's report — against
+  both halves, and the ancestor cases are asserted against `stagingFault` as a function
+  and **never reproduced**: there is nothing to learn from deleting a second project, and
+  the function is what `astro:config:setup` consults.
 - **A browser suite waits for a condition, never for the clock** (MUSE-54), and
   `test/helpers/browser-settle.ts` is the only place it waits. Three suites flaked in one
   afternoon with no code in common and one defect in common: a measurement taken at a
