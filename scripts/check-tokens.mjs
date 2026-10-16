@@ -217,6 +217,10 @@ const SYNTAX = {
   markup: { block: false, line: false, html: true, jsx: true, strings: '' },
 };
 
+/** @typedef {keyof typeof SYNTAX} RegionKind */
+
+/** @typedef {{ start: number, end: number }} Range */
+
 /**
  * Split a file into stretches of one syntax each.
  *
@@ -224,11 +228,14 @@ const SYNTAX = {
  * `<style>` blocks (CSS), its `<script>` blocks (code) and the markup between them — and
  * the markup matters: the two `theme-color` metas are brand literals in an attribute
  * rather than in a stylesheet.
+ *
+ * @returns {{ kind: RegionKind, start: number, end: number }[]}
  */
-export function regionsOf(file, text) {
+export function regionsOf(/** @type {string} */ file, /** @type {string} */ text) {
   if (file.endsWith('.css')) return [{ kind: 'css', start: 0, end: text.length }];
   if (!file.endsWith('.astro')) return [{ kind: 'code', start: 0, end: text.length }];
 
+  /** @type {{ kind: RegionKind, start: number, end: number }[]} */
   const regions = [];
   let at = 0;
 
@@ -283,20 +290,21 @@ export function regionsOf(file, text) {
  * the braces of a JSX comment expression are blanked with the comment, because a
  * leftover brace would read as the end of a CSS block.
  */
-function scanRegion(text, kind) {
+function scanRegion(/** @type {string} */ text, /** @type {RegionKind} */ kind) {
   const syntax = SYNTAX[kind];
   const out = text.split('');
+  /** @type {Range[]} */
   const ranges = [];
   let i = 0;
 
-  const blank = (from, to) => {
+  const blank = (/** @type {number} */ from, /** @type {number} */ to) => {
     for (let j = from; j < to && j < out.length; j += 1) {
       if (out[j] !== '\n') out[j] = ' ';
     }
     ranges.push({ start: from, end: Math.min(to, out.length) });
   };
 
-  const run = (opener, closer) => {
+  const run = (/** @type {string} */ opener, /** @type {string} */ closer) => {
     const end = text.indexOf(closer, i + opener.length);
     const stop = end === -1 ? text.length : end + closer.length;
     blank(i, stop);
@@ -340,12 +348,12 @@ function scanRegion(text, kind) {
 }
 
 /** One region's text with its comments blanked. Exported so a test can drive it alone. */
-export function blankComments(text, kind) {
+export function blankComments(/** @type {string} */ text, /** @type {RegionKind} */ kind) {
   return scanRegion(text, kind).blanked;
 }
 
 /** The whole file with every comment blanked, region by region, plus the comment ranges. */
-export function blankedSource(file, text) {
+export function blankedSource(/** @type {string} */ file, /** @type {string} */ text) {
   let blanked = text;
   const comments = [];
 
@@ -361,7 +369,7 @@ export function blankedSource(file, text) {
 }
 
 /** 1-based line number of an offset. */
-function lineAt(text, offset) {
+function lineAt(/** @type {string} */ text, /** @type {number} */ offset) {
   let line = 1;
   for (let i = 0; i < offset && i < text.length; i += 1) {
     if (text[i] === '\n') line += 1;
@@ -370,7 +378,7 @@ function lineAt(text, offset) {
 }
 
 /** The declaration an offset sits in: everything back to the previous `;`, `{` or `}`. */
-function declarationAt(blanked, offset) {
+function declarationAt(/** @type {string} */ blanked, /** @type {number} */ offset) {
   let start = offset;
   while (start > 0 && !';{}'.includes(blanked[start - 1])) start -= 1;
   const chunk = blanked.slice(start, offset);
@@ -379,7 +387,7 @@ function declarationAt(blanked, offset) {
 }
 
 /** The matching close paren for the open paren at `open`. */
-function closingParen(text, open) {
+function closingParen(/** @type {string} */ text, /** @type {number} */ open) {
   let depth = 0;
   for (let i = open; i < text.length; i += 1) {
     if (text[i] === '(') depth += 1;
@@ -394,10 +402,14 @@ function closingParen(text, open) {
 /* ------------------------------------------------------------------------------ the rules */
 
 /** Every offence in one file, before the opt-out and the named exemptions are applied. */
-function rawOffences(file, blanked) {
+function rawOffences(/** @type {string} */ file, /** @type {string} */ blanked) {
+  /** @type {{ file: string, line: number, offset: number, rule: string, what: string }[]} */
   const found = [];
-  const push = (offset, rule, what) =>
-    found.push({ file, line: lineAt(blanked, offset), offset, rule, what });
+  const push = (
+    /** @type {number} */ offset,
+    /** @type {string} */ rule,
+    /** @type {string} */ what,
+  ) => found.push({ file, line: lineAt(blanked, offset), offset, rule, what });
 
   // A `#` after a word character, a `/` or an `&` is a URL fragment or an HTML entity,
   // never a colour: `url(x.svg#abcdef)`, `https://…/#abc123`, `&#128169;`. The residual
@@ -448,7 +460,12 @@ function rawOffences(file, blanked) {
  * comes from the blanking pass rather than from looking for a terminator, so a note in a
  * line comment, a block comment and a JSX comment expression are all one case.
  */
-function allowedLines(text, blanked, comments, offending) {
+function allowedLines(
+  /** @type {string} */ text,
+  /** @type {string} */ blanked,
+  /** @type {Range[]} */ comments,
+  /** @type {any} */ offending,
+) {
   const lines = blanked.split('\n');
   const hasCode = lines.map((line) => line.trim() !== '');
   const allowed = new Map();
@@ -480,7 +497,11 @@ function allowedLines(text, blanked, comments, offending) {
 }
 
 /** Whether a named exemption covers this offence. */
-function exempts(entry, blanked, found) {
+function exempts(
+  /** @type {any} */ entry,
+  /** @type {string} */ blanked,
+  /** @type {{ offset: number, line: number }} */ found,
+) {
   if (entry.customProperty) {
     const property = declarationAt(blanked, found.offset);
     return property !== null && property.startsWith('--');
@@ -499,7 +520,11 @@ function exempts(entry, blanked, found) {
  * numerals have one home and shadows have none, so there is nothing an exemption could
  * say about either.
  */
-export function findOffences(file, text, { exemptions = EXEMPTIONS } = {}) {
+export function findOffences(
+  /** @type {string} */ file,
+  /** @type {string} */ text,
+  { exemptions = EXEMPTIONS } = {},
+) {
   const { blanked, comments } = blankedSource(file, text);
   const raw = rawOffences(file, blanked);
   const offending = new Set(raw.map(({ line }) => line));
@@ -534,7 +559,7 @@ export function findOffences(file, text, { exemptions = EXEMPTIONS } = {}) {
  * the second is the one a reader thinks is redundant — this file's own header told them
  * it was, until MUSE-118.
  */
-export function numeralsHome(text) {
+export function numeralsHome(/** @type {string} */ text) {
   const blanked = blankComments(text, 'css');
   const declarations = [...blanked.matchAll(/font-variant-numeric\s*:([^;}]*)/g)].map(
     (match) => {
@@ -616,6 +641,7 @@ export function checkTree({ cwd = process.cwd(), exemptions = EXEMPTIONS } = {})
 }
 
 /** What a reader is told to do about each rule. */
+/** @type {Record<string, string[]>} */
 export const GUIDANCE = {
   hex: [
     'use a role token (--surface, --text, --accent, --accent-fill, --line), or',
