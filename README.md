@@ -15,7 +15,7 @@ Remaining pages, the CMS and the delivery pipeline are not yet wired up.
 | i18n | Astro i18n; HR at `/`, EN at `/en/` |
 | Hosting | GitHub Pages via Actions |
 | CMS | Sanity — the per-page titles/descriptions, the studio details (MUSE-20) and the weekly schedule, its classes and its instructors (MUSE-36) are read from it at build time |
-| Video | Cloudflare R2 — *not yet wired* |
+| Video | The hero loop is a 1.2 MB `.webm` in `src/assets/`, imported like any other asset (MUSE-133). Cloudflare R2 — *not yet wired* — is still where a second one would go |
 
 Astro rather than a React framework because this is a content site: the build ships
 **zero JavaScript files**: the theme switch, language switch and nav are small enough that
@@ -624,7 +624,13 @@ env in `.github/workflows/deploy.yml` to `SITE=https://muse.dance` and `BASE=/`,
 `CNAME`. Nothing in the code needs to change.
 
 Pages caps a published site at **1 GB**; CI fails above 900 MB. Media belongs on the Sanity
-CDN and R2, never in the repo.
+CDN and R2 rather than in the repo, with **one stated exception**: the hero video,
+`src/assets/hero.webm`, is 1.2 MB and is committed (MUSE-133). It is in git because the
+bucket does not exist yet and because the performance budget can only weigh what the site
+serves itself — `scripts/budget.mjs` has a `media` line of its own holding it, and a
+cross-origin video would be invisible to every number in that table. The camera masters are
+*not* committed: they are 27 MB together and `.gitignore` names them. A second video is the
+point at which R2 gets wired rather than the point at which this exception grows.
 
 ### How an edit in the Studio reaches the site
 

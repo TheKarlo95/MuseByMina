@@ -430,10 +430,11 @@ export async function getInstructors({ minimum = 1 }: ListOptions = {}) {
  *
  * **Not memoised**, unlike `getSiteSettings` and `pagesByRoute`. Those two are read by the
  * footer on every page and by `llms.txt`, so without a cache a build makes a dozen
- * identical requests for one document. This one is read by `AboutUs.astro` and nothing
- * else — twice per build, once per locale — so a cache would save one request and cost the
- * thing a cache costs: `test/projections.test.ts` swaps the fixture per test, and a
- * memoised reader silently answers the second test from the first test's dataset.
+ * identical requests for one document. This one is read by `AboutUs.astro` and, since
+ * MUSE-133, by the homepage — four times per build, two pages per locale — so a cache
+ * would save two requests and cost the thing a cache costs: `test/projections.test.ts`
+ * swaps the fixture per test, and a memoised reader silently answers the second test from
+ * the first test's dataset.
  */
 export async function getStudioStory() {
   const row = await runQuery<unknown>(STUDIO_STORY_QUERY);

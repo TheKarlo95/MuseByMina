@@ -170,6 +170,10 @@ export const MIME = {
   '.jpg': 'image/jpeg',
   '.webp': 'image/webp',
   '.ico': 'image/x-icon',
+  // The hero video (MUSE-133). Pages serves `video/webm`; without this entry both
+  // in-process hosts answer `application/octet-stream`, and a browser handed that for a
+  // `<source type="video/webm">` is measuring a page the deploy does not serve.
+  '.webm': 'video/webm',
 };
 
 /**

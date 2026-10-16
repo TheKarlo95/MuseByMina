@@ -89,7 +89,11 @@ describe('MUSE-58: the formatting convention is stated and read', () => {
 
     // "Unchecked" is a reported set rather than an absence. Fonts and artwork are assets;
     // a text format arriving in the tree shows up here and has to be classified.
-    expect(skipped).toEqual(['.png', '.svg', '.woff2']);
+    // `.webm` and `.webp` are the hero video and its poster frame (MUSE-133) — the first
+    // `.webp` in the *source* tree, where every other picture is a PNG the build encodes.
+    // Both are binary, so rule 2 reads nothing in them, and what reaches `dist` is held by
+    // `test/nojs.test.ts` and `scripts/budget.mjs`.
+    expect(skipped).toEqual(['.png', '.svg', '.webm', '.webp', '.woff2']);
   });
 
   it('names the file and line of a requoted literal', () => {

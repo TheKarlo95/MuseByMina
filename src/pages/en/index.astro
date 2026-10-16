@@ -1,15 +1,40 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import Home from '../../components/Home.astro';
-import { getPage, getSchedule, getSiteSettings } from '../../lib/sanity';
+import heroPoster from '../../assets/hero-poster.webp?url';
+// No `no-inline`: the file is three hundred times Vite's 4 KB inline threshold, so the
+// suffix would be a word that does nothing, which is what `src/lib/icon.ts` warns about.
+import heroVideo from '../../assets/hero.webm?url';
+import { homeContent } from '../../lib/home';
+import {
+  getInstructors,
+  getPage,
+  getPricingTiers,
+  getSchedule,
+  getSiteSettings,
+  getStudioStory,
+} from '../../lib/sanity';
 
-const [meta, settings, entries] = await Promise.all([
+const [meta, settings, entries, story, tiers, instructors] = await Promise.all([
   getPage('/'),
   getSiteSettings(),
   getSchedule(),
+  getStudioStory(),
+  getPricingTiers(),
+  getInstructors(),
 ]);
+
+const content = homeContent('en', { story, tiers, instructors });
 ---
 
 <BaseLayout locale="en" title={meta.title.en} description={meta.description.en}>
-  <Home locale="en" address={settings.address} entries={entries} />
+  <Home
+    locale="en"
+    address={settings.address}
+    entries={entries}
+    hero={{ video: heroVideo, poster: heroPoster }}
+    story={content.story}
+    rates={content.rates}
+    people={content.people}
+  />
 </BaseLayout>

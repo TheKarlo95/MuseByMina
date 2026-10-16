@@ -309,8 +309,13 @@ describe('a content edit shows up in a running dev server', () => {
  * instrumented, from two builds that agreed to the query — one reading
  * `content/seed.ndjson` and one reading the live dataset:
  *
- *     scheduleSlot 6   event 6   post 5   studioStory 2   prosePage 2
- *     pricingTier 2    instructor 2   galleryImage 2   siteSettings 1   page 1   = 29
+ *     scheduleSlot 6   event 6   post 5   studioStory 4   prosePage 2
+ *     pricingTier 4    instructor 4   galleryImage 2   siteSettings 1   page 1   = 35
+ *
+ * **Six of those are the homepage** (MUSE-133): it now renders the studio story, the rate
+ * card and the instructors, so `studioStory`, `pricingTier` and `instructor` are each read
+ * on two more pages. Three readers × two locales, and none of the three is memoised — the
+ * reason is written beside each one in `src/lib/sanity/index.ts`.
  *
  * **The two ones are the whole of the memoisation**, and that is why this number is here.
  * `siteSettings` is read by the footer on all twenty-three pages and answers once;
@@ -324,7 +329,7 @@ describe('a content edit shows up in a running dev server', () => {
  * measurement rather than a drift nothing reports. Re-measure with the census line the
  * build prints — do not adjust this to whatever the suite happens to say.
  */
-const QUERIES_PER_BUILD = 29;
+const QUERIES_PER_BUILD = 35;
 
 /** The query census a build prints as it exits, as a number. */
 function queryCensus(log: string): number {
