@@ -183,9 +183,14 @@ npm run sanity:deploy  # push the Studio to musebymina.sanity.studio
   → `testing.md`
 - **A browser check measures the page it names** (MUSE-48). `openCheckPage()` in
   `scripts/browser-checks.mjs` is the only way to open a page; it derives the locale from
-  the route and asserts where it landed. That module **owns Playwright** — nothing else in
+  the route and asserts where it landed — **the path and the `?lang=`**, which is the one
+  query this site routes on (MUSE-107). That module **owns Playwright** — nothing else in
   `scripts/` or `test/` may call `newContext`, `newPage`, `addInitScript`, `setItem` or
-  `chromium.launch`. → `testing.md`
+  `chromium.launch`. **Both the discovery and the rule are read by a parser**,
+  `drivesBrowser` and `browserOwnership` in `test/helpers/source-guard.ts`; a text scan
+  missed `import('play' + 'wright')` and `browser['new' + 'Context']`, and had to hide the
+  needles from itself. `openRedirectProbe` asserts nothing **by design**, so its callers are
+  a named list with a reason each, asserted complete and still live. → `testing.md`
 - **A test that can only see `dist` cannot see a dev-only bug.** `test/fonts.test.ts` is
   the one suite that drives `astro dev`, through `astroDev()`. Pass `--ignore-lock` and
   strip `VITEST` from the child env. **A green dev-server suite on your machine is not

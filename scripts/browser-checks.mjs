@@ -50,7 +50,10 @@ import { recordHeavyOperation } from './heavy-census.mjs';
  * what language it is measuring, without coming through here, and its author does not have
  * to know this ticket exists. `test/browserlocale.test.ts` discovers those files off the
  * two directories rather than from a list and fails if any of them opens a browser of its
- * own. Reading the stored language is fine, and several suites do; the write is what this
+ * own. **Both halves are read by a parser** (`browserOwnership` and `drivesBrowser` in
+ * `test/helpers/source-guard.ts`, MUSE-107): the textual version missed `await
+ * import('play' + 'wright')` entirely, and missed `browser['new' + 'Context'](…)` inside a
+ * file it had discovered. Reading the stored language is fine, and several suites do; the write is what this
  * owns, because a write is a decision about which page is being measured.
  *
  * It lives in `scripts/` beside `scripts/dist-origin.mjs` rather than in `test/helpers/`
@@ -95,6 +98,15 @@ export const DEFAULT_CHECK_LOCALE = 'hr';
 
 /** The key `src/lib/lang.ts` stores a chosen language under. */
 const LANG_KEY = 'muse-lang';
+
+/**
+ * The query parameter `src/lib/lang.ts` routes on.
+ *
+ * Mirrored here rather than imported, for the reason `NAVIGATOR_LOCALE` mirrors `LOCALES`:
+ * a `.mjs` script cannot import a `.ts` module. `test/browserlocale.test.ts` pins it
+ * against `LANG_PARAM`, so a rename arrives here as a failing test.
+ */
+const LANG_QUERY = 'lang';
 
 /**
  * What a measured page turned out to be.
@@ -215,9 +227,12 @@ function navigatorLocaleFor(locale) {
  * runs on every navigation in the context, so a check that clicks through to a second
  * page keeps its pin.
  *
- * Then the landing URL is compared with the requested one and a mismatch throws. That
- * assertion — not the pin — is the part that generalises: the pin knows about one
- * redirect, and the assertion knows that a check must measure the page it named.
+ * Then the landing URL is compared with the requested one — its **path and its `?lang=`**
+ * (MUSE-107) — and a mismatch throws. That assertion, not the pin, is the part that
+ * generalises: the pin knows about one redirect, and the assertion knows that a check must
+ * measure the page it named. The query half is there because the path half let a redirect
+ * to `…/schedule/?lang=hr` through, and `?lang=` is what this site routes language on, so
+ * the page was measured under an instruction the check never gave.
  *
  * @param {import('playwright').Browser} browser
  * @param {RouteSource} site
@@ -275,17 +290,32 @@ export async function openCheckPage(browser, site, route, options = {}) {
     const response = await page.goto(url, { waitUntil });
     const landed = page.url();
 
-    if (new URL(landed).pathname !== new URL(url).pathname) {
+    const asked = new URL(url);
+    const got = new URL(landed);
+    /** @param {URL} at */
+    const langOf = (at) => at.searchParams.get(LANG_QUERY) ?? '(none)';
+    const movedPath = got.pathname !== asked.pathname;
+    // MUSE-107: the pathname was the whole comparison, and a redirect that changes only
+    // the query resolved — so a check could measure a page that had been handed a language
+    // instruction it never asked for. `?lang=` is the one query that decides this site's
+    // language (`src/lib/lang.ts`), and it is also the one MUSE-56 is about: a link
+    // marked with a language must keep naming it, `?lang=` and all. The rest of the query
+    // string is deliberately not compared — a check is free to ask for `?foo=1` and a host
+    // is free to add tracking — because a rule that fires on a query nobody routes on is a
+    // rule that gets turned off.
+    const movedLanguage = langOf(got) !== langOf(asked);
+
+    if (movedPath || movedLanguage) {
       throw new Error(
         [
           `A check asked for ${url} and landed on ${landed}.`,
           '',
-          `  requested  ${new URL(url).pathname}`,
-          `  measured   ${new URL(landed).pathname}`,
+          `  requested  ${asked.pathname}  ?${LANG_QUERY}=${langOf(asked)}`,
+          `  measured   ${got.pathname}  ?${LANG_QUERY}=${langOf(got)}`,
           `  pinned to  ${locale} (navigator.language=${navigatorLocaleFor(locale)}, ` +
             `${LANG_KEY}=${locale})`,
           '',
-          REDIRECT_ADVICE,
+          movedPath ? REDIRECT_ADVICE : LANGUAGE_ADVICE,
         ].join('\n'),
       );
     }
@@ -317,6 +347,19 @@ const REDIRECT_ADVICE = [
   'whatever it measured would have been reported under the URL above. If the redirect is',
   'correct and the other page is what you want, ask for that route instead — asking for',
   '/en/ is how a check asks for English. If the redirect is new, it is the finding.',
+].join('\n');
+
+/**
+ * What to do about a landing whose `?lang=` is not the one that was asked for. A different
+ * sentence from the one above because it is a different finding: the page is the page that
+ * was named, and something changed the language it was asked to be served as.
+ */
+const LANGUAGE_ADVICE = [
+  'MUSE-107: the page is the one that was asked for, but the language in the URL is not.',
+  '`?lang=` is what src/lib/lang.ts routes on, so this page was measured under a language',
+  'instruction the check did not give. If the check wants that language, ask for that',
+  'route — `/en/…` is how a check asks for English. If something is adding or dropping',
+  'the parameter, that is the finding (MUSE-56: a link that offers a language must name it).',
 ].join('\n');
 
 /**

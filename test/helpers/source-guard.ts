@@ -32,6 +32,17 @@ import ts from 'typescript';
  * a package nobody has thought of yet, a shelled-out `rm -rf` — and it is deliberately
  * not the only line any more.
  *
+ * MUSE-107 moved MUSE-48's browser rules in for the same reason, and they are the third
+ * demonstration of both failures in one guard. `test/browserlocale.test.ts` searched each
+ * line of a discovered file for an assembled substring, so `browser['new' + 'Context']({
+ * locale: 'en-US' })` planted in `scripts/a11y.mjs` left the guard green — and the guard
+ * had to assemble its needles from fragments in the first place *because* it searched
+ * text and would otherwise have reported its own prose. A rule over a callee has neither
+ * problem: the names below are spelled out, a comment that mentions one is not a call, and
+ * a computed member is folded to the name it computes. Discovery moved with them —
+ * `drivesBrowser` asks the parser which module a file imports, so `await import('play' +
+ * 'wright')` is an import of Playwright rather than a line no regular expression matched.
+ *
  * MUSE-54 added `fixedSleeps` here rather than as a fourth scan beside this module,
  * because that is the form the rule has to take: a *call* named `waitForTimeout`. The
  * doc comment under that function mentions the name several times and does not trip it —
@@ -175,6 +186,58 @@ const TAB_COMMIT = frag('settleNew', 'Tab');
 const DEV_SERVER = frag('astro', 'Dev');
 const MEASURED_MODULE = 'measured';
 
+/**
+ * The one module that may drive a browser, and the modules a browser can come from.
+ *
+ * MUSE-48's rule, MUSE-107's statement of it. A file drives a browser by **importing**
+ * one of these, which is the only way to get one — so a script or suite written next year
+ * is covered the day it is written, with nobody adding it to a list.
+ *
+ * `playwright` is matched exactly rather than by its last path segment, because
+ * `@axe-core/playwright` is a different package that `scripts/a11y.mjs` legitimately
+ * imports and that drives no browser of its own. `browser-checks.mjs` is matched by its
+ * basename, because every importer spells the relative path differently.
+ */
+export const BROWSER_DOOR = 'scripts/browser-checks.mjs';
+const BROWSER_DOOR_FILE = 'browser-checks.mjs';
+const BROWSER_MODULES = new Set(['playwright', 'playwright-core', '@playwright/test']);
+
+/**
+ * Playwright's launchers, by the name the module exports them under.
+ *
+ * Importing one is the offence rather than only calling `launch` on it: a launcher handed
+ * to another function launches just as well, and an import is the thing a rule over syntax
+ * can see without following values about.
+ */
+const BROWSER_LAUNCHERS = new Set(['chromium', 'firefox', 'webkit']);
+
+/**
+ * The calls `scripts/browser-checks.mjs` owns, each with the reason it owns it.
+ *
+ * Spelled out, not assembled from fragments. The textual scan this replaces had to hide
+ * these names from itself — `new${'Context('}` — because it searched the text of files
+ * that include the guard's own prose, and the first draft of that prose reddened the run.
+ * A rule over a *callee* has no such problem: a name inside a comment or a string is not a
+ * call, which is the whole reason MUSE-34 made these rules read syntax.
+ *
+ * `launch` is the launcher's own method and nothing else in `test/` or `scripts/` calls a
+ * method by that name — `launchChecks()`, the sanctioned one, is a different name, and it
+ * is where the run's browser census is written (MUSE-68).
+ */
+const BROWSER_OWNED = new Map([
+  [
+    'newContext',
+    'opens a browser context, which is where the language a page is measured as is decided',
+  ],
+  ['newPage', 'opens a page without asserting which page it then measured'],
+  ['addInitScript', 'seeds the page before it runs — one of the two halves of the locale pin'],
+  [
+    'setItem',
+    'writes stored state, and the write is a decision about which language is being measured',
+  ],
+  ['launch', 'starts a browser, which goes through launchChecks() so the census sees it'],
+]);
+
 // ---------------------------------------------------------------------------
 // The census: every file under `test/` is one of three kinds, and a fourth is an
 // error rather than a file nobody looks at.
@@ -273,7 +336,7 @@ export function uncheckedKinds(): Offence[] {
 // Parsing
 // ---------------------------------------------------------------------------
 
-interface Import {
+export interface Import {
   /** The module specifier as written: `node:fs/promises`. */
   module: string;
   /** The name as *exported* by that module, or `null` for a namespace/default/bare import. */
@@ -281,7 +344,7 @@ interface Import {
   line: number;
 }
 
-interface Call {
+export interface Call {
   /**
    * Was it called *on* something — `cp.execSync(…)`, `/re/.exec(…)` — or by bare name?
    *
@@ -473,8 +536,12 @@ function collect(
       callee.kind === ts.SyntaxKind.ImportKeyword ||
       (ts.isIdentifier(callee) && callee.text === 'require');
     const first = node.arguments[0];
-    if (dynamic && first !== undefined && ts.isStringLiteral(first)) {
-      into.imports.push({ module: first.text, name: null, line: lineOf(node) });
+    const specifier = first === undefined ? null : staticString(first);
+    // Folded, not read as one literal: `import('play' + 'wright')` is an import of
+    // Playwright (MUSE-107), and a discovery that could not see it applied no rule to the
+    // file at all.
+    if (dynamic && specifier !== null) {
+      into.imports.push({ module: specifier, name: null, line: lineOf(node) });
       return;
     }
 
@@ -504,13 +571,14 @@ function collect(
         line: lineOf(node),
       });
     } else if (ts.isElementAccessExpression(callee)) {
-      // fs['rmSync'](…) — the string is the name.
-      const key = callee.argumentExpression;
-      if (ts.isStringLiteral(key)) {
+      // fs['rmSync'](…) — the string is the name, and `browser['new' + 'Context'](…)` is
+      // the same call written in pieces (MUSE-107).
+      const key = staticString(callee.argumentExpression);
+      if (key !== null) {
         into.calls.push({
           member: true,
           object: null,
-          name: key.text,
+          name: key,
           firstString,
           firstIdentifier,
           line: lineOf(node),
@@ -533,6 +601,51 @@ function collect(
 }
 
 /**
+ * The string an expression computes, when it computes one without running anything.
+ *
+ * MUSE-107. The parser read `o['rmSync']` and `import('playwright')` and stopped at a
+ * single literal, so `browser['new' + 'Context'](…)` and `await import('play' + 'wright')`
+ * were a member call with no name and an import of nothing — a forbidden call inside a
+ * discovered file, and a file discovery never reached. Both are the same evasion the
+ * guards in this module already model for an *alias*: the name is there, spelled in
+ * pieces, and joining pieces is something a reader does at a glance.
+ *
+ * Deliberately only the forms whose value is in the file: literals, a parenthesis, `+`
+ * between two of them, and a template whose substitutions are themselves foldable. A
+ * variable is not followed — that is a type checker's job, and `copyPasteTripwire` is the
+ * second line for what no rule here models.
+ *
+ * **It is not used for `literals`**, which stay split per span: `buildDirectoryNames` and
+ * the needle-splitting convention this module writes its own constants with both depend on
+ * `node_${'modules'}` being two values. Folding is for the two places the file is *naming*
+ * something — a callee and a module specifier.
+ */
+function staticString(expression: ts.Expression): string | null {
+  if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
+    return expression.text;
+  }
+  if (ts.isParenthesizedExpression(expression)) return staticString(expression.expression);
+  if (
+    ts.isBinaryExpression(expression) &&
+    expression.operatorToken.kind === ts.SyntaxKind.PlusToken
+  ) {
+    const left = staticString(expression.left);
+    const right = staticString(expression.right);
+    return left === null || right === null ? null : left + right;
+  }
+  if (ts.isTemplateExpression(expression)) {
+    let joined = expression.head.text;
+    for (const span of expression.templateSpans) {
+      const piece = staticString(span.expression);
+      if (piece === null) return null;
+      joined += piece + span.literal.text;
+    }
+    return joined;
+  }
+  return null;
+}
+
+/**
  * The name a callee is written under — `f`, `o.f`, `o['f']` — or `null`.
  *
  * Only the callee's *own* name, the way the `Call` facts above read it: what a call is
@@ -541,11 +654,8 @@ function collect(
 function calleeName(expression: ts.Expression): string | null {
   if (ts.isIdentifier(expression)) return expression.text;
   if (ts.isPropertyAccessExpression(expression)) return expression.name.text;
-  if (
-    ts.isElementAccessExpression(expression) &&
-    ts.isStringLiteral(expression.argumentExpression)
-  ) {
-    return expression.argumentExpression.text;
+  if (ts.isElementAccessExpression(expression)) {
+    return staticString(expression.argumentExpression);
   }
   return null;
 }
@@ -845,6 +955,115 @@ export function unmeasuredDevServers(file: string, source?: string): Offence[] {
       `that was asked for (MUSE-62). Read pages through fetchMeasuredPage/assertMeasuredPage ` +
       `so a wrong URL is a named failure rather than eleven green tests.`,
   }));
+}
+
+/**
+ * The modules a file imports, as the exporting module spells the names.
+ *
+ * Exposed because two of MUSE-48's questions are census questions rather than rules —
+ * *which* files drive a browser, and which of them import the door that asserts nothing —
+ * and both have to be answered by the parser or they are answered by a regular expression
+ * that a concatenation defeats (MUSE-107). The list is the parser's, so a dynamic import
+ * and a `require` are in it, and an aliased name appears under the name its module
+ * exports.
+ */
+export function importsOf(file: string, source?: string): Import[] {
+  return facts(file, source).imports;
+}
+
+/**
+ * The calls `file` makes, by the name each callee is written under.
+ *
+ * The companion to `importsOf`, and exposed for the same reason: „which files reach the
+ * one door that asserts nothing" is a census, and a census taken by searching text is
+ * defeated by the concatenation this module now folds. A destructured dynamic import
+ * leaves no imported name behind, so the *call* is the second signal — and a call is
+ * exactly what this module can state (MUSE-34).
+ */
+export function callsOf(file: string, source?: string): Call[] {
+  return facts(file, source).calls;
+}
+
+/**
+ * Whether `file` can get hold of a browser at all.
+ *
+ * The question MUSE-48's guards are stated over: a file that cannot obtain a browser
+ * cannot open a context, so the token rules below are applied to the files this answers
+ * yes for. It used to be a regular expression over the file's text — `/from
+ * ['"](playwright|[^'"]*browser-checks\.mjs)['"]/` — which is a model of an import
+ * statement, and `await import('play' + 'wright')` is an import that the model does not
+ * describe: the file drove a browser and no rule applied to it, which MUSE-107
+ * demonstrated end to end with a probe that measured `/en/` and reported `/`.
+ *
+ * Asked of the import list instead, so every spelling the loader accepts counts: static,
+ * dynamic, `require`, aliased, and a specifier assembled from pieces.
+ *
+ * It says nothing about `scripts/browser-checks.mjs` itself, which is the module the rules
+ * are *about* — the one exclusion, made by the caller so that it is visible there.
+ */
+export function drivesBrowser(file: string, source?: string): boolean {
+  return importsOf(file, source).some(
+    ({ module }) =>
+      BROWSER_MODULES.has(module) || module.split('/').pop() === BROWSER_DOOR_FILE,
+  );
+}
+
+/**
+ * Calls only `scripts/browser-checks.mjs` may make, and launchers only it may import.
+ *
+ * MUSE-48's rule — „no file in `scripts/` or `test/` may call `newContext`, `newPage`,
+ * `addInitScript`, `setItem` or launch a browser" — restated against callees and imported
+ * names (MUSE-107). Every offence is returned, each naming the call it found: the four
+ * `expect`s per file this replaces short-circuited, so a file with five planted tokens
+ * reported two and named none of them.
+ *
+ * ---
+ *
+ * **What this rule cannot reach.** The same shape of note as `fixedSleeps`:
+ *
+ *   - **A call through a value this file does not follow.** `const open = browser.newContext;
+ *     await open(…)` is a property read, not a call, and `const { newContext: make } = browser`
+ *     spells the name in code but calls `make(…)`. The declaration is visible to a reader and
+ *     to nothing here, exactly as `fixedSleeps`' aliased sleep is — and the tripwire does not
+ *     carry these names, because they appear in the legitimate prose of three files and a
+ *     permanent false positive is a guard that gets deleted.
+ *   - **Playwright reached through something that is not an import.** A browser handed in as
+ *     an argument is how every suite in this tree gets one, which is the point: the
+ *     *context* is what the door owns, and a suite holding a browser can still only open a
+ *     page through it.
+ *   - **Whether the door was used correctly.** That `openCheckPage` asserts where it landed
+ *     is asserted in `test/browserlocale.test.ts` against a running browser, not here.
+ */
+export function browserOwnership(file: string, source?: string): Offence[] {
+  const { imports, calls } = facts(file, source);
+  const found: Offence[] = [];
+
+  for (const { module, name, line } of imports) {
+    if (name !== null && BROWSER_MODULES.has(module) && BROWSER_LAUNCHERS.has(name)) {
+      found.push({
+        file,
+        line,
+        what:
+          `imports ${name} from '${module}' — a browser is launched in ${BROWSER_DOOR} ` +
+          `and nowhere else, so the run's census sees it (MUSE-48, MUSE-68)`,
+      });
+    }
+  }
+
+  for (const call of calls) {
+    const why = BROWSER_OWNED.get(call.name);
+    if (why !== undefined) {
+      found.push({
+        file,
+        line: call.line,
+        what:
+          `calls ${named(call)} — ${why}. ${BROWSER_DOOR} owns it (MUSE-48): open pages ` +
+          `with openCheckPage(), which pins the locale and asserts the page it measured.`,
+      });
+    }
+  }
+
+  return found;
 }
 
 /**
