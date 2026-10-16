@@ -54,6 +54,38 @@ ticket (MUSE-114 is the open instance).
   **No bio is written for Mina or Antonio and none should be** — see the optional-field
   note below, which is the same argument on the same page.
 
+  **The half of that which is a test measured a sentence as its fragments, and for a year
+  it was the half that did not work** (MUSE-102). „Asserts nothing checkable" is Mina's
+  half once she types over the text; until then, and for anything a *component* adds, the
+  residue guard in `test/aboutus.test.ts` is what keeps it true — no full stop, no digit,
+  at most three words, asked of whatever the page says that the dataset did not. The three
+  rules are sound. What was wrong was what they were asked of: the page was split on
+  **every** tag, so `<p>Najveći <b>bachata</b> studio u Zagrebu<span>.</span></p>` arrived
+  as „Najveći", „bachata", „studio u Zagrebu" and „.", four fragments of at most three
+  words with the full stop dropped by the punctuation filter before the full-stop rule
+  ran. „The biggest bachata studio in Zagreb" shipped on both locale pages with all 54
+  tests green. The page most likely to attract a confident sentence about the studio was
+  the one whose only defence against one split it into harmless pieces.
+
+  **The fix is the measurement, not a fourth count**: a block's text rather than an
+  element's — `textContent`, which is what the three rules were written for. They caught
+  the sentence the moment they were shown it whole, and a fourth count would have been a
+  fourth thing to sidestep. **The boundary is load-bearing in both directions and is
+  asserted in both**: inline children join, so `<b>` inside a sentence does not end it;
+  block children stay apart, so three two-word `<li>` are three labels and not one
+  six-word sentence. Flattening everything is the same defect with the sign reversed — a
+  red test on an honest page — and it is why the element list is written out rather than
+  guessed at. An element nobody listed counts as inline, because guessing wrong that way
+  reddens a test and guessing wrong the other way is this ticket.
+
+  `/pricing` was checked for the same hole and does not have it: its guard subtracts from
+  the whole page's text as one blob and demands the residue be empty, which is strictly
+  stronger, and the planted paragraph fails it in both locales (measured).
+  **`/whatisbachata` has no residue guard over its rendered text at all** — „holds no
+  prose of its own" reads quoted strings out of the component's *frontmatter*, so the same
+  paragraph in its markup ships with all 43 tests green (measured). That is a wider hole
+  than this one and a different fix, so it is not this ticket; it needs its own.
+
 - **`/whatisbachata` says what the dance is, and nothing about the curriculum**
   (MUSE-65). It is the one of MUSE-27's four trust pages that could be written without
   Mina, because its subject is general knowledge; the other three are studio facts and
