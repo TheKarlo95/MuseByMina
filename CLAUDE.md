@@ -323,7 +323,10 @@ retired and what must not come back.
   composed at render time appears in no source file. → `pages.md`
 - **`/contact` tells the visitor to do what this build can actually do**, gated on
   `FORM_HAS_PROCESSOR` — the same expression `TrialForm.astro` tests before it will
-  `fetch`. → `pages.md`
+  `fetch`. **The form's own failure copy is gated on it too** (MUSE-110): with no endpoint
+  no message instructs a retry and one line offers the inbox, including the offline one,
+  which that branch does reach. `formMessages` in `src/lib/forms.ts` is the only place it
+  is decided. → `pages.md`
 - **`/privacy/` is a statutory document, so it stays in code** (MUSE-72), and the one fact
   that varies is read off the form's own configuration. Art. 13(1)(e) takes *categories* of
   recipient, so the live paragraph names no provider. **Retention and whether student
