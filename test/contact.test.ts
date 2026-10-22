@@ -10,7 +10,7 @@ import { settleAnimations, settleScroll } from './helpers/browser-settle';
 import { pagePath, startPreview, type Preview } from './helpers/preview';
 
 /**
- * MUSE-7 — `/contact` and the trial-class form.
+ * MUSE-7 — `/contact` and the enquiry form (MUSE-136 retired the name it had).
  *
  * Driven in a real browser rather than asserted against the built HTML, because every
  * acceptance criterion here is about *rendered* and *interactive* behaviour: a label
@@ -211,25 +211,25 @@ function fieldOf(fields: FieldState[], name: FieldName): FieldState {
 }
 
 /**
- * AC1 — Given the homepage, when I click any CTA, then I land on the `#trial` form with
+ * AC1 — Given the homepage, when I click any CTA, then I land on the `#enquiry` form with
  * it fully visible below the fixed header.
  *
- * "Fully visible below the fixed header" is read as: no part of the `#trial` block is
+ * "Fully visible below the fixed header" is read as: no part of the `#enquiry` block is
  * behind the fixed header, and the form's first field is wholly inside the viewport.
  * The block as a whole is taller than a laptop viewport — asserting it fits would be
  * asserting a different, smaller form than the one the ticket asks for.
  *
- * "Any CTA" was read off `a[href*="#trial"]`, which stopped meaning that in MUSE-16: the
+ * "Any CTA" was read off `a[href*="#enquiry"]`, which stopped meaning that in MUSE-16: the
  * locale switcher now carries the current fragment on its hrefs, so on a page whose hash
- * is `#trial` the two language links match too. They are not CTAs — following one is a
+ * is `#enquiry` the two language links match too. They are not CTAs — following one is a
  * request to change language, and it lands on the *other* locale's page — so they are
  * excluded by the `data-locale` attribute only they carry.
  */
-const TRIAL_CTA = 'a[href*="#trial"]:not([data-locale])';
+const ENQUIRY_CTA = 'a[href*="#enquiry"]:not([data-locale])';
 
-describe('AC1: every CTA lands on #trial, clear of the fixed header', () => {
+describe('AC1: every CTA lands on #enquiry, clear of the fixed header', () => {
   for (const target of TARGETS) {
-    it(`${target.locale}: every CTA on the homepage scrolls #trial clear of the header`, async () => {
+    it(`${target.locale}: every CTA on the homepage scrolls #enquiry clear of the header`, async () => {
       const { page, close } = await visit(target.home);
       try {
         // Guards the pin above: if the language redirect fires, this is the other page.
@@ -237,11 +237,11 @@ describe('AC1: every CTA lands on #trial, clear of the fixed header', () => {
           LOCALE_HTML_LANG[target.locale],
         );
 
-        const ctas = await page.$$eval(TRIAL_CTA, (els) =>
+        const ctas = await page.$$eval(ENQUIRY_CTA, (els) =>
           els.map((el) => el.getAttribute('href') ?? ''),
         );
         // The header CTA and the hero CTA at minimum. A vacuous pass would be zero links.
-        expect(ctas.length, 'CTAs pointing at #trial').toBeGreaterThanOrEqual(2);
+        expect(ctas.length, 'CTAs pointing at #enquiry').toBeGreaterThanOrEqual(2);
 
         for (const [index] of ctas.entries()) {
           // Clear the fragment as well as the scroll position: clicking a link whose hash
@@ -257,18 +257,18 @@ describe('AC1: every CTA lands on #trial, clear of the fixed header', () => {
             history.replaceState(null, '', location.pathname);
             window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
           });
-          const link = page.locator(TRIAL_CTA).nth(index);
+          const link = page.locator(ENQUIRY_CTA).nth(index);
           await link.click();
           // The flake MUSE-50's agent hit: the geometry below was measured after a fixed
           // pause and a 25 ms poll, which on a busy machine reads two equal positions
-          // mid-scroll and calls it settled — so `#trial` was measured halfway up the
+          // mid-scroll and calls it settled — so `#enquiry` was measured halfway up the
           // viewport, still under the header. This waits on the frame clock that drives
           // the scroll instead, and fails naming the condition if it never stops.
           await settleScroll(page);
 
           const geom = await page.evaluate(() => {
             const header = document.querySelector<HTMLElement>('[data-header]')!;
-            const trial = document.querySelector<HTMLElement>('#trial')!;
+            const trial = document.querySelector<HTMLElement>('#enquiry')!;
             const control = document.querySelector<HTMLElement>('[data-trial-form] [name="name"]')!;
             const label = document.querySelector<HTMLElement>(
               `[data-trial-form] label[for="${control.id}"]`,
@@ -282,7 +282,7 @@ describe('AC1: every CTA lands on #trial, clear of the fixed header', () => {
             };
           });
 
-          expect(geom.trialTop, `CTA ${index}: #trial is under the header`).toBeGreaterThanOrEqual(
+          expect(geom.trialTop, `CTA ${index}: #enquiry is under the header`).toBeGreaterThanOrEqual(
             geom.headerBottom,
           );
           expect(geom.labelTop, `CTA ${index}: first label is under the header`).toBeGreaterThan(
@@ -982,7 +982,7 @@ describe('spam: the honeypot is invisible, unfocusable and fatal to a submit', (
 });
 
 /**
- * The homepage `#trial` block and `/contact` are the same component, so the conversion
+ * The homepage `#enquiry` block and `/contact` are the same component, so the conversion
  * path cannot drift between them.
  */
 describe('the trial form is the same on the homepage and on /contact', () => {

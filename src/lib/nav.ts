@@ -143,31 +143,54 @@ export const MORE_NAV: NavItem[] = [
 ];
 
 /**
- * The site's primary call to action: the trial-class form at `/#trial`.
+ * The site's primary call to action: the enquiry form at `/#enquiry`.
  *
- * **It names the class and says nothing about what it costs** (MUSE-71). From the
+ * **The thing this label named does not exist** (MUSE-136). It named one from the
+ * foundation commit until 2026-10-22, when the owner said plainly that the studio makes
+ * no such offer. It is the same defect MUSE-71 found one
+ * layer down: that ticket retired the *price* of it and left the offer itself standing,
+ * because the price was the visible lie and nobody asked whether the thing underneath it
+ * existed. It did not. The form, its heading, `/contact`'s `<h1>`, `/schedule`'s closing
+ * band, two paragraphs of `/privacy` and three `page` descriptions all invited a visitor
+ * to it. The retired wording is quoted in `test/helpers/offer-claims.ts` and nowhere the
+ * guard reads, which is why this paragraph describes it rather than spelling it.
+ *
+ * What replaced it is what the studio actually does: you get in touch and a time is
+ * arranged. „Javi nam se i dogovorit ćemo termin." was already the homepage band's own
+ * second line, so the vocabulary is the site's own rather than something invented to fill
+ * the hole. The fragment is `#enquiry` because the old one named the retired thing in
+ * every href on every page and in any URL anybody shared.
+ *
+ * **The cost half, kept** (MUSE-71). From the foundation commit until that ticket this
+ * label priced a first class at nothing — on the header button of all fourteen pages, in
+ * both locales — and the same promise was repeated in the form band, `/contact`'s
+ * eyebrow, `/schedule`'s CTA band and both `page` descriptions, so it reached Google's
+ * result snippets and `llms.txt` as well. From the
  * foundation commit until that ticket this label priced a first class at nothing — on the
  * header button of all fourteen pages, in both locales — and the same promise was
- * repeated in the `#trial` band, `/contact`'s eyebrow, `/schedule`'s CTA band and both
+ * repeated in the homepage form band, `/contact`'s eyebrow, `/schedule`'s CTA band and both
  * `page` descriptions, so it reached Google's result snippets and `llms.txt` as well. The
  * studio offers no such thing: its own 2026/2027 enrolment form lists 55 € regular, 40 €
  * student and 20 € drop-in, and nothing it publishes anywhere mentions one. The claim was
  * invented in the same commit as MUSE-36's thirteen imaginary classes and it survived
  * because nobody thought to question the CTA.
  *
- * So the claim is gone and **nothing replaced it**. A first class now carries no price on
- * the site at all, which is the only honest position available without the studio stating
- * a policy: naming the drop-in rate here would be covering one invented offer with a
- * second, since nobody has said that is what a trial costs.
+ * So the claim is gone and **nothing replaced it**. A first class carries no price on the
+ * site at all, which is the only honest position available without the studio stating a
+ * policy: naming the drop-in rate here would be covering one invented offer with a
+ * second.
  * `test/offerclaims.test.ts` fails if any of it comes back — and it reads this file as
  * plain text, prose included, which is why the retired wording is quoted there and not
  * here (the MUSE-42 ruling, as `test/contentdrift.test.ts` applies it).
  *
- * The words are the brief's, shortened. §1 gives *Dođi na probni sat.* as the model
- * sentence, and that sentence is already `/contact`'s `<h1>` and the `#trial` band's
- * eyebrow; a third word-for-word copy on the same page is not emphasis. A header pill is
- * `white-space: nowrap` inside a `flex-wrap: nowrap` chrome, so the bar cannot absorb a
- * longer label either — and a noun is what every other entry in this file is.
+ * **The brand brief says the opposite and is now wrong about it.** Its §1 model sentence
+ * is an invitation to the retired class, so the human-authored spec and the owner
+ * disagree about whether the studio runs one — the same shape of disagreement MUSE-36
+ * left behind over the three style names. The owner's word is what ships. Do not quietly
+ * correct the brief, and do not restore the sentence from it.
+ *
+ * A header pill is `white-space: nowrap` inside a `flex-wrap: nowrap` chrome, so the bar
+ * cannot absorb a long label — and a phrase of two or three words is what fits.
  *
  * **It is still a code literal, and the ticket's second criterion asks for a field Mina
  * can edit.** That is a schema change — a `localeString` on `siteSettings`, regenerated
@@ -176,8 +199,8 @@ export const MORE_NAV: NavItem[] = [
  * review. Until it lands, the guard is the only thing holding this label.
  */
 export const CTA = {
-  route: '/#trial',
-  label: { hr: 'Probni sat', en: 'Trial class' },
+  route: '/#enquiry',
+  label: { hr: 'Javi nam se', en: 'Get in touch' },
 } as const;
 
 /**

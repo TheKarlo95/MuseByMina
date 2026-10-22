@@ -32,10 +32,10 @@ import { pagePath, startPreview, type Preview } from './helpers/preview';
  */
 
 /** The anchor every CTA on the site points at (`src/lib/nav.ts`). */
-const TRIAL = '#trial';
+const ENQUIRY = '#enquiry';
 const FORM = '[data-trial-form]';
 const HEADER = '[data-header]';
-/** The CTA in the header, which is a same-document link to `#trial` on the home pages. */
+/** The CTA in the header, which is a same-document link to `#enquiry` on the home pages. */
 const CTA = '[data-header] a.cta';
 
 const FOREIGN_LOCALE = 'en-US';
@@ -118,7 +118,7 @@ async function visit(
 /**
  * Click `selector` and wait for whatever navigation it causes to settle.
  *
- * Covers both kinds: a locale switch is a document navigation, the header CTA to `#trial`
+ * Covers both kinds: a locale switch is a document navigation, the header CTA to `#enquiry`
  * is a same-document hash change. Playwright reports a commit for both, which is why
  * `settleMove` can be the one gate here — and why it is the gate rather than the in-page
  * `location.href` poll this used to run. That poll observed the commit in the *renderer*,
@@ -436,7 +436,7 @@ async function expectAnchoredAt(page: Page, selector: string): Promise<void> {
 /**
  * Assert `selector` is on screen on a scrolled page.
  *
- * For the form itself rather than the anchor: `#trial` is the section, and the form sits
+ * For the form itself rather than the anchor: `#enquiry` is the section, and the form sits
  * a few hundred pixels into it, so "at the top of the viewport" is the wrong claim about
  * it. "The visitor can see the form they scrolled down for" is the right one.
  */
@@ -458,34 +458,34 @@ function switchHref(page: Page, locale: Locale): Promise<string | null> {
 }
 
 describe('locale switch — the fragment survives (MUSE-16)', () => {
-  it('switches /en/#trial to the Croatian form, scrolled to it', async () => {
+  it('switches /en/#enquiry to the Croatian form, scrolled to it', async () => {
     // The exact journey MUSE-10's QA reproduced: routed to English, scrolled to the form,
     // then switched to Croatian — and landed at the top of the page.
-    const { page, close } = await visit(urlFor('/en', TRIAL), { locale: FOREIGN_LOCALE });
+    const { page, close } = await visit(urlFor('/en', ENQUIRY), { locale: FOREIGN_LOCALE });
     try {
       await expectInView(page, FORM);
 
       await clickAndSettle(page, switchTo('hr'));
 
       // `?lang=hr` rides along because the href is the record of the choice (MUSE-33).
-      expect(page.url()).toBe(urlFor('/', `?${LANG_PARAM}=hr${TRIAL}`));
+      expect(page.url()).toBe(urlFor('/', `?${LANG_PARAM}=hr${ENQUIRY}`));
       expect(await page.getAttribute('html', 'lang')).toBe('hr-HR');
       // The equivalent anchor resolved on the destination, and the destination is at it.
-      await expectAnchoredAt(page, TRIAL);
+      await expectAnchoredAt(page, ENQUIRY);
       await expectInView(page, FORM);
     } finally {
       await close();
     }
   });
 
-  it('switches /#trial to the English form, scrolled to it', async () => {
-    const { page, close } = await visit(urlFor('/', TRIAL), { locale: CROATIAN_LOCALE });
+  it('switches /#enquiry to the English form, scrolled to it', async () => {
+    const { page, close } = await visit(urlFor('/', ENQUIRY), { locale: CROATIAN_LOCALE });
     try {
       await clickAndSettle(page, switchTo('en'));
 
-      expect(page.url()).toBe(urlFor('/en', `?${LANG_PARAM}=en${TRIAL}`));
+      expect(page.url()).toBe(urlFor('/en', `?${LANG_PARAM}=en${ENQUIRY}`));
       expect(await page.getAttribute('html', 'lang')).toBe('en');
-      await expectAnchoredAt(page, TRIAL);
+      await expectAnchoredAt(page, ENQUIRY);
       await expectInView(page, FORM);
     } finally {
       await close();
@@ -495,16 +495,16 @@ describe('locale switch — the fragment survives (MUSE-16)', () => {
   it('carries a fragment picked up after load, not just one that was in the URL', async () => {
     // The href is rendered without a fragment, so a switcher that only patched hrefs at
     // build or first paint would drop this one: the visitor arrived at `/en/`, clicked the
-    // header CTA to `#trial`, and only then switched language.
+    // header CTA to `#enquiry`, and only then switched language.
     const { page, close } = await visit(urlFor('/en'), { locale: FOREIGN_LOCALE });
     try {
       expect(new URL(page.url()).hash).toBe('');
 
       await clickAndSettle(page, CTA);
-      expect(new URL(page.url()).hash).toBe(TRIAL);
+      expect(new URL(page.url()).hash).toBe(ENQUIRY);
 
       await clickAndSettle(page, switchTo('hr'));
-      expect(page.url()).toBe(urlFor('/', `?${LANG_PARAM}=hr${TRIAL}`));
+      expect(page.url()).toBe(urlFor('/', `?${LANG_PARAM}=hr${ENQUIRY}`));
       await expectInView(page, FORM);
     } finally {
       await close();
@@ -512,19 +512,19 @@ describe('locale switch — the fragment survives (MUSE-16)', () => {
   });
 
   it('carries a ?query across the switch, fragment and all', async () => {
-    const suffix = `?utm_source=instagram&utm_campaign=trial${TRIAL}`;
+    const suffix = `?utm_source=instagram&utm_campaign=trial${ENQUIRY}`;
     const { page, close } = await visit(urlFor('/en', suffix), { locale: FOREIGN_LOCALE });
     try {
       await clickAndSettle(page, switchTo('hr'));
 
       // Byte-identical, with `lang` appended rather than the whole query re-serialised.
       expect(page.url()).toBe(
-        urlFor('/', `?utm_source=instagram&utm_campaign=trial&${LANG_PARAM}=hr${TRIAL}`),
+        urlFor('/', `?utm_source=instagram&utm_campaign=trial&${LANG_PARAM}=hr${ENQUIRY}`),
       );
       const landed = new URL(page.url());
       expect(landed.searchParams.get('utm_source')).toBe('instagram');
       expect(landed.searchParams.get('utm_campaign')).toBe('trial');
-      expect(landed.hash).toBe(TRIAL);
+      expect(landed.hash).toBe(ENQUIRY);
       await expectInView(page, FORM);
     } finally {
       await close();
@@ -584,7 +584,7 @@ describe('locale switch — the fragment survives (MUSE-16)', () => {
   });
 
   it('records the switch, so the homepage redirect does not undo it', async () => {
-    const { page, close } = await visit(urlFor('/en', TRIAL), { locale: FOREIGN_LOCALE });
+    const { page, close } = await visit(urlFor('/en', ENQUIRY), { locale: FOREIGN_LOCALE });
     try {
       await clickAndSettle(page, switchTo('hr'));
       expect(await storedLang(page)).toBe('hr');
@@ -600,7 +600,7 @@ describe('locale switch — it cannot fight the redirect it just triggered (MUSE
     // selector a URL that explicitly asks for English, which sends the visitor straight
     // back to `/en/` — the switch would be unclickable. The param names a *requested*
     // language, so switching language rewrites it.
-    const { page, close } = await visit(urlFor('/en', `?${LANG_PARAM}=en${TRIAL}`), {
+    const { page, close } = await visit(urlFor('/en', `?${LANG_PARAM}=en${ENQUIRY}`), {
       locale: FOREIGN_LOCALE,
     });
     try {
@@ -610,13 +610,13 @@ describe('locale switch — it cannot fight the redirect it just triggered (MUSE
       // symptom is being dumped back on the English page, and a test that only compared
       // href strings would be checking our own output rather than the bounce.
       expect(new URL(page.url()).pathname).not.toBe(pagePath('/en'));
-      expect(page.url()).toBe(urlFor('/', `?${LANG_PARAM}=hr${TRIAL}`));
+      expect(page.url()).toBe(urlFor('/', `?${LANG_PARAM}=hr${ENQUIRY}`));
       expect(await page.getAttribute('html', 'lang')).toBe('hr-HR');
       await expectInView(page, FORM);
 
       // And the href the switcher now advertises for the way back.
       expect(await switchHref(page, 'en')).toBe(
-        `${pagePath('/en')}?${LANG_PARAM}=en${TRIAL}`,
+        `${pagePath('/en')}?${LANG_PARAM}=en${ENQUIRY}`,
       );
     } finally {
       await close();
@@ -657,12 +657,12 @@ describe('?lang= selects a language rather than only suppressing (MUSE-16)', () 
     }
   });
 
-  it('carries the fragment while selecting, so ?lang=en#trial lands on the form', async () => {
-    const { page, close } = await visit(urlFor('/', `?${LANG_PARAM}=en${TRIAL}`), {
+  it('carries the fragment while selecting, so ?lang=en#enquiry lands on the form', async () => {
+    const { page, close } = await visit(urlFor('/', `?${LANG_PARAM}=en${ENQUIRY}`), {
       locale: FOREIGN_LOCALE,
     });
     try {
-      expect(page.url()).toBe(urlFor('/en', `?${LANG_PARAM}=en${TRIAL}`));
+      expect(page.url()).toBe(urlFor('/en', `?${LANG_PARAM}=en${ENQUIRY}`));
       await expectInView(page, FORM);
     } finally {
       await close();
@@ -670,11 +670,11 @@ describe('?lang= selects a language rather than only suppressing (MUSE-16)', () 
   });
 
   it('keeps ?lang=hr on the Croatian page and remembers the choice', async () => {
-    const { page, close } = await visit(urlFor('/', `?${LANG_PARAM}=hr${TRIAL}`), {
+    const { page, close } = await visit(urlFor('/', `?${LANG_PARAM}=hr${ENQUIRY}`), {
       locale: FOREIGN_LOCALE,
     });
     try {
-      expect(page.url()).toBe(urlFor('/', `?${LANG_PARAM}=hr${TRIAL}`));
+      expect(page.url()).toBe(urlFor('/', `?${LANG_PARAM}=hr${ENQUIRY}`));
       expect(await page.getAttribute('html', 'lang')).toBe('hr-HR');
       expect(await storedLang(page)).toBe('hr');
     } finally {
@@ -704,8 +704,8 @@ describe('?lang= selects a language rather than only suppressing (MUSE-16)', () 
   });
 
   it('settles after one redirect — ?lang=en is not a loop', async () => {
-    const baseline = await visit(urlFor('/', TRIAL), { locale: CROATIAN_LOCALE });
-    const selected = await visit(urlFor('/', `?${LANG_PARAM}=en${TRIAL}`), {
+    const baseline = await visit(urlFor('/', ENQUIRY), { locale: CROATIAN_LOCALE });
+    const selected = await visit(urlFor('/', `?${LANG_PARAM}=en${ENQUIRY}`), {
       locale: FOREIGN_LOCALE,
     });
     try {
@@ -853,11 +853,11 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
     // The irony MUSE-33 names: MUSE-16 made the carry an *href rewrite* precisely because
     // middle-click, "open in new tab" and "copy link address" fire no `click` event — and
     // then left persistence in the click handler, where those paths still miss it. A bare
-    // `/MuseByMina/#trial` is not a durable link to Croatian: the homepage redirect is
+    // `/MuseByMina/#enquiry` is not a durable link to Croatian: the homepage redirect is
     // free to reinterpret it, and for a non-Croatian browser it does.
-    const { page, close } = await visit(urlFor('/en', TRIAL), { locale: FOREIGN_LOCALE });
+    const { page, close } = await visit(urlFor('/en', ENQUIRY), { locale: FOREIGN_LOCALE });
     try {
-      expect(await switchHref(page, 'hr')).toBe(`${pagePath('/')}?${LANG_PARAM}=hr${TRIAL}`);
+      expect(await switchHref(page, 'hr')).toBe(`${pagePath('/')}?${LANG_PARAM}=hr${ENQUIRY}`);
       // And it is a *plain* link, which is the site-owned half of "a middle-click opens
       // it in a tab": `target` or `download` on it would change what the browser does
       // with the gesture, and the middle-click case below could then only report that as
@@ -875,10 +875,10 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
   });
 
   it('advertises the other language from the Croatian side too', async () => {
-    const { page, close } = await visit(urlFor('/', TRIAL), { locale: CROATIAN_LOCALE });
+    const { page, close } = await visit(urlFor('/', ENQUIRY), { locale: CROATIAN_LOCALE });
     try {
       expect(await switchHref(page, 'en')).toBe(
-        `${pagePath('/en')}?${LANG_PARAM}=en${TRIAL}`,
+        `${pagePath('/en')}?${LANG_PARAM}=en${ENQUIRY}`,
       );
       expect(await page.locator(switchTo('hr')).count()).toBe(0);
     } finally {
@@ -889,7 +889,7 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
   it('opens the HR link in a new tab on Croatian, on a browser preferring English', async () => {
     // A genuine middle-click: Chromium opens a background tab, no `click` handler runs,
     // and nothing has been stored. Everything the destination needs has to be in the URL.
-    const { page, context, close } = await visit(urlFor('/en', TRIAL), {
+    const { page, context, close } = await visit(urlFor('/en', ENQUIRY), {
       locale: FOREIGN_LOCALE,
     });
     try {
@@ -898,7 +898,7 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
       const tab = await middleClickOpens(page, context, switchTo('hr'));
 
       // Croatian, not bounced to `/en/` by the homepage redirect.
-      expect(tab.url).toBe(urlFor('/', `?${LANG_PARAM}=hr${TRIAL}`));
+      expect(tab.url).toBe(urlFor('/', `?${LANG_PARAM}=hr${ENQUIRY}`));
       expect(tab.htmlLang).toBe('hr-HR');
       // And the choice is now recorded, by the link rather than by a handler.
       expect(tab.stored).toBe('hr');
@@ -908,13 +908,13 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
   });
 
   it('opens the EN link in a new tab on English, and records that too', async () => {
-    const { page, context, close } = await visit(urlFor('/', TRIAL), {
+    const { page, context, close } = await visit(urlFor('/', ENQUIRY), {
       locale: CROATIAN_LOCALE,
     });
     try {
       const tab = await middleClickOpens(page, context, switchTo('en'));
 
-      expect(tab.url).toBe(urlFor('/en', `?${LANG_PARAM}=en${TRIAL}`));
+      expect(tab.url).toBe(urlFor('/en', `?${LANG_PARAM}=en${ENQUIRY}`));
       expect(tab.htmlLang).toBe('en');
       // `/en/` ran no language script before MUSE-33, so a tab opened here displayed
       // English and remembered nothing — and the next plain `/` went Croatian.
@@ -931,17 +931,17 @@ describe('a copied or middle-clicked switcher link is durable (MUSE-33)', () => 
     // claims to *carry* a visitor's campaign tags and it was rewriting them (MUSE-33).
     const encoded = 'utm_campaign=trial%20class';
     const { page, close } = await visit(
-      urlFor('/en', `?${encoded}&${LANG_PARAM}=en${TRIAL}`),
+      urlFor('/en', `?${encoded}&${LANG_PARAM}=en${ENQUIRY}`),
       { locale: FOREIGN_LOCALE },
     );
     try {
       expect(await switchHref(page, 'hr')).toBe(
-        `${pagePath('/')}?${encoded}&${LANG_PARAM}=hr${TRIAL}`,
+        `${pagePath('/')}?${encoded}&${LANG_PARAM}=hr${ENQUIRY}`,
       );
 
       await clickAndSettle(page, switchTo('hr'));
 
-      expect(page.url()).toBe(urlFor('/', `?${encoded}&${LANG_PARAM}=hr${TRIAL}`));
+      expect(page.url()).toBe(urlFor('/', `?${encoded}&${LANG_PARAM}=hr${ENQUIRY}`));
       // And it still means what it meant, byte-identical or not.
       expect(new URL(page.url()).searchParams.get('utm_campaign')).toBe('trial class');
     } finally {
@@ -1091,8 +1091,8 @@ describe('the entry for the locale you are reading is inert (MUSE-39)', () => {
       // URL it got. Re-proved by MUSE-91, which dropped the parameter again: this test
       // then fails one assertion earlier, on the href, so the measurement of the *tab's*
       // comparison was taken on „opens the HR link in a new tab" above — 1,177 ms for the
-      // test, 4.44 s for the run, reading „expected …/MuseByMina/en/#trial to be
-      // …/MuseByMina/?lang=hr#trial". Seconds and a comparison, not a timeout.
+      // test, 4.44 s for the run, reading „expected …/MuseByMina/en/#enquiry to be
+      // …/MuseByMina/?lang=hr#enquiry". Seconds and a comparison, not a timeout.
       expect(tab.url).toBe(urlFor('/schedule', `?${LANG_PARAM}=hr`));
       expect(tab.htmlLang).toBe('hr-HR');
       expect(tab.stored).toBe('hr');
@@ -1147,10 +1147,10 @@ describe('?lang= works off the root, not only on it (MUSE-33)', () => {
 
   it('carries the query and fragment onto the deep destination', async () => {
     const result = await landing({
-      from: urlFor('/schedule', `?utm_source=qr&${LANG_PARAM}=en${TRIAL}`),
+      from: urlFor('/schedule', `?utm_source=qr&${LANG_PARAM}=en${ENQUIRY}`),
       locale: CROATIAN_LOCALE,
     });
-    expect(result.url).toBe(urlFor('/en/schedule', `?utm_source=qr&${LANG_PARAM}=en${TRIAL}`));
+    expect(result.url).toBe(urlFor('/en/schedule', `?utm_source=qr&${LANG_PARAM}=en${ENQUIRY}`));
   });
 
   it('stays put, and stores, when a deep page is already the requested locale', async () => {

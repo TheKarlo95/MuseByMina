@@ -40,7 +40,7 @@ import {
  */
 
 /** The anchor every CTA on the site points at (`src/lib/nav.ts`). */
-const TRIAL = '#trial';
+const ENQUIRY = '#enquiry';
 const FORM = '[data-trial-form]';
 
 /** A browser that is clearly not Croatian — the only case the redirect fires for. */
@@ -211,16 +211,16 @@ function geometryOf(page: Page, selector: string): Promise<Geometry> {
 }
 
 describe('language redirect — fragment and query survive (MUSE-10)', () => {
-  it('lands a non-Croatian browser on /en/#trial with the form in view', async () => {
-    const { page, close } = await visit(urlFor('/', TRIAL), { locale: FOREIGN_LOCALE });
+  it('lands a non-Croatian browser on /en/#enquiry with the form in view', async () => {
+    const { page, close } = await visit(urlFor('/', ENQUIRY), { locale: FOREIGN_LOCALE });
     try {
       // The redirect happened at all — otherwise the rest proves nothing.
       expect(new URL(page.url()).pathname).toBe(pagePath('/en'));
       // …and carried the fragment. This is the regression.
-      expect(page.url()).toBe(urlFor('/en', TRIAL));
+      expect(page.url()).toBe(urlFor('/en', ENQUIRY));
 
       // The URL is not the acceptance criterion; the form being on screen is.
-      const section = await geometryOf(page, TRIAL);
+      const section = await geometryOf(page, ENQUIRY);
       expect(section.scrollY).toBeGreaterThan(0);
       expect(section.visible).toBe(true);
       // Anchored near the top of the viewport, below the fixed header's scroll-margin
@@ -240,7 +240,7 @@ describe('language redirect — fragment and query survive (MUSE-10)', () => {
   });
 
   it('carries a ?query across the redirect, fragment and all', async () => {
-    const suffix = `?utm_source=instagram&utm_campaign=trial${TRIAL}`;
+    const suffix = `?utm_source=instagram&utm_campaign=trial${ENQUIRY}`;
     const { page, close } = await visit(urlFor('/', suffix), { locale: FOREIGN_LOCALE });
     try {
       expect(page.url()).toBe(urlFor('/en', suffix));
@@ -248,7 +248,7 @@ describe('language redirect — fragment and query survive (MUSE-10)', () => {
       const target = new URL(page.url());
       expect(target.searchParams.get('utm_source')).toBe('instagram');
       expect(target.searchParams.get('utm_campaign')).toBe('trial');
-      expect(target.hash).toBe(TRIAL);
+      expect(target.hash).toBe(ENQUIRY);
 
       expect((await geometryOf(page, FORM)).visible).toBe(true);
     } finally {
@@ -284,8 +284,8 @@ describe('language redirect — fragment and query survive (MUSE-10)', () => {
     // cannot return to it and immediately bounce forward again. Measured against the
     // no-redirect case rather than against a hard number, because the stack already
     // holds whatever entries the automation's own first navigation put there.
-    const baseline = await visit(urlFor('/', TRIAL), { locale: CROATIAN_LOCALE });
-    const redirected = await visit(urlFor('/', TRIAL), { locale: FOREIGN_LOCALE });
+    const baseline = await visit(urlFor('/', ENQUIRY), { locale: CROATIAN_LOCALE });
+    const redirected = await visit(urlFor('/', ENQUIRY), { locale: FOREIGN_LOCALE });
     try {
       expect(await redirected.page.evaluate(() => history.length)).toBe(
         await baseline.page.evaluate(() => history.length),
@@ -301,10 +301,10 @@ describe('language redirect — fragment and query survive (MUSE-10)', () => {
 });
 
 describe('language redirect — the guards that must not fire (MUSE-10)', () => {
-  it('leaves a Croatian browser on /#trial, scrolled to the form', async () => {
-    const { page, close } = await visit(urlFor('/', TRIAL), { locale: CROATIAN_LOCALE });
+  it('leaves a Croatian browser on /#enquiry, scrolled to the form', async () => {
+    const { page, close } = await visit(urlFor('/', ENQUIRY), { locale: CROATIAN_LOCALE });
     try {
-      expect(page.url()).toBe(urlFor('/', TRIAL));
+      expect(page.url()).toBe(urlFor('/', ENQUIRY));
       expect(await page.getAttribute('html', 'lang')).toBe('hr-HR');
 
       const form = await geometryOf(page, FORM);
@@ -316,7 +316,7 @@ describe('language redirect — the guards that must not fire (MUSE-10)', () => 
   });
 
   it('leaves a non-Croatian browser alone once Croatian is stored', async () => {
-    const { page, close } = await visit(urlFor('/', TRIAL), {
+    const { page, close } = await visit(urlFor('/', ENQUIRY), {
       locale: FOREIGN_LOCALE,
       storedLang: 'hr',
     });
@@ -324,7 +324,7 @@ describe('language redirect — the guards that must not fire (MUSE-10)', () => 
       // A stored choice wins over the browser's preference. `hr` is the direction where
       // "stay put" is the right outcome; `en` is the other direction and is covered by
       // the MUSE-33 block below, where staying put is the bug.
-      expect(page.url()).toBe(urlFor('/', TRIAL));
+      expect(page.url()).toBe(urlFor('/', ENQUIRY));
       expect(await page.getAttribute('html', 'lang')).toBe('hr-HR');
       expect((await geometryOf(page, FORM)).visible).toBe(true);
     } finally {
@@ -333,7 +333,7 @@ describe('language redirect — the guards that must not fire (MUSE-10)', () => 
   });
 
   it('leaves a non-Croatian browser alone when ?lang= overrides', async () => {
-    const suffix = `?lang=hr${TRIAL}`;
+    const suffix = `?lang=hr${ENQUIRY}`;
     const { page, close } = await visit(urlFor('/', suffix), { locale: FOREIGN_LOCALE });
     try {
       expect(page.url()).toBe(urlFor('/', suffix));
@@ -348,7 +348,7 @@ describe('language redirect — the guards that must not fire (MUSE-10)', () => 
     // Root route only: `detectLanguage` is passed by `src/pages/index.astro` alone, so a
     // non-Croatian visitor who asked for a specific Croatian page keeps it.
     for (const route of ['/schedule', '/contact']) {
-      const { page, close } = await visit(urlFor(route, TRIAL), {
+      const { page, close } = await visit(urlFor(route, ENQUIRY), {
         locale: FOREIGN_LOCALE,
       });
       try {
@@ -383,7 +383,7 @@ describe('a stored choice is obeyed rather than merely noticed (MUSE-33)', () =>
       ['en', FOREIGN_LOCALE, '/en', 'en'],
       ['hr', CROATIAN_LOCALE, '/', 'hr-HR'],
     ] as const) {
-      const { page, close } = await visit(urlFor('/', TRIAL), {
+      const { page, close } = await visit(urlFor('/', ENQUIRY), {
         locale,
         storedLang: stored,
       });
@@ -392,7 +392,7 @@ describe('a stored choice is obeyed rather than merely noticed (MUSE-33)', () =>
         expect(new URL(page.url()).pathname, where).toBe(pagePath(landing));
         expect(await page.getAttribute('html', 'lang'), where).toBe(htmlLang);
         // The fragment still survives the hop, and the form is still where it was asked for.
-        expect(new URL(page.url()).hash, where).toBe(TRIAL);
+        expect(new URL(page.url()).hash, where).toBe(ENQUIRY);
         expect((await geometryOf(page, FORM)).visible, where).toBe(true);
       } finally {
         await close();
@@ -437,11 +437,11 @@ describe('a stored choice is obeyed rather than merely noticed (MUSE-33)', () =>
     // Croatian preference would decide instead.
     const visitor = await session(CROATIAN_LOCALE);
     try {
-      await visitor.open(urlFor('/', `?lang=EN${TRIAL}`));
+      await visitor.open(urlFor('/', `?lang=EN${ENQUIRY}`));
       expect(new URL(visitor.page.url()).pathname).toBe(pagePath('/en'));
       expect(await visitor.page.getAttribute('html', 'lang')).toBe('en');
       // Carried, selected, and scrolled to — the fold changes nothing else about the hop.
-      expect(new URL(visitor.page.url()).hash).toBe(TRIAL);
+      expect(new URL(visitor.page.url()).hash).toBe(ENQUIRY);
       expect((await geometryOf(visitor.page, FORM)).visible).toBe(true);
       // Canonical lowercase, not the spelling that arrived.
       expect(await storedLang(visitor.page)).toBe('en');
@@ -478,13 +478,13 @@ describe('a stored choice is obeyed rather than merely noticed (MUSE-33)', () =>
       ['EN', CROATIAN_LOCALE, '/en', 'en'],
       ['Hr', FOREIGN_LOCALE, '/', 'hr-HR'],
     ] as const) {
-      const { page, close } = await visit(urlFor('/', TRIAL), { locale, storedLang: stored });
+      const { page, close } = await visit(urlFor('/', ENQUIRY), { locale, storedLang: stored });
       try {
         const where = `stored=${stored} browser=${locale}`;
         expect(new URL(page.url()).pathname, where).toBe(pagePath(landing));
         expect(await page.getAttribute('html', 'lang'), where).toBe(htmlLang);
         // The fragment still survives the hop, same as for a lowercase value.
-        expect(new URL(page.url()).hash, where).toBe(TRIAL);
+        expect(new URL(page.url()).hash, where).toBe(ENQUIRY);
         expect((await geometryOf(page, FORM)).visible, where).toBe(true);
         // Read, not rewritten: the script's one write is the `?lang=` branch, which
         // folds before storing, so nothing uppercase can originate there.
@@ -499,11 +499,11 @@ describe('a stored choice is obeyed rather than merely noticed (MUSE-33)', () =>
     // The destination must not bounce back. `/en/` does not language-detect, and the
     // only redirect this script performs is toward the locale already decided on, so
     // there is nothing left to disagree with once it lands.
-    const baseline = await visit(urlFor('/', TRIAL), {
+    const baseline = await visit(urlFor('/', ENQUIRY), {
       locale: CROATIAN_LOCALE,
       storedLang: 'hr',
     });
-    const redirected = await visit(urlFor('/', TRIAL), {
+    const redirected = await visit(urlFor('/', ENQUIRY), {
       locale: CROATIAN_LOCALE,
       storedLang: 'en',
     });
@@ -790,7 +790,7 @@ describe("the 404's exits land in the language that was pressed (MUSE-56)", () =
   /** The exit link inside a locale's half of the bilingual body. */
   const exitIn = (locale: Locale): string => `main [lang="${locale}"] a[href]`;
 
-  /** The header CTA: on this page it is the Croatian chrome's link to `/#trial`. */
+  /** The header CTA: on this page it is the Croatian chrome's link to `/#enquiry`. */
   const HEADER_CTA = '[data-header] a.cta';
 
   /** The homepage each locale's exit leads to. */
@@ -940,7 +940,7 @@ describe("the 404's exits land in the language that was pressed (MUSE-56)", () =
    * The Croatian chrome this page also renders — looked at, and deliberately left alone.
    *
    * The header, footer and CTA here are the same components every other page renders, in
-   * Croatian, and two of their links (`/` and `/#trial`) land on the one detecting route.
+   * Croatian, and two of their links (`/` and `/#enquiry`) land on the one detecting route.
    * Their *exposure* is therefore identical to the Croatian exit's, and they are still not
    * the same thing:
    *
@@ -957,12 +957,12 @@ describe("the 404's exits land in the language that was pressed (MUSE-56)", () =
    *     stores the language, and a stored choice outranks the browser (MUSE-33), so the
    *     chrome follows the choice from then on. The second test below is that composition.
    *
-   * What has to hold either way is MUSE-10: the CTA carries `#trial` across the redirect,
+   * What has to hold either way is MUSE-10: the CTA carries `#enquiry` across the redirect,
    * in both directions. The *geometry* of the landing — the form on screen below the fixed
    * header — is asserted by the MUSE-10 block above and by `test/localeswitch.test.ts`;
    * the question here is only whether the fragment survived, and into which language.
    */
-  it("carries #trial across the chrome's CTA, in both directions", async () => {
+  it("carries #enquiry across the chrome's CTA, in both directions", async () => {
     for (const [locale, stored, landing] of [
       // Nothing stored: the browser decides, which is MUSE-10 working as designed.
       [CROATIAN_LOCALE, undefined, '/'],
@@ -975,7 +975,7 @@ describe("the 404's exits land in the language that was pressed (MUSE-56)", () =
       const { page, close } = await arrive({ locale, storedLang: stored });
       try {
         expect(await page.getAttribute(HEADER_CTA, 'href'), where).toBe(
-          `${pagePath('/')}${TRIAL}`,
+          `${pagePath('/')}${ENQUIRY}`,
         );
 
         await follow(page, HEADER_CTA);
@@ -983,9 +983,9 @@ describe("the 404's exits land in the language that was pressed (MUSE-56)", () =
         const landed = new URL(page.url());
         expect(landed.pathname, where).toBe(pagePath(landing));
         // The regression MUSE-10 exists to prevent, across exactly this redirect.
-        expect(landed.hash, where).toBe(TRIAL);
+        expect(landed.hash, where).toBe(ENQUIRY);
         // And the fragment names something on the page it reached, in that language.
-        expect(await page.locator(TRIAL).count(), where).toBe(1);
+        expect(await page.locator(ENQUIRY).count(), where).toBe(1);
         expect(await page.locator(FORM).count(), where).toBe(1);
       } finally {
         await close();
@@ -1008,7 +1008,7 @@ describe("the 404's exits land in the language that was pressed (MUSE-56)", () =
 
       const landed = new URL(page.url());
       expect(landed.pathname).toBe(pagePath('/'));
-      expect(landed.hash).toBe(TRIAL);
+      expect(landed.hash).toBe(ENQUIRY);
       expect(await page.getAttribute('html', 'lang')).toBe('hr-HR');
     } finally {
       await close();

@@ -2,7 +2,13 @@ import type { Locale } from './i18n';
 import { LEVELS, LEVEL_NAME, type Level } from './schedule';
 
 /**
- * The trial-class form: field model, endpoint and every user-facing string.
+ * The enquiry form: field model, endpoint and every user-facing string.
+ *
+ * It was named after an offer the studio does not make, until the owner said so on
+ * 2026-10-22 (MUSE-136). The fields and the gating are unchanged; what went is every
+ * sentence that named it. The file and the component keep their names — renaming
+ * `TrialForm.astro` moves its `<link>` in `<head>`, which `test/cascade.test.ts` watches
+ * against `dist`, and that is a different ticket's risk to take.
  *
  * One module rather than copy inside the component, for three reasons:
  *   - HR and EN are declared side by side, so a missing translation is visible
@@ -404,7 +410,7 @@ export interface FormCopy {
 
 export const FORM_COPY: Record<Locale, FormCopy> = {
   hr: {
-    formLabel: 'Prijava za probni sat',
+    formLabel: 'Obrazac za upit',
     labels: {
       name: 'Ime i prezime',
       email: 'E-mail adresa',
@@ -447,7 +453,7 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
     // it. That is MUSE-71's rule and there is no exemption list; the wording lives in
     // `test/helpers/offer-claims.ts`, which is not scanned.
     sentBody:
-      'Javljamo se s terminom za probni sat. Ako ne vidiš naš odgovor, provjeri spam mapu.',
+      'Javljamo se s terminom. Ako ne vidiš naš odgovor, provjeri spam mapu.',
     failTitle: 'Prijava nije poslana.',
     failBody:
       'Tvoji odgovori su ostali u obrascu, pa možeš pokušati ponovno. Ako i dalje ne ide, piši nam na:',
@@ -470,7 +476,7 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
     noscriptAsk: 'Napiši ime, razinu ako je već znaš i kad ti otprilike odgovara.',
   },
   en: {
-    formLabel: 'Trial class request',
+    formLabel: 'Enquiry form',
     labels: {
       name: 'Full name',
       email: 'Email address',
@@ -505,7 +511,7 @@ export const FORM_COPY: Record<Locale, FormCopy> = {
     tooLong: 'That message is too long — please shorten it.',
     sentTitle: 'Your request is on its way.',
     sentBody:
-      'We reply with a slot for your trial class. If you do not see our answer, check your spam folder.',
+      'We reply with a time. If you do not see our answer, check your spam folder.',
     failTitle: 'That did not send.',
     failBody:
       'Your answers are still in the form, so you can try again. If it still will not go through, write to us at:',

@@ -187,21 +187,48 @@ const SUPERSEDED: { route: string; field: CopyField; ticket: string; because: st
   {
     route: '/',
     field: 'description',
-    ticket: 'MUSE-71',
+    ticket: 'MUSE-71, MUSE-136',
     because:
       'The frozen description ended „Dođi na besplatni probni sat." / "Come to a free ' +
       'trial class." The studio offers no free class: its own 2026/2027 enrolment form ' +
       'lists 55 € regular, 40 € student and 20 € drop-in and no trial rate, and nothing ' +
       'it publishes anywhere mentions one — the claim came from the same foundation ' +
-      "commit as MUSE-36's invented schedule. One word is gone and nothing replaced it; " +
-      'the sentence is now the brief\'s own „Dođi na probni sat.", which makes no price ' +
-      'claim. Removing an unsupported commercial promise needed no decision from the ' +
-      'studio — adding one would.',
+      "commit as MUSE-36's invented schedule. MUSE-71 took one word out and nothing " +
+      'replaced it. **MUSE-136 then took the rest of the sentence**: on 2026-10-22 the ' +
+      'owner said there is no trial class at all, so what MUSE-71 left — an invitation ' +
+      'to the class itself — was an offer the studio does not make. The description now ' +
+      'ends with what it does do, which is answer and arrange a time. Removing an ' +
+      'unsupported commercial promise needed no decision from the studio; adding one ' +
+      'would.',
+  },
+  {
+    route: '/contact',
+    field: 'title',
+    ticket: 'MUSE-136',
+    because:
+      'The frozen title was „Prijava za probni sat — Muse by Mina" / "Trial class ' +
+      'sign-up — Muse by Mina", so the page offered a trial class in the one string ' +
+      'Google prints as the headline of a result. On 2026-10-22 the owner said the ' +
+      'studio has no such thing. The page is a way to reach the studio and the title ' +
+      'says that; the form on it is unchanged, and it is the third ticket to correct ' +
+      'this one sentence after MUSE-71 and MUSE-80 each took a modifier off it and left ' +
+      'the noun standing.',
+  },
+  {
+    route: '/privacy',
+    field: 'description',
+    ticket: 'MUSE-136',
+    because:
+      'The frozen description named „obrazac za probni sat" / "the trial-class form" — ' +
+      'the notice describing the form by an offer the studio does not make. Only the ' +
+      "form's name changed; what it collects, why, and the rights listed are untouched, " +
+      'and `PUBLIC_FORM_ENDPOINT` is still unset so the notice still names no recipient ' +
+      '(MUSE-72).',
   },
   {
     route: '/contact',
     field: 'description',
-    ticket: 'MUSE-71, MUSE-80, MUSE-84',
+    ticket: 'MUSE-71, MUSE-80, MUSE-84, MUSE-136',
     because:
       'Three unsupported claims in one sentence, retired by three tickets. MUSE-71 took ' +
       '„besplatni probni sat" / "a free bachata trial class" out of the ' +
@@ -216,8 +243,11 @@ const SUPERSEDED: { route: string; field: CopyField; ticket: string; because: st
       'reason one ticket later: it instructed a submission the deploy cannot transmit at ' +
       'all. The hero is gated on `FORM_HAS_PROCESSOR` and this string cannot be — a ' +
       '`page` document has no branch and reads no configuration — so it has to be true ' +
-      'in both states, and it now names no mechanism. `test/trialform.test.ts` holds it ' +
-      'against both builds.',
+      'in both states, and it names no mechanism. `test/trialform.test.ts` holds it ' +
+      'against both builds. **MUSE-136 took the last of it**: with three modifiers gone ' +
+      'the sentence still invited somebody to a trial class, which the owner said on ' +
+      '2026-10-22 does not exist. Four tickets on one sentence is the record of a noun ' +
+      'nobody checked while three people corrected its adjectives.',
   },
 ];
 

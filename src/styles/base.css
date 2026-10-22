@@ -146,7 +146,7 @@ video {
   body { padding-top: 80px; }
 }
 
-/* Anchor targets must clear the fixed header too, or #trial lands under it. */
+/* Anchor targets must clear the fixed header too, or #enquiry lands under it. */
 :target {
   scroll-margin-top: 96px;
 }

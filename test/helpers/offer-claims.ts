@@ -1,23 +1,50 @@
 /**
  * **The retired claims, as one rule two suites can apply.**
  *
- * Two unsupported promises have been taken off this site, both written by an agent, both
- * plausible, neither ever said by the studio. They are kept retired here together because
+ * Three unsupported promises have been taken off this site, all written by an agent, all
+ * plausible, none ever said by the studio. They are kept retired here together because
  * they fail the same way, are found by the same scan and would come back through the same
  * doors — and because a second mechanism for the second one would be two answers to one
  * question (MUSE-38's shape).
+ *
+ * The third is the other two's parent, which is worth reading before adding a fourth.
+ * MUSE-71 retired what the trial class *cost* and MUSE-80 retired how fast the studio
+ * would *answer* about it; both left the class itself standing, because each ticket
+ * corrected the modifier it was shown and nobody asked whether the noun existed. It did
+ * not (MUSE-136). A guard against the adjectives of a thing that is not offered is a
+ * guard around a hole.
  *
  * ## MUSE-71 — a free first class
  *
  * „Besplatni probni sat" / "Free trial class" was the site's primary call to action from
  * the foundation commit until MUSE-71: the header button on all fourteen pages in both
- * locales, repeated in the homepage `#trial` band, `/contact`'s hero eyebrow,
+ * locales, repeated in the homepage form band, `/contact`'s hero eyebrow,
  * `/schedule`'s CTA band and both `page` descriptions — so also in the two
  * `<meta name="description">` tags Google shows and in `llms.txt`. The studio offers no
  * such thing. Its own „DANCE STUDIO MUSE BY MINA – UPISI | SEZONA 2026/2027" form lists
  * 55 € regular, 40 € student and 20 € drop-in and no free or trial rate, and its timetable
  * matches the published schedule minute for minute, so the document is current rather than
  * stale. The claim came from the same commit as MUSE-36's thirteen invented classes.
+ *
+ * ## MUSE-136 — the trial class itself
+ *
+ * „Probni sat" / "Trial class" was the site's primary call to action from the foundation
+ * commit until 2026-10-22, when the owner said plainly: *there is no probni sat concept at
+ * all*. It was the header pill on every page in both locales, the homepage band's eyebrow,
+ * `/contact`'s `<h1>`, `/schedule`'s closing band, the form's own `aria-label` and
+ * confirmation line, two paragraphs of `/privacy`, a Studio field description, and three
+ * `page` descriptions — so also three `<meta name="description">` tags and six `llms.txt`
+ * lines. The studio's own 2026/2027 enrolment form lists three monthly and drop-in rates
+ * and no trial of any kind, which is the same document that disproved MUSE-71.
+ *
+ * **The brand brief disagrees**, and that is recorded rather than resolved: its §1 model
+ * sentence is an invitation to this class. The same shape as the three style names MUSE-36
+ * retired while the brief still teaches them. The owner's word ships; the brief is not
+ * quietly corrected.
+ *
+ * What replaced it is an enquiry — get in touch, a time is arranged — which is what the
+ * form has in fact been doing, since `PUBLIC_FORM_ENDPOINT` has never been set and every
+ * path through it offers the studio inbox (MUSE-110, MUSE-117).
  *
  * ## MUSE-80 — a reply within one working day
  *
@@ -183,7 +210,7 @@ export const RETIRED_CLAIMS: RetiredClaim[] = [
       'besplatna radionica',
     ],
     why:
-      "the header CTA, the `#trial` band, `/contact`'s eyebrow and both `page` " +
+      "the header CTA, the homepage form band, `/contact`'s eyebrow and both `page` " +
       'descriptions all said it, and the studio does not offer it.',
   },
   {
@@ -236,6 +263,77 @@ export const RETIRED_CLAIMS: RetiredClaim[] = [
       'the claim restated. These were never on the site, and that is the point — the ' +
       'thing to keep retired is the offer, not the four sentences that happened to carry ' +
       'it. Add a line here rather than widening a needle until it reads prose.',
+  },
+  {
+    what: 'an introductory class offered, in Croatian („probni sat")',
+    ticket: 'MUSE-136',
+    untrue: 'The studio runs no trial class, and never has',
+    // The root plus the noun, rather than „probn" alone: „probni" is also the ordinary
+    // adjective for a rehearsal or a test, and „probna verzija" is not an offer. The noun
+    // list is what makes it a class — and „sat" declines, so the stem is matched and the
+    // ending is not spelled out.
+    pattern: /probn[\p{L}]*\s+(?:sat|sata|satu|sati|satom|termin|termina|trening|treninga)(?![\p{L}])/iu,
+    examples: [
+      'Probni sat',
+      'Dođi na probni sat.',
+      'Prijava za probni sat',
+      'Što obrazac za probni sat prikuplja, zašto, kome se prenosi',
+      'Javljamo se s terminom za probni sat.',
+      'Besplatni probni sat',
+      'nakon probnog sata',
+      'dogovori probni termin',
+    ],
+    why:
+      'the header pill, the homepage band, `/contact`, `/schedule`, the form label and ' +
+      'confirmation, `/privacy`, a Studio field description and three `page` ' +
+      'descriptions. It is the noun MUSE-71 and MUSE-80 both left standing.',
+  },
+  {
+    what: 'an introductory class offered, in English ("trial class")',
+    ticket: 'MUSE-136',
+    untrue: 'The studio runs no trial class, and never has',
+    // `[\s-]` because the published strings used both spellings — "a trial class" in the
+    // copy and "the trial-class form" in the privacy notice — and a needle that read only
+    // the space would have left the notice saying it.
+    pattern: /\btrial\b[\s-]{1,2}(?:class|classes|lesson|lessons|session|sessions|course)\b/iu,
+    examples: [
+      'Trial class',
+      'Come to a trial class.',
+      'Trial class request',
+      'the trial-class form asks for a name',
+      'We reply with a slot for your trial class.',
+      'Free trial class',
+      'Sign up for a bachata trial class in Zagreb.',
+      'book your trial session',
+    ],
+    why:
+      'the English half of the same thing, in the same places, plus the two `llms.txt` ' +
+      'lines a scraper reads.',
+  },
+  {
+    what: 'the same offer under another name',
+    ticket: 'MUSE-136',
+    untrue: 'The studio runs no trial class, and never has',
+    // The words somebody reaches for when told the first two are forbidden. Written as a
+    // separate line rather than as alternatives inside the needles above, for the reason
+    // MUSE-71's paraphrase line gives: the thing kept retired is the offer, not the
+    // sentences that happened to carry it.
+    pattern:
+      /\b(?:taster|intro|introductory|try-?out)\b[\s-]{1,2}(?:class|lesson|session)\b|probn[\p{L}]*\s+(?:lekcij|dolazak|posjet)/iu,
+    examples: [
+      'taster class',
+      'a free taster session',
+      'your intro lesson',
+      'an introductory class',
+      'try-out session',
+      'probna lekcija',
+      'probni dolazak',
+    ],
+    why:
+      'none of these were ever on the site, which is the point. A paraphrase of a ' +
+      'retired offer is the retired offer. Add a line here rather than widening a needle ' +
+      'until it reads prose — and note that it is why no comment under `src/` may spell ' +
+      'any of these: the scan reads prose, and a denial would be caught as a claim.',
   },
   {
     what: 'a reply promised inside a stated period, in Croatian',
@@ -323,11 +421,14 @@ export const RETIRED_CLAIMS: RetiredClaim[] = [
  * least one needle above, which is the assertion that makes the list teeth rather than
  * decoration.
  *
- * Grouped by the claim and by the commit it was read off, because there are two claims
+ * Grouped by the claim and by the commit it was read off, because there are three claims
  * now and a string proves nothing unless it is known to have been live. MUSE-71's are
  * read off `src/lib/nav.ts`, `src/components/{Home,Contact,Schedule}.astro` and
  * `content/seed.ndjson` at `6a67da9`; MUSE-80's off `src/lib/forms.ts` and
- * `content/seed.ndjson` at `ea55858`.
+ * `content/seed.ndjson` at `ea55858`; MUSE-136's off the same files plus
+ * `src/components/{Privacy,TrialForm}.astro` and
+ * `sanity/schemaTypes/documents/studio.ts` at `5c83a36`, which is the commit this ticket
+ * branched from.
  *
  * `/contact`'s description appears **twice**, which is not a duplicate. The MUSE-71
  * group's last pair is how it read at `6a67da9`, carrying *both* claims in one sentence —
@@ -340,7 +441,7 @@ export const WAS_PUBLISHED: string[] = [
   // src/lib/nav.ts — the header CTA and the mobile panel, every page.
   'Besplatni probni sat',
   'Free trial class',
-  // src/components/Home.astro — the `#trial` band's heading.
+  // src/components/Home.astro — the form band's heading.
   'Prvi sat je besplatan. Javi nam se i dogovorit ćemo termin.',
   'Your first class is free. Get in touch and we will find you a slot.',
   // src/components/Contact.astro — the hero eyebrow.
@@ -369,6 +470,42 @@ export const WAS_PUBLISHED: string[] = [
   // gone and the working day still there, which is the string this ticket exists for.
   'Prijavi se na probni sat bachate u Zagrebu. Ispuni obrazac ili nam piši — javljamo se u roku od jednog radnog dana.',
   'Sign up for a bachata trial class in Zagreb. Fill in the form or write to us — we answer within one working day.',
+
+  /* MUSE-136 — the class itself. Read off `5c83a36`, after both earlier tickets had
+     taken their modifier off it and left the noun. */
+  // src/lib/nav.ts — the header pill and the mobile panel, every page, both locales.
+  'Probni sat',
+  'Trial class',
+  // src/components/Home.astro — the form band's eyebrow.
+  'Dođi na probni sat',
+  'Come to a trial class',
+  // src/components/Contact.astro — the hero `<h1>`.
+  'Dođi na probni sat',
+  'Come to a trial class',
+  // src/components/Schedule.astro — the closing CTA band, deleted with the band.
+  'Dođi na probni sat.',
+  'Come to a trial class.',
+  // src/lib/forms.ts — the form's `aria-label` and the confirmation body.
+  'Prijava za probni sat',
+  'Trial class request',
+  'Javljamo se s terminom za probni sat. Ako ne vidiš naš odgovor, provjeri spam mapu.',
+  'We reply with a slot for your trial class. If you do not see our answer, check your spam folder.',
+  // src/components/Privacy.astro — the two paragraphs naming the form.
+  'Jedini osobni podaci koje primamo su oni koje sama ili sam upišeš u obrazac za probni sat.',
+  'The only personal data we receive is what you type into the trial-class form.',
+  'Obrazac za probni sat traži ime, e-mail adresu i — ako ih želiš dati — broj telefona, razinu i poruku.',
+  // sanity/schemaTypes/documents/studio.ts — what Mina reads beside the level field.
+  'tako piše i na rasporedu i na obrascu za probni sat.',
+  // content/seed.ndjson — `page-home`, `page-contact` and `page-privacy`, so also three
+  // `<meta name="description">` tags, a `<title>` and six `llms.txt` lines.
+  'Plesni studio u Zagrebu. Bachata za odrasle — bez partnera, bez iskustva. Dođi na probni sat.',
+  'A dance studio in Zagreb. Bachata for adults — no partner, no experience needed. Come to a trial class.',
+  'Prijava za probni sat — Muse by Mina',
+  'Trial class sign-up — Muse by Mina',
+  'Prijavi se na probni sat bachate u Zagrebu. Javi nam se i dogovaramo termin koji ti odgovara.',
+  'Sign up for a bachata trial class in Zagreb. Get in touch and we will find a time that suits you.',
+  'Što obrazac za probni sat prikuplja, zašto, kome se prenosi, koliko dugo ga čuvamo i koja su tvoja prava prema GDPR-u.',
+  'What the trial-class form collects, why, who it is passed to, how long we keep it and what your rights are under the GDPR.',
 ];
 
 /**
@@ -383,9 +520,9 @@ export const WAS_PUBLISHED: string[] = [
  */
 export const INNOCENT: string[] = [
   // src/lib/lang.ts — a URL fragment the redirect may reinterpret. The nearest miss in the
-  // tree: `#trial` and "free" sit four words apart on one line, and the backtick closing the
-  // fragment is what the needle's word-gap refuses to cross.
-  '`/MuseByMina/#trial` that the homepage redirect was free to reinterpret.',
+  // tree: the fragment and "free" sit four words apart on one line, and the backtick closing
+  // the fragment is what the needle's word-gap refuses to cross.
+  '`/MuseByMina/#enquiry` that the homepage redirect was free to reinterpret.',
   // src/lib/rebuild.ts — GitHub Actions minutes.
   'Actions minutes are free on a public repository',
   // src/lib/forms.ts — the cost of changing a wire format.

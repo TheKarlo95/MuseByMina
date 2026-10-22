@@ -1,6 +1,5 @@
 ---
-import { localeUrl, type Locale } from '../lib/i18n';
-import { CTA } from '../lib/nav';
+import { type Locale } from '../lib/i18n';
 import { addressLines, getSiteSettings } from '../lib/sanity';
 import {
   classCount,
@@ -110,10 +109,6 @@ const t = {
     time: 'Vrijeme',
     gridCaption: 'Tjedni raspored — dani u stupcima, vrijeme u redovima.',
     empty: 'Trenutno nema objavljenih termina.',
-    trialEyebrow: 'Prvi sat',
-    // MUSE-71: this heading priced the first class at nothing, which the studio does not
-    // do. The brief's own model sentence (§1) is the invitation without the claim.
-    trialLede: 'Dođi na probni sat.',
   },
   en: {
     eyebrow: `Schedule · ${street}`,
@@ -127,8 +122,6 @@ const t = {
     time: 'Time',
     gridCaption: 'Weekly schedule — days in columns, times in rows.',
     empty: 'No classes are published right now.',
-    trialEyebrow: 'First class',
-    trialLede: 'Come to a trial class.',
   },
 }[locale];
 
@@ -254,14 +247,6 @@ const rows = timeRows(entries);
   </div>
 </section>
 
-<section class="section">
-  <div class="wrap">
-    <p class="eyebrow">{t.trialEyebrow}</p>
-    <h2 class="displayM">{t.trialLede}</h2>
-    <a class="btn btnPrimary" href={localeUrl(CTA.route, locale)}>{CTA.label[locale]}</a>
-  </div>
-</section>
-
 <style>
   .srOnly {
     position: absolute;
@@ -301,15 +286,6 @@ const rows = timeRows(entries);
     }
   }
 
-  .section {
-    padding: var(--space-8) var(--space-5);
-  }
-  @media (min-width: 768px) {
-    .section {
-      padding: var(--space-10) var(--space-7);
-    }
-  }
-
   .wrap {
     max-width: 1280px;
     margin-inline: auto;
@@ -338,16 +314,6 @@ const rows = timeRows(entries);
     text-wrap: balance;
     margin: var(--space-4) 0 0;
   }
-  .displayM {
-    font-family: var(--font-display);
-    font-weight: 400;
-    font-size: clamp(2.125rem, 5vw, 3.75rem);
-    line-height: 1.05;
-    letter-spacing: -0.01em;
-    text-wrap: balance;
-    margin: var(--space-4) 0 0;
-  }
-
   .lede {
     font-size: 1.125rem;
     line-height: 1.6;
@@ -555,36 +521,4 @@ const rows = timeRows(entries);
     color: var(--text-muted);
   }
 
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 48px;
-    margin-top: var(--space-6);
-    padding-inline: var(--space-6);
-    border-radius: var(--radius-full);
-    border: 1px solid transparent;
-    font-family: var(--font-label);
-    font-size: 0.8125rem;
-    letter-spacing: 0.28em;
-    line-height: 1.4;
-    text-transform: uppercase;
-    text-decoration: none;
-    transition:
-      transform var(--dur-fast) var(--ease),
-      filter var(--dur-fast) var(--ease);
-  }
-  @media (min-width: 768px) {
-    .btn {
-      min-height: 56px;
-    }
-  }
-  .btn:hover {
-    transform: translateY(-1px);
-    filter: brightness(1.06);
-  }
-  .btnPrimary {
-    background: var(--btn-bg);
-    color: var(--btn-fg);
-  }
 </style>
