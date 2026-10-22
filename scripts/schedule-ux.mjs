@@ -14,8 +14,15 @@ import { openSiteOrExit } from './dist-origin.mjs';
  * built HTML. Three of the criteria cannot be checked that way at all:
  *
  *   AC1 / AC2  which view a given viewport *shows* is a media query decision
- *   AC4        the empty state only appears once a filter has been clicked
  *   AC6        "operable by keyboard alone" means real Tab and Enter presses
+ *
+ * AC4 was the third, "the empty state only appears once a filter has been clicked", and
+ * it is gone with the filter (MUSE-135). Two consequences for this file. The page now
+ * ships **no script of its own**, so everything measured below is the browser's own
+ * behaviour — a `<details>` and two media queries — and nothing here can be broken by a
+ * component's JavaScript failing to run. And the empty state it drove is now a build-time
+ * state of the data, which needs no browser: `test/schedule.test.ts` renders the component
+ * with an empty timetable instead.
  *
  * Same shape and conventions as `scripts/a11y.mjs`: prints one line per check and
  * exits non-zero on the first failure count above zero, and gets its server from
@@ -26,15 +33,10 @@ import { openSiteOrExit } from './dist-origin.mjs';
  *   node scripts/schedule-ux.mjs
  */
 
-/** The schedule in both locales, with the copy each one must show. */
+/** The schedule in both locales. */
 const PAGES = [
-  { locale: 'hr', route: '/schedule', empty: 'Nema termina za odabrani filter.', one: '1 termin' },
-  {
-    locale: 'en',
-    route: '/en/schedule',
-    empty: 'No classes match the selected filter.',
-    one: '1 class',
-  },
+  { locale: 'hr', route: '/schedule' },
+  { locale: 'en', route: '/en/schedule' },
 ];
 
 /** The breakpoint the ticket names, checked on both sides of it. */
@@ -115,7 +117,7 @@ async function open(route, { viewport, colorScheme = 'dark' }) {
  * geometry from its last layout — so every row of a closed day still reports a
  * client rect, and a rect-based check silently passes on a schedule that is not
  * on screen at all. `checkVisibility()` answers the question being asked, and
- * covers `display: none` (the two layouts, and anything the filter hides) too.
+ * covers `display: none`, which is how the two layouts take turns.
  *
  * Which of the two layouts the browser is actually painting:
  */
@@ -130,88 +132,6 @@ async function paintedSlots(page) {
   return page.$$eval('[data-slot]', (els) =>
     els.filter((el) => el.checkVisibility()).map((el) => el.dataset.level),
   );
-}
-
-/**
- * Every level the page offers a chip for, and every level the data actually holds.
- *
- * Read off the page rather than hardcoded, because the data is CMS content since MUSE-36
- * and this script must keep working when Mina changes it.
- */
-async function levels(page) {
-  return page.evaluate(() => ({
-    offered: [...document.querySelectorAll('[data-filter="level"]')]
-      .map((el) => el.dataset.value)
-      .filter((value) => value !== 'all'),
-    taught: [
-      ...new Set([...document.querySelectorAll('[data-slot]')].map((el) => el.dataset.level)),
-    ],
-  }));
-}
-
-/**
- * A level that is taught on some days but not on all of them, read off the accordion.
- *
- * **What replaced `emptyFilterPair`** (MUSE-36). That looked for a level+style pair the
- * data did not contain, which was the reachable empty state while there were three styles
- * and thirteen classes. Styles are gone and there is one filter dimension, so the state a
- * filter reaches from today's data is the grid's **empty cell**: four levels across two
- * days is eight combinations and four classes, so selecting one level leaves the other
- * day's column with nothing in it.
- *
- * Each `<details data-day-group>` is one day, so a slot's day is its enclosing group —
- * the same information the accordion's own markup carries.
- */
-async function levelWithAnEmptyDay(page) {
-  return page.evaluate(() => {
-    const days = [
-      ...new Set(
-        [...document.querySelectorAll('[data-day-group]')].map((el) => el.dataset.dayGroup),
-      ),
-    ];
-    const taught = new Set(
-      [...document.querySelectorAll('[data-day-group] [data-slot]')].map(
-        (el) => `${el.dataset.level}|${el.closest('[data-day-group]').dataset.dayGroup}`,
-      ),
-    );
-    const offered = [...document.querySelectorAll('[data-filter="level"]')]
-      .map((el) => el.dataset.value)
-      .filter((value) => value !== 'all');
-
-    for (const level of offered) {
-      const empty = days.filter((day) => !taught.has(`${level}|${day}`));
-      if (empty.length > 0 && empty.length < days.length) return { level, empty, days };
-    }
-    return undefined;
-  });
-}
-
-/**
- * Levels the page offers a chip for and teaches in no slot at all.
- *
- * This is the state that reaches `[data-empty]`: the chips come from `LEVELS`, not from
- * the data, so a class paused for the summer (`active: false`) leaves a chip with nothing
- * behind it. Today every level is taught, so the list is empty and the check below is
- * skipped rather than faked — and when Mina does pause one, it starts running.
- */
-async function levelsWithNoClass(page) {
-  const { offered, taught } = await levels(page);
-  return offered.filter((level) => !taught.includes(level));
-}
-
-/** Grid cells the browser is painting with nothing visible in them. */
-async function emptyGridCells(page) {
-  return page.$$eval('[data-view="grid"] td', (els) =>
-    els.filter(
-      (el) =>
-        el.checkVisibility() &&
-        [...el.querySelectorAll('[data-slot]')].every((slot) => !slot.checkVisibility()),
-    ).length,
-  );
-}
-
-async function selectFilter(page, kind, value) {
-  await page.click(`[data-filter="${kind}"][data-value="${value}"]`);
 }
 
 // ---------------------------------------------------------------------------
@@ -353,116 +273,6 @@ for (const { locale, route } of PAGES) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// AC4 — what the level filter empties, in both layouts.
-//
-// Two states, and MUSE-36 changed which of them today's data can reach:
-//
-//   the grid's empty cell   selecting a level the other day does not teach. Reachable
-//                           now — four levels across two days.
-//   `[data-empty]`          selecting a level with no class at all. The chips come from
-//                           `LEVELS` rather than from the data, so this is what a summer
-//                           pause produces; every level is taught today, so the check
-//                           runs only when the dataset offers the case.
-// ---------------------------------------------------------------------------
-for (const { locale, route, empty, one } of PAGES) {
-  for (const [name, viewport] of [
-    ['390px', MOBILE],
-    ['1280px', DESKTOP],
-  ]) {
-    const { close, page } = await open(route, { viewport });
-    const label = `AC4 ${locale} ${name.padEnd(6)}`;
-
-    check(
-      `${label} the filter bar is there once scripting runs`,
-      await page.isVisible('[data-filters]'),
-    );
-    check(`${label} the empty state is hidden at rest`, !(await page.isVisible('[data-empty]')));
-
-    const { offered, taught } = await levels(page);
-    check(
-      `${label} offers a chip for every level, not only the ones taught this term`,
-      offered.length >= taught.length && taught.every((level) => offered.includes(level)),
-      `offered [${offered.join(', ')}] taught [${taught.join(', ')}]`,
-    );
-
-    const sparse = await levelWithAnEmptyDay(page);
-    check(`${label} finds a level that is not taught on every day`, Boolean(sparse));
-
-    if (sparse) {
-      await selectFilter(page, 'level', sparse.level);
-
-      const after = await paintedSlots(page);
-      check(
-        `${label} keeps only the ${sparse.level} classes`,
-        after.length > 0 && after.every((level) => level === sparse.level),
-        `painted [${[...new Set(after)].join(', ')}]`,
-      );
-      check(
-        `${label} and the empty state stays hidden — classes remain`,
-        !(await page.isVisible('[data-empty]')),
-      );
-
-      if (viewport === DESKTOP) {
-        // The grid keeps a column per day, so the day this level is not taught on is a
-        // painted cell with nothing in it. That is the empty cell MUSE-36's test asks for.
-        const blanks = await emptyGridCells(page);
-        check(
-          `${label} paints an empty grid cell for ${sparse.empty.join(', ')}`,
-          blanks >= sparse.empty.length,
-          `${blanks} empty cell(s), expected at least ${sparse.empty.length}`,
-        );
-      }
-
-      // Back to all levels: everything comes back.
-      await selectFilter(page, 'level', 'all');
-      check(
-        `${label} clearing the filter brings every class back`,
-        (await paintedSlots(page)).length > after.length,
-      );
-
-      // The day count is recomputed, which is where the ported Croatian pluralisation has
-      // to hold: a filtered day with one class reads `1 termin`, not `1 termina`.
-      if (viewport === MOBILE) {
-        await selectFilter(page, 'level', sparse.level);
-        const counts = await page.$$eval('[data-count]', (els) =>
-          els.filter((el) => el.checkVisibility()).map((el) => el.textContent.trim()),
-        );
-        check(
-          `${label} recounts a filtered day as "${one}"`,
-          counts.includes(one),
-          `counts [${counts.join(', ')}]`,
-        );
-        await selectFilter(page, 'level', 'all');
-      }
-    }
-
-    // The empty state itself, when the data offers a level with nothing behind its chip.
-    const unused = await levelsWithNoClass(page);
-    if (unused.length === 0) {
-      console.log(
-        `· ${label} every level is taught, so no chip can empty the schedule — ` +
-          `[data-empty] is the summer-pause state and is not reachable today`,
-      );
-    } else {
-      await selectFilter(page, 'level', unused[0]);
-      const shown = (await page.textContent('[data-empty]'))?.trim();
-      check(
-        `${label} ${unused[0]} shows the empty state, worded exactly`,
-        (await page.isVisible('[data-empty]')) && shown === empty,
-        `visible=${await page.isVisible('[data-empty]')} text="${shown}"`,
-      );
-      check(
-        `${label} and paints no classes at all`,
-        (await paintedSlots(page)).length === 0,
-        `${(await paintedSlots(page)).length} still painted`,
-      );
-    }
-
-    await close();
-  }
-}
-
 await browser.close();
 await site.close();
 
@@ -470,4 +280,4 @@ if (failures) {
   console.log(`\n${failures} failure(s)`);
   process.exit(1);
 }
-console.log('\nSchedule: responsive shift, keyboard operation and filtering all verified.');
+console.log('\nSchedule: responsive shift and keyboard operation both verified.');

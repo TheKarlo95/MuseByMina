@@ -24,10 +24,11 @@ import { buildSite, PAGES_DEPLOY, type Build } from './helpers/build';
  *   - a component `<script>` **is** bundled and shipped.
  *
  * Inline `<script>` blocks are therefore expected and fine — `src/lib/theme.ts` has to be
- * inline to stamp the theme before first paint (CLAUDE.md), and the schedule filters and
- * the trial form are inline too. A script *file* is a different claim: it means Astro
- * decided a bundle was big enough to externalise, which on this site can only mean
- * something arrived that does not belong.
+ * inline to stamp the theme before first paint (CLAUDE.md), and the trial form and the
+ * hero's video control are inline too. `/schedule` used to be on that list; MUSE-135
+ * removed its level filter, which was the only thing that script did. A script *file* is
+ * a different claim: it means Astro decided a bundle was big enough to externalise, which
+ * on this site can only mean something arrived that does not belong.
  */
 describe('the built site ships no JavaScript files and no CMS client', () => {
   let build: Build;
