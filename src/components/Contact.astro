@@ -32,7 +32,7 @@ import { localeUrl, type Locale } from '../lib/i18n';
 import { STUDIO } from '../lib/nav';
 
 /**
- * `/contact` — the same trial form as `/#trial`, given a page of its own.
+ * `/contact` — the same enquiry form as `/#enquiry`, given a page of its own.
  *
  * It exists because the nav's Contact entry has pointed at a 404 since the rebuild, and
  * because a link someone can send a friend ("prijavi se ovdje") should not be a fragment
@@ -113,10 +113,12 @@ const settings = await getSiteSettings();
  */
 const t = {
   hr: {
-    // MUSE-71: the eyebrow used to price the first class at nothing. It names the
-    // subject of the hero instead, which is what every other eyebrow on the site does.
-    eyebrow: 'Prvi sat',
-    h1: 'Dođi na probni sat',
+    // MUSE-71 cut a price out of this eyebrow — a first class at nothing — and left it
+    // naming the class. MUSE-136 found there is no such class: both the eyebrow and the
+    // heading invited somebody to an offer the studio does not make. They
+    // name what this page is for instead.
+    eyebrow: 'Kontakt',
+    h1: 'Javi nam se',
     lede: FORM_HAS_PROCESSOR
       ? 'Bez partnera, bez iskustva. Ispuni obrazac i javljamo se s terminom koji ti odgovara.'
       : 'Bez partnera, bez iskustva. Obrazac trenutačno ne možemo primiti, pa nam prijavu pošalji e-mailom na:',
@@ -128,8 +130,8 @@ const t = {
     schedule: 'Pogledaj raspored',
   },
   en: {
-    eyebrow: 'First class',
-    h1: 'Come to a trial class',
+    eyebrow: 'Contact',
+    h1: 'Get in touch',
     lede: FORM_HAS_PROCESSOR
       ? 'No partner, no experience. Fill in the form and we will come back with a time that suits you.'
       : 'No partner, no experience. We cannot receive the form at the moment, so send your request by email to:',

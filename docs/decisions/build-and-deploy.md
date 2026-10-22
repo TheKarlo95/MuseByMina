@@ -145,7 +145,7 @@ a successor only moves the staleness to the next close (MUSE-114).
   that finds no affordances passes.
 
   **The error page's monolingual chrome is deliberately not stamped.** Its logo, nav and
-  CTA have the identical exposure (`/` and `/#trial` land on the detecting route) and are
+  CTA have the identical exposure (`/` and `/#enquiry` land on the detecting route) and are
   not a language affordance: each is offered once with no counterpart, so following one
   asserts nothing about language, where the exits are a pair and pressing one is a choice.
   There is also no 404-only chrome — stamping it would stamp every Croatian page, which
@@ -153,7 +153,9 @@ a successor only moves the staleness to the next close (MUSE-114).
   the moment they clicked the logo, i.e. break the cohort MUSE-38 exists for. A pressed
   exit stores the language and a stored choice outranks the browser, so the fix governs the
   chrome from the first press anyway; `test/lang.test.ts` pins that composition and pins
-  `#trial` surviving the CTA's redirect in both directions (MUSE-10).
+  `#enquiry` surviving the CTA's redirect in both directions (MUSE-10). The fragment was
+  `#trial` until MUSE-136 retired the class it named; what MUSE-10 is about is that a
+  fragment survives a redirect, and that is unchanged.
 
   The **footer** marks the current route with `aria-current="page"`, because `/privacy/` is
   reachable only from there (the nav omits it on purpose, MUSE-7) and nothing else on the

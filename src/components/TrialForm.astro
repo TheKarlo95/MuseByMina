@@ -18,8 +18,14 @@ import { localeUrl, type Locale } from '../lib/i18n';
 import { getSiteSettings } from '../lib/sanity';
 
 /**
- * The trial-class form — the site's one conversion path, rendered identically at
- * `/#trial` and on `/contact` so the two cannot drift.
+ * The enquiry form — the site's one conversion path, rendered identically at `/#enquiry`
+ * and on `/contact` so the two cannot drift.
+ *
+ * It was named for an offer the studio does not make, which MUSE-136 retired
+ * on 2026-10-22. **The file keeps its name and so do the field ids** (`trial-name`,
+ * `data-trial-form`): renaming the component moves its `<link>` in `<head>`, which
+ * `test/cascade.test.ts` watches against `dist`, and an element id is not a sentence
+ * addressed to anybody. What went is every string a visitor reads.
  *
  * Shape and behaviour come from design system §7.2 and §11.5: a visible label above
  * every field, transparent fields with a bottom rule only, and errors that carry an icon

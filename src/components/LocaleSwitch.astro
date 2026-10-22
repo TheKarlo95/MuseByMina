@@ -87,7 +87,7 @@ const label = locale === 'hr' ? 'Jezik' : 'Language';
    *
    * That argument applies just as much to *recording* the choice, which is what MUSE-33
    * found still sitting in the click handler: a middle-clicked HR link opened a new tab at
-   * a bare `/MuseByMina/#trial` with nothing stored, and the homepage redirect bounced a
+   * a bare `/MuseByMina/#enquiry` with nothing stored, and the homepage redirect bounced a
    * non-Croatian browser to `/en/`. So the locale goes into the href as `?lang=`, where
    * every path that follows the link carries it, and `src/lib/lang.ts` persists it on
    * arrival. There is no click handler to miss, and the URL a visitor copies out of the
@@ -105,7 +105,7 @@ const label = locale === 'hr' ? 'Jezik' : 'Language';
 
   sync();
   // The fragment is live: a visitor who lands on `/en/` and then clicks the header CTA to
-  // `#trial` has changed where the switcher should take them, without any navigation.
+  // `#enquiry` has changed where the switcher should take them, without any navigation.
   addEventListener('hashchange', sync);
   addEventListener('popstate', sync);
 

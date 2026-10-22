@@ -1786,13 +1786,13 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
       locale: 'hr',
       route: '/privacy',
       build: 'unconfigured',
-      text: 'Što obrazac za probni sat prikuplja, zašto, kome se prenosi',
+      text: 'Što obrazac za upit prikuplja, zašto, kome se prenosi',
     },
     {
       locale: 'en',
       route: '/en/privacy',
       build: 'unconfigured',
-      text: 'What the trial-class form collects, why, who it is passed to',
+      text: 'What the enquiry form collects, why, who it is passed to',
     },
     // MUSE-109. „upišeš u obrazac" is what the visitor does to the form, not what the
     // page tells them to do with it; it is also the reason `upiš` is not a verb above.
@@ -1800,13 +1800,13 @@ describe('MUSE-84: the contact copy describes the form that was actually built',
       locale: 'hr',
       route: '/privacy',
       build: 'unconfigured',
-      text: 'upišeš u obrazac za probni sat',
+      text: 'upišeš u obrazac za upit',
     },
     {
       locale: 'en',
       route: '/en/privacy',
       build: 'unconfigured',
-      text: 'what you type into the trial-class form',
+      text: 'what you type into the enquiry form',
     },
     // MUSE-109. The configured build's failure copy: „your answers are still in the form"
     // is a statement about where the input went, and „obrascu" is now inside the pattern.

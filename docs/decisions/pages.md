@@ -401,6 +401,50 @@ a successor only moves the staleness to the next close (MUSE-114).
   risk, now reachable from the CMS rather than only in principle, and it wants its own
   ticket.
 
+- **There is no trial class, and no surface offers one** (MUSE-136). The owner said it
+  plainly on 2026-10-22: *there is no probni sat concept at all*. „Probni sat" / "Trial
+  class" had been the site's primary call to action since the foundation commit — the
+  header pill on every page in both locales, the homepage band's eyebrow, `/contact`'s
+  `<h1>`, `/schedule`'s closing band, the form's own `aria-label` and confirmation line,
+  two paragraphs of `/privacy`, a Studio field description Mina reads, and three `page`
+  descriptions, so also three `<meta name="description">` tags, a `<title>` and six
+  `llms.txt` lines.
+
+  **Read this beside the two bullets below before adding a fourth needle to the guard.**
+  MUSE-71 retired what the class *cost* and MUSE-80 retired how fast the studio would
+  *answer* about it. Each ticket corrected the modifier it was shown. Neither asked
+  whether the noun existed, and `/contact`'s description needed **four** tickets for one
+  sentence because of it. A guard around the adjectives of a thing that is not offered is
+  a guard around a hole.
+
+  What replaced it is what the studio actually does: you get in touch, a time is arranged.
+  „Javi nam se i dogovorit ćemo termin." was already the homepage band's second line, so
+  the vocabulary is the site's own. **The form stays** — same fields, same gating, same
+  `FORM_HAS_PROCESSOR` behaviour — because that costs nothing in function:
+  `PUBLIC_FORM_ENDPOINT` has never been set, so nothing has ever been transmitted and
+  every path through it already offers the studio inbox (MUSE-110, MUSE-117). What it is
+  called changed; what it does did not. `TrialForm.astro` and the `trial-` field ids keep
+  their names — renaming the component moves its `<link>` in `<head>`, which
+  `test/cascade.test.ts` watches against `dist`, and an element id is not a sentence
+  addressed to anybody.
+
+  **The fragment moved with it**, `/#trial` → `/#enquiry`: it was in every CTA href on
+  every page and in any URL a visitor shared. MUSE-10's guarantee is that a fragment
+  survives the homepage redirect, which is unaffected.
+
+  **The brand brief disagrees and is not being corrected.** Its §1 model sentence is an
+  invitation to this class, so the human-authored spec and the owner contradict each other
+  about whether the studio runs one — the same shape as the three style names MUSE-36
+  retired while the brief still teaches them. The owner's word is what ships. Ask Mina
+  before touching the brief; do not restore the sentence from it.
+
+  The guard is three needles in `test/helpers/offer-claims.ts` — the Croatian noun, the
+  English one, and the paraphrases nobody has written yet — and it is why **no comment
+  under `src/` or `sanity/` may spell any of them**. That scan reads prose, so a denial
+  would be caught as a claim; the retired wording is quoted in the test helper and
+  described everywhere else. That is MUSE-42's ruling, and this is the third ticket to
+  apply it.
+
 - **The site makes no claim about what a first class costs** (MUSE-71). „Besplatni probni
   sat" / "Free trial class" was the header CTA on all fourteen pages in both locales, and
   the promise was repeated in the homepage `#trial` band, `/contact`'s eyebrow,

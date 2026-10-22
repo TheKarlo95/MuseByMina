@@ -6,7 +6,7 @@
  */
 interface ImportMetaEnv {
   /**
-   * Where the trial-class form POSTs — `https://submit-form.com/<form-id>` (Formspark).
+   * Where the enquiry form POSTs — `https://submit-form.com/<form-id>` (Formspark).
    *
    * The form id travels inside every page a visitor downloads, so it is configuration
    * rather than a secret and `PUBLIC_` is the correct prefix. Unset, the form still

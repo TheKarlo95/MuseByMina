@@ -259,7 +259,7 @@ export const danceClass = defineType({
       type: 'string',
       description:
         'Beginner, Improver, Intermediate ili Advanced. Namjerno engleski na oba ' +
-        'jezika — tako piše i na rasporedu i na obrascu za probni sat.',
+        'jezika — tako piše i na rasporedu i na obrascu za upit.',
       options: { list: [...LEVEL_OPTIONS], layout: 'radio' },
       validation: (Rule) => Rule.required().error('Razina je obavezna.'),
     }),

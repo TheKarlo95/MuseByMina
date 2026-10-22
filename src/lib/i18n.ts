@@ -42,8 +42,8 @@ export function routeKey(pathname: string): string {
  * and every nav link get theirs (MUSE-9). `trailingSlash: 'always'` in
  * `astro.config.mjs` is the other half; changing one without the other reopens the bug.
  *
- * A `#fragment` or `?query` is kept after the slash, not appended to it: `/#trial` is
- * `/MuseByMina/#trial`, never `/MuseByMina/#trial/`.
+ * A `#fragment` or `?query` is kept after the slash, not appended to it: `/#enquiry` is
+ * `/MuseByMina/#enquiry`, never `/MuseByMina/#enquiry/`.
  */
 export function localeUrl(route: string, locale: Locale): string {
   const mark = route.search(/[#?]/);

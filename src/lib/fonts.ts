@@ -18,8 +18,11 @@
  * `unicode-range` and **every Croatian diacritic — `č ć ž š đ` — lives in `latin-ext`**.
  * With `font-display: swap` on all six faces, the latin half of a word paints as soon as
  * `…-latin` arrives while the diacritic paints from the system fallback until `…-latin-ext`
- * catches up: „Do**đ**i na probni sat" at 96px with a heavy upright slab mid-word, and
- * „Nau**č**i bachatu u Zagrebu" at 136px, the largest text on the site. The second is
+ * catches up: „Nau**č**i bachatu u Zagrebu" at 136px, the largest text on the site, and
+ * the homepage form band's „dogovorit **ć**emo termin" beneath it. (The band's heading was
+ * a different sentence when this was measured, carrying a „đ" rather than a „ć" —
+ * MUSE-136 retired it. The demonstration is the subset, not the letter: both are
+ * `latin-ext`, and the page still sets one in Cormorant at display size.) The second is
  * flatter and everywhere: `jost-300-500-latin` was preloaded nowhere, and Jost is the label
  * face — masthead, buttons, form labels, above the fold on every page in both locales.
  *
@@ -57,12 +60,15 @@
  * There was one, per route, for Cormorant's latin-ext. **Two pull requests merged on the
  * day it was written and each invalidated it**, in two different ways:
  *
- *   - **MUSE-71** retired the offer claim `Schedule.astro`'s `trialLede` used to make
- *     and replaced it with **„Dođi na probni sat."**, rendered `<h2 class="displayM">`.
- *     The old wording had no diacritic in it; `/schedule` was listed here as having
- *     plain-latin display copy, and now it sets a `đ` in Cormorant. (The retired string
- *     is deliberately not quoted — `test/offerclaims.test.ts` scans prose too, and it is
- *     right to.)
+ *   - **MUSE-71** retired the offer claim `Schedule.astro`'s CTA band used to make and
+ *     replaced it with a sentence carrying a `đ`, rendered `<h2 class="displayM">`. The
+ *     old wording had no diacritic in it; `/schedule` was listed here as having
+ *     plain-latin display copy, and then it set one in Cormorant. (Neither string is
+ *     quoted — `test/offerclaims.test.ts` scans prose too, and it is right to.)
+ *     **MUSE-136 then deleted that band**, so the route has been on both sides of this
+ *     list inside one project. Which is the argument, twice over: a hand-written "does
+ *     not need" is invalidated by a copy edit, and nobody editing copy reads a font
+ *     table.
  *   - **MUSE-72** corrected the regulator's address to **„Ulica Metela Ožegovića 16"**.
  *     A street name is a proper noun, so it is not translated, and it appears verbatim in
  *     the English privacy notice — making `/en/privacy` the first English page in the

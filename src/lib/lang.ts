@@ -36,7 +36,7 @@ export const LANG_PARAM = 'lang';
  *     moved the carry out of the click handler and into the href precisely because
  *     middle-click, "open in new tab" and "copy link address" fire no `click` event — and
  *     then left the persistence behind in the handler, so those paths produced a bare
- *     `/MuseByMina/#trial` that the homepage redirect was free to reinterpret. A link that
+ *     `/MuseByMina/#enquiry` that the homepage redirect was free to reinterpret. A link that
  *     names the language cannot be reinterpreted, by a new tab or by a stranger.
  *
  * Everything that is not `lang` is left byte-identical. The query is spliced as a string
@@ -215,7 +215,7 @@ export interface LangRouting {
  * ## Carrying, and why this is hand-written
  *
  * `?query` and `#fragment` are carried across verbatim. Every CTA on the site points at
- * `/#trial` (`src/lib/nav.ts`), so dropping the fragment landed exactly the visitors this
+ * `/#enquiry` (`src/lib/nav.ts`), so dropping the fragment landed exactly the visitors this
  * redirect exists for at the top of `/en/` instead of at the form (MUSE-10). The fragment
  * is never sent to the server, so there is nowhere else this can be fixed.
  *

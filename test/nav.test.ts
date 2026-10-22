@@ -39,7 +39,7 @@ import { ROUTES } from '../src/lib/pages';
  *     ones it does;
  *   - it cannot see the language switcher, whose hrefs are computed from the current
  *     pathname and are dead on the 404 page in both directions;
- *   - it cannot see the CTA (`/#trial`), the logo, or any href written inside a
+ *   - it cannot see the CTA (`/#enquiry`), the logo, or any href written inside a
  *     component;
  *   - it agrees with `nav.ts` by construction, so a route list that is wrong in the same
  *     way in two places passes;
@@ -157,7 +157,7 @@ const isAnchor = (ref: PageRef): boolean => ref.source.startsWith('<a href>');
  * a request, and `test/urls.test.ts`'s model of the host needs it — so this used to read
  * `/MuseByMina/?lang=hr` as the route `/?lang=hr`, in no locale, and the error page's two
  * exits stopped looking like links to the two homepages the moment MUSE-56 made them name
- * their language. The fragment goes with it for the same reason: `/#trial` is the
+ * their language. The fragment goes with it for the same reason: `/#enquiry` is the
  * homepage.
  */
 function addressOf(request: string): { locale: Locale; route: string } {

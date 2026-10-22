@@ -96,7 +96,7 @@ ROUTE=/schedule OUT=/tmp/muse-shots/schedule npm run shots   # reports h-overflo
 
 **`a11y` takes no route list**, and that is MUSE-55. It used to take `ROUTES`, defaulting
 to the two homepages, with a list in `ci.yml` that said "adding a page → add it" — so
-`/contact`'s trial form had axe coverage only because somebody remembered, and the error
+`/contact`'s form had axe coverage only because somebody remembered, and the error
 page had none at all and *could not*: `site.url('/404')` spells `/MuseByMina/404/`, which
 the host answers 404 for because it is not a directory, and the gate asserted 200 for
 every page. Both halves were right. So the set is now read off the build, and each page
@@ -180,8 +180,10 @@ Rules that are load-bearing rather than stylistic:
 - **Components reference a role token, never a brand colour.** Gold on cream is 2.02:1 and
   fails every threshold, which is why `--accent` exists: it *is* gold in dark and gold-deep
   in light. `npm run ds` fails the build on a violation.
-- **Cormorant never below 26px.** Below ~24px its `đ` crossbar disappears and the studio's
-  main call to action, *Dođi na probni sat*, renders as "Dodi".
+- **Cormorant never below 26px.** Below ~24px its `đ` crossbar disappears and *Dođi*
+  renders as "Dodi". That word was the site's main call to action until MUSE-136 retired
+  the class it invited people to; the letter did not go anywhere, and neither did the
+  floor.
 - **No drop shadows, in either theme.** Depth comes from surface value and hairlines.
 - Per-theme alpha values differ **on purpose** — `.56` passes on plum but fails AA on cream.
 
@@ -206,7 +208,7 @@ src/
                 sanity/ (the one read path: client, queries, decoders, fixture),
                 site.ts (deploy-root URLs),
                 schedule.ts (class model, locale wording, Croatian pluralisation)
-                forms.ts (trial-form fields, endpoint and HR/EN copy)
+                forms.ts (enquiry-form fields, endpoint and HR/EN copy)
   pages/        thin wrappers over components, one per locale
                 robots.txt.ts + llms.txt.ts; generated, not static
   styles/       globals.css → fonts.css + tokens.css + base.css
@@ -288,11 +290,16 @@ One caveat worth knowing: on the GitHub Pages project URL these land at
 the custom domain is live and `BASE=/`. Project Pages cannot serve the origin root at all —
 this is not something the build can fix.
 
-## The trial-class form
+## The enquiry form
 
 `src/components/TrialForm.astro` is the site's one conversion path. It renders in two
-places — the homepage `#trial` band and `/contact/` — from a single component, so the two
-cannot drift apart. Field list and copy live in `src/lib/forms.ts`.
+places — the homepage `#enquiry` band and `/contact/` — from a single component, so the
+two cannot drift apart. Field list and copy live in `src/lib/forms.ts`.
+
+It was the *trial-class* form until 2026-10-22, when the owner said the studio runs no
+such class (MUSE-136). The file and the field ids keep the old name: renaming the
+component moves its `<link>` in `<head>`, which `test/cascade.test.ts` watches against
+`dist`. Every string a visitor reads changed.
 
 There is no backend, so a submission has to go to a form service. **Nothing is configured
 today** — `PUBLIC_FORM_ENDPOINT` is unset, MUSE-12 is parked, and no message has ever been

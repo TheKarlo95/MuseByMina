@@ -108,10 +108,13 @@ const t = {
     teachers: 'Tko predaje',
     where: 'Gdje smo',
     openMaps: 'Otvori u Google Maps',
-    trial: 'Dođi na probni sat',
-    // MUSE-71 removed this sentence's first half, which priced the first class at
-    // nothing. The second half is the whole of what the studio has actually said.
-    trialLede: 'Javi nam se i dogovorit ćemo termin.',
+    // MUSE-136: the eyebrow invited the visitor to an offer the studio does not make,
+    // and the retired wording is quoted in `test/helpers/offer-claims.ts` rather than
+    // here. The second line was already the whole of what the studio has actually
+    // said — MUSE-71 cut that sentence's first half, which priced a first class at
+    // nothing — so the band leads with its subject, the way every other eyebrow here does.
+    enquiry: 'Kontakt',
+    enquiryLede: 'Javi nam se i dogovorit ćemo termin.',
     playVideo: 'Pokreni video',
     pauseVideo: 'Zaustavi video',
     doorNudge: { beginner: 'Počni ovdje.' },
@@ -138,8 +141,8 @@ const t = {
     teachers: 'Who teaches',
     where: 'Where we are',
     openMaps: 'Open in Google Maps',
-    trial: 'Come to a trial class',
-    trialLede: 'Get in touch and we will find you a slot.',
+    enquiry: 'Contact',
+    enquiryLede: 'Get in touch and we will find you a slot.',
     playVideo: 'Play the video',
     pauseVideo: 'Pause the video',
     doorNudge: { beginner: 'Start here.' },
@@ -458,11 +461,11 @@ const week = groupByDay(entries).flatMap((group) =>
   </div>
 </section>
 
-<section class="section invert" id="trial">
+<section class="section invert" id="enquiry">
   <div class="wrap">
     <div class="head">
-      <p class="eyebrow">{t.trial}</p>
-      <h2 class="displayM">{t.trialLede}</h2>
+      <p class="eyebrow">{t.enquiry}</p>
+      <h2 class="displayM">{t.enquiryLede}</h2>
     </div>
     {/*
       MUSE-7: the form itself, not a "coming soon" email address. Every CTA on the site

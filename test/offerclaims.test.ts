@@ -110,7 +110,7 @@ function offencesIn(files: { file: string; text: string }[]): Offence[] {
   return files.flatMap(({ file, text }) => claimsIn(text, file));
 }
 
-describe('MUSE-71 and MUSE-80: the retired claims, as a rule with teeth', () => {
+describe('MUSE-71, MUSE-80 and MUSE-136: the retired claims, as a rule with teeth', () => {
   it('catches every string the site actually published', () => {
     // The teeth. Without this the needles could be anything at all — including nothing,
     // which is how an empty guard passes for ever.
@@ -145,7 +145,7 @@ describe('MUSE-71 and MUSE-80: the retired claims, as a rule with teeth', () => 
     // Both retired claims are actually in here. Deleting a needle is allowed — with who
     // said so — but deleting the last needle of a ticket silently retires the guard.
     expect(new Set(RETIRED_CLAIMS.map((claim) => claim.ticket))).toEqual(
-      new Set(['MUSE-71', 'MUSE-80']),
+      new Set(['MUSE-71', 'MUSE-80', 'MUSE-136']),
     );
   });
 
@@ -192,7 +192,7 @@ describe('MUSE-71 and MUSE-80: the retired claims, as a rule with teeth', () => 
   });
 });
 
-describe('MUSE-71 and MUSE-80: nothing claims a free class or a reply time', () => {
+describe('MUSE-71, MUSE-80 and MUSE-136: no free class, no reply time, no trial class', () => {
   const files = scanned();
 
   it('reads the whole of `src/`, `sanity/` and the seed', () => {
