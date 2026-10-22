@@ -756,6 +756,34 @@ a successor only moves the staleness to the next close (MUSE-114).
     spec disagree about the same fact. The site claims neither, which is the safe state,
     but one of the two documents is misleading the next author. Ask Mina; do not quietly
     correct either one.
+  - **There is no level picker, and `/schedule` ships no script** (MUSE-135). A filter bar
+    stood above the schedule until 2026-10-22 — an "all" chip plus one per entry in
+    `LEVELS`, five buttons per page in both locales, revealed by the component's own
+    `<script>` and keyed on `data-filter` / `data-value`. The owner removed it: it narrowed
+    **four classes across two evenings**. Design system §7.5 had named two dimensions,
+    style and level; MUSE-36 took the style half when `STYLES` went, because it filtered an
+    attribute no class carries, and this took the other.
+
+    Three things followed, and the second is the one worth keeping. The script existed for
+    the filter alone, so the page now ships **no JavaScript of its own** and „operable by
+    keyboard alone" is the browser's `<details>` rather than something this repository
+    maintains — `test/schedule.test.ts` holds that as a property, by comparing the page's
+    script tags against a page that has no component script at all. `scripts/schedule-ux.mjs`
+    lost its AC4 section and five helpers with it. And the empty state was re-grounded: it
+    read „Nema termina za odabrani filter.", which after the removal described a control
+    that is not there, so it is now a sentence about the **dataset** — rendered when
+    `groupByDay` returns nothing, which is a term between schedules or every slot
+    `active: false`. That state is unreachable from today's seed, so it is asserted by
+    rendering the component directly with an empty timetable, the way the form's copy suite
+    does; the built pages are asserted not to show it.
+
+    **A filter coming back means a script coming back.** Weigh it against the number of
+    rows on the page first, and against what the browser already does for free. One claim
+    that did *not* survive the measurement: MUSE-36 had left an assertion that the grid
+    "leaves a cell empty, so the empty cell is a rendered state". The grid's cells are
+    day × time, and the seeded timetable fills all four — the empty cell was only ever
+    reachable through the filter, and nothing asserts one now.
+
   - **`instructors` is an array** on `class` and on `scheduleSlot`, and the override
     *replaces* rather than adds. Not for today's data — for lady styling, a confirmed
     coming class that Mina teaches alone. `formatNames` in `src/lib/schedule.ts` joins

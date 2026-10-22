@@ -2,8 +2,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { experimental_AstroContainer as AstroContainer } from 'astro/container';
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import Schedule from '../src/components/Schedule.astro';
 import {
   assetFile,
   buildSite,
@@ -53,16 +55,22 @@ const REAL_TIMETABLE = [
  *                         from, the copy, the locale-correct day names and times,
  *                         the prerequisite wording, the empty-state string.
  *   schedule-ux.mjs     — anything that needs a layout engine or an input device:
- *                         which view a 390px / 1280px viewport actually *shows*,
- *                         keyboard operation of the accordion, and the filter
- *                         producing the empty state. A regex cannot see any of it.
+ *                         which view a 390px / 1280px viewport actually *shows*, and
+ *                         keyboard operation of the accordion. A regex cannot see
+ *                         either. It no longer drives a filter, because there is
+ *                         none (MUSE-135) — and with the filter went the only script
+ *                         this page shipped, so what that file measures now is the
+ *                         browser's own `<details>` behaviour.
  *
  * ---------------------------------------------------------------------------
  * The structural contract asserted below, stated up front rather than inferred
  * from whatever markup the component happens to emit:
  *
- *   - each class is one element carrying `data-slot`, plus `data-level` and
- *     `data-style` so a client-side filter has something to act on;
+ *   - each class is one element carrying `data-slot` and `data-level`. Both outlived
+ *     the client-side filter they were cut for (MUSE-135): `data-level` is what pairs
+ *     a slot with the level name beside it, which is the MUSE-11 contract, and
+ *     `data-slot` is how both this file and `scripts/schedule-ux.mjs` find a class in
+ *     either layout. There is no `data-style` — MUSE-36 deleted the dimension;
  *   - the accordion is native `<details>`/`<summary>`, one per day — which is
  *     also what makes AC6's "keyboard alone" true with no JavaScript at all;
  *   - the desktop view is a `<table>` whose `<th scope="col">` are day names and
@@ -135,10 +143,18 @@ const LEVEL_KEYS = ['beginner', 'improver', 'intermediate', 'advanced'] as const
 type LevelKey = (typeof LEVEL_KEYS)[number];
 type DayKey = keyof (typeof DAY_NAME)['hr'];
 
-/** AC4, verbatim from the ticket and from design system §7.2. */
+/**
+ * The empty state, which is now about the **dataset** and not about a filter (MUSE-135).
+ *
+ * MUSE-6's AC4 and design system §7.2 both specified „Nema termina za odabrani filter."
+ * The picker that was the only way to reach it was removed on 2026-10-22, so the sentence
+ * described a control the page does not have. What is published instead says the schedule
+ * holds nothing, which is a statement about the seed and is reachable from the Studio —
+ * every slot `active: false`, or a term between schedules.
+ */
 const EMPTY_STATE = {
-  hr: 'Nema termina za odabrani filter.',
-  en: 'No classes match the selected filter.',
+  hr: 'Trenutno nema objavljenih termina.',
+  en: 'No classes are published right now.',
 } as const;
 
 type Locale = 'hr' | 'en';
@@ -632,98 +648,120 @@ describe('AC3: the prerequisite is time danced, not jargon', () => {
 });
 
 /**
- * AC4 — Given a filter that matches nothing, then the empty state reads
- * "Nema termina za odabrani filter."
+ * MUSE-135 — the picker is gone, and AC4 is retired with it.
  *
- * The filter interaction itself is `scripts/schedule-ux.mjs`; what it reveals
- * has to be in the served HTML, which is what is checked here.
+ * MUSE-6's fourth criterion read: *Given a filter that matches nothing, then the empty
+ * state reads „Nema termina za odabrani filter."* Both halves of it went on 2026-10-22,
+ * at the owner's instruction. There is no control on the page, so nothing can empty the
+ * schedule while somebody is reading it, and a sentence about a filter describes a thing
+ * that is not there.
+ *
+ * Three claims are asserted here, and the order is deliberate.
+ *
+ *   1. **The absence.** No chip, no `data-filter`, no `aria-pressed`, neither wording of
+ *      the "all levels" label.
+ *   2. **What the absence buys**, which is the part worth protecting: the filter was the
+ *      only reason this component had a `<script>`, so `/schedule` now ships no
+ *      JavaScript of its own. Asserted as a property rather than as a count — the page
+ *      carries the same script tags as a page with no component script at all.
+ *   3. **The empty state, re-grounded.** It is about the dataset now, which is a state
+ *      today's seed cannot produce, so it is rendered straight out of the component with
+ *      an empty `entries` array — `experimental_AstroContainer`, the way
+ *      `test/formcopy.test.ts` renders `TrialForm`. No build, so the concurrency census
+ *      is untouched. The built pages are asserted *not* to show it, which is the other
+ *      half: a sentence that appeared while four classes were published would be a lie
+ *      in the opposite direction.
+ *
+ * **What is no longer asserted, because it is no longer true.** MUSE-36 left an assertion
+ * that the grid "leaves a cell empty, so the empty cell is a rendered state", reasoning
+ * that four levels across two days is eight combinations and four classes. That was a
+ * property of a *filtered* grid. The grid's cells are day × time, not day × level, and the
+ * seeded timetable is two evenings at two times each — **a full matrix**, measured before
+ * this was written. At rest the grid has no empty cell; the only one this page ever had
+ * was the filter's.
  */
-describe('AC4: the empty state', () => {
-  it('ships the exact Croatian wording the ticket specifies', () => {
-    expect(main(page.hr)).toContain(EMPTY_STATE.hr);
-  });
+describe('MUSE-135: no level picker, and an empty state about the data', () => {
+  /** Rendered straight out of the component, with nothing in the timetable. */
+  const emptied = new Map<Locale, string>();
 
-  it('ships an English counterpart rather than the Croatian string', () => {
-    expect(main(page.en)).toContain(EMPTY_STATE.en);
-    expect(main(page.en)).not.toContain(EMPTY_STATE.hr);
-  });
-
-  it('is hidden until a filter empties the schedule', () => {
+  beforeAll(async () => {
+    const container = await AstroContainer.create();
     for (const locale of LOCALES) {
-      const line = new RegExp(`<[^>]*\\bhidden\\b[^>]*>\\s*${EMPTY_STATE[locale]}`);
-      expect(line.test(main(page[locale])), `${locale} empty state is visible at rest`).toBe(
-        true,
+      emptied.set(
+        locale,
+        await container.renderToString(Schedule, { props: { locale, entries: [] } }),
       );
     }
-  });
+  }, 60_000);
 
-  it('offers a filter for every level, and none for a style', () => {
-    // Level was one of the two dimensions design system §7.5 named; the other was
-    // style, and MUSE-36 deleted it — the studio has no style dimension, so the three
-    // chips filtered a field that was invented along with the rows. Asserted as an
-    // absence as well as a presence: a leftover style chip would filter on an attribute
-    // no class carries and so would match nothing at all.
+  it('renders no filter control, in either locale', () => {
+    // `main()`, not the whole document: `aria-pressed` is also the theme switch's
+    // attribute and it sits in the header of every page, so a page-wide needle would be
+    // answered by a control that has nothing to do with the schedule.
     for (const locale of LOCALES) {
       const content = main(page[locale]);
-      for (const level of LEVEL_KEYS) {
-        expect(content, `no ${level} filter (${locale})`).toMatch(
-          new RegExp(`data-filter="level"[^>]*data-value="${level}"`),
-        );
+      for (const needle of [
+        'data-filter',
+        'data-value',
+        'aria-pressed',
+        'class="chip"',
+        'Sve razine',
+        'All levels',
+      ]) {
+        expect(content, `${needle} survives on ${PAGE_FILE[locale]}`).not.toContain(needle);
       }
-      expect(content, `a style filter survives on /schedule (${locale})`).not.toContain(
-        'data-filter="style"',
+    }
+  });
+
+  it('ships no script of its own, which is what the filter cost', () => {
+    // `/privacy` is the comparison because `Privacy.astro` has no `<script>` of its own:
+    // whatever tags it carries are the layout's — the pre-paint theme stamp, the header
+    // and the footer, which every page has. A property, not a number, so the layout may
+    // gain or lose a script without anybody editing this.
+    const tags = (html: string): number => (html.match(/<script\b/g) ?? []).length;
+
+    const reference = build.read('privacy/index.html');
+    expect(tags(reference), 'the comparison page has no script tags at all').toBeGreaterThan(0);
+
+    for (const locale of LOCALES) {
+      expect(
+        tags(page[locale]),
+        `${PAGE_FILE[locale]} carries a script /privacy does not`,
+      ).toBe(tags(reference));
+    }
+  });
+
+  it('says nothing about an empty schedule while classes are published', () => {
+    for (const locale of LOCALES) {
+      expect(page[locale], `${PAGE_FILE[locale]} claims to be empty`).not.toContain(
+        EMPTY_STATE[locale],
       );
     }
   });
 
-  it('offers a chip per level from the fixed set, not per level in the data', () => {
-    /**
-     * **What keeps the empty state reachable now that there is one filter dimension.**
-     *
-     * This used to be "at least one level+style pair matches nothing", which was true of
-     * the invented data (no advanced traditional class) and is meaningless with styles
-     * gone. The replacement is the property it was really standing in for: the chips are
-     * rendered from `LEVELS`, so the page offers one for every level **whether or not a
-     * class of that level runs**. Today all four do, so no single chip empties the
-     * schedule — but a class paused for the summer (`active: false` on its slot, which is
-     * what that field is for) leaves its chip in place with nothing behind it, and
-     * „Nema termina za odabrani filter." is what the visitor gets. That is a state Mina
-     * can reach from the Studio this afternoon, not a hypothetical.
-     *
-     * The grid's *empty cell* is the state reachable from today's data, and it is
-     * asserted separately below.
-     */
+  it('says the schedule is empty when the dataset is, in the reader’s language', () => {
     for (const locale of LOCALES) {
-      const offered = [
-        ...main(page[locale]).matchAll(/data-filter="level"[^>]*data-value="([^"]*)"/g),
-      ].map((m) => m[1]!);
-      expect(offered, `level chips (${locale})`).toEqual(['all', ...LEVEL_KEYS]);
+      expect(emptied.get(locale)!, `the ${locale} empty schedule says nothing`).toContain(
+        EMPTY_STATE[locale],
+      );
     }
-
-    // And the claim the comment rests on: the chip set does not shrink to the levels
-    // that happen to be in the dataset.
-    expect(LEVEL_KEYS.length).toBeGreaterThanOrEqual(new Set(ROWS.map((r) => r.level)).size);
+    expect(emptied.get('en')!, 'the English empty state is Croatian').not.toContain(
+      EMPTY_STATE.hr,
+    );
   });
 
-  it('leaves a cell of the grid empty, so the empty cell is a rendered state', () => {
-    /**
-     * Four levels across two days is eight level+day combinations and four classes, so
-     * most of that matrix is empty: selecting any one level leaves the other day's
-     * column with nothing in it, which is the grid's empty cell. Asserted against the
-     * data rather than hoped for — the same shape as the assertion it replaces.
-     *
-     * `scripts/schedule-ux.mjs` is where a browser confirms the cell is actually painted
-     * empty; a regex cannot see a filter run.
-     */
-    const taught = new Set(ROWS.map((row) => `${row.level}|${row.day}`));
-    const days = [...new Set(ROWS.map((row) => row.day))];
-    const all = LEVEL_KEYS.flatMap((level) => days.map((day) => `${level}|${day}`));
-
-    expect(days.length, 'the grid has fewer than two day columns').toBeGreaterThan(1);
-    expect(
-      all.filter((pair) => !taught.has(pair)),
-      'every level runs on every day, so no filter can empty a grid cell',
-    ).not.toEqual([]);
+  it('words the empty state as a fact about the data, naming no filter', () => {
+    for (const locale of LOCALES) {
+      // „filtriraj", "filter", "filtered" — any of them means the retired sentence came
+      // back under a new spelling.
+      expect(EMPTY_STATE[locale], `the ${locale} empty state names a filter`).not.toMatch(
+        /filtr|filter/i,
+      );
+      expect(
+        emptied.get(locale)!,
+        `a filter is mentioned on the empty ${locale} page`,
+      ).not.toMatch(/filtr|filter/i);
+    }
   });
 });
 
